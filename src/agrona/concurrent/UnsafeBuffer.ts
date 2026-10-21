@@ -18,13 +18,12 @@
 // Port of org/agrona/concurrent/UnsafeBuffer.java @ Agrona 2.6.1
 import { AbstractMutableDirectBuffer } from '../AbstractMutableDirectBuffer.js';
 import { BitUtil } from '../BitUtil.js';
+import { ArrayUtil } from '../collections/ArrayUtil.js';
 import { DirectBuffer } from '../DirectBuffer.js';
 import { dataViewGetLong, dataViewSetLong, IllegalStateException, Objects } from '../jdk.js';
 import { AtomicBuffer } from './AtomicBuffer.js';
 
 const { SIZE_OF_BYTE, SIZE_OF_CHAR, SIZE_OF_INT, SIZE_OF_LONG, SIZE_OF_SHORT } = BitUtil;
-// ArrayUtil.EMPTY_BYTE_ARRAY: collections/ArrayUtil is ported in T4
-const EMPTY_BYTE_ARRAY = new Uint8Array(0);
 
 /**
  * Supports regular, byte ordered, and atomic (memory ordered) access to an underlying buffer. The buffer can be a
@@ -67,7 +66,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     public constructor(buffer?: Uint8Array | ArrayBuffer | DirectBuffer, offset?: number, length?: number) {
         super();
         if (undefined === buffer) {
-            this.wrap(EMPTY_BYTE_ARRAY);
+            this.wrap(ArrayUtil.EMPTY_BYTE_ARRAY);
         } else if (undefined === offset) {
             this.wrap(buffer);
         } else {
