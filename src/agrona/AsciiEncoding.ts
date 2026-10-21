@@ -216,6 +216,10 @@ export class AsciiEncoding {
             return Number((AsciiEncoding.LONG_DIGITS[floorLog2]! + (value >> BigInt(floorLog2 >> 2))) >> 52n);
         }
 
+        if (value < 0) {
+            return AsciiEncoding.digitCountLong(BigInt(value));
+        }
+
         // a number is below 2^53, where every power of ten is exact: the bits give the digits to within one
         const positive = value < 1 ? 1 : value;
         const floorLog2 = 63 - Long.numberOfLeadingZeros(positive);
@@ -389,6 +393,7 @@ export class AsciiEncoding {
     public static isEightDigitAsciiEncodedNumberWords(high: number, low: number): boolean {
         const sumLow = (low >>> 0) + 0x46464646;
         const diffLow = (low >>> 0) - 0x30303030;
+        // the carry and borrow terms mirror Java's 64-bit arithmetic but cannot change the result: bit 31 is already set
         const sumHigh = high + 0x46464646 + (sumLow > 0xffffffff ? 1 : 0);
         const diffHigh = high - 0x30303030 - (diffLow < 0 ? 1 : 0);
         return 0 === (((sumLow | diffLow) & 0x80808080) | ((sumHigh | diffHigh) & 0x80808080));

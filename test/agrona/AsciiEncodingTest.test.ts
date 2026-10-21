@@ -24,7 +24,7 @@ import { UnsafeBuffer } from '../../src/agrona/concurrent/UnsafeBuffer.js';
 import { ByteOrder, Integer, Long, LongOverflowError, ThreadLocalRandom } from '../../src/agrona/jdk.js';
 import { assertParsedLong } from '../support/Assertions.js';
 import { ITERATIONS_SCALE, ROUND_TRIP_TIMEOUT_MS } from '../support/Iterations.js';
-import { randomJavaLong } from '../support/Random.js';
+import { sampledJavaLong } from '../support/Random.js';
 
 const {
     INT_MAX_DIGITS,
@@ -335,19 +335,26 @@ describe('AsciiEncodingTest', () => {
             const prefix = 'long to test';
             let buffer = prefix;
 
-            for (let i = 0; i < ITERATIONS; i++) {
-                // adapted: the full range of a Java long, as a bigint; inside +/-(2^53 - 1) the parse returns the value,
-                // outside it throws LongOverflowError carrying it
-                const value = randomJavaLong(i);
-                buffer += value;
+            // adapted: no stack traces for the thrown LongOverflowErrors, which cost most of the time
+            const stackTraceLimit = Error.stackTraceLimit;
+            Error.stackTraceLimit = 0;
+            try {
+                for (let i = 0; i < ITERATIONS; i++) {
+                    // adapted: the full range of a Java long, as a bigint; inside +/-(2^53 - 1) the parse returns the value,
+                    // outside it throws LongOverflowError carrying it
+                    const value = sampledJavaLong(i);
+                    buffer += value;
 
-                const parse = (): number => parseLongAscii(buffer, prefix.length, buffer.length - prefix.length);
-                if (value >= -BigInt(Long.MAX_VALUE) && value <= BigInt(Long.MAX_VALUE)) {
-                    assert.strictEqual(parse(), Number(value));
-                } else {
-                    assert.throws(parse, (e: unknown) => e instanceof LongOverflowError && e.value === value);
+                    const parse = (): number => parseLongAscii(buffer, prefix.length, buffer.length - prefix.length);
+                    if (value >= -BigInt(Long.MAX_VALUE) && value <= BigInt(Long.MAX_VALUE)) {
+                        assert.strictEqual(parse(), Number(value));
+                    } else {
+                        assert.throws(parse, (e: unknown) => e instanceof LongOverflowError && e.value === value);
+                    }
+                    buffer = buffer.substring(0, prefix.length);
                 }
-                buffer = buffer.substring(0, prefix.length);
+            } finally {
+                Error.stackTraceLimit = stackTraceLimit;
             }
         },
         ROUND_TRIP_TIMEOUT_MS,

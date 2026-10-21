@@ -3,4 +3,4 @@
 export const ITERATIONS_SCALE = process.env.AERON_TS_FULL_ITERATIONS ? 1 : 100;
 
 /** The timeout of a test with one of those loops: the vitest default is 10 s, too short for the full counts. */
-export const ROUND_TRIP_TIMEOUT_MS = ITERATIONS_SCALE === 1 ? 900_000 : 30_000;
+export const ROUND_TRIP_TIMEOUT_MS = ITERATIONS_SCALE === 1 ? 180_000 : 30_000;

@@ -18,19 +18,15 @@
 // Port of org/agrona/SystemUtilTest.java @ Agrona 2.6.1
 import { describe, expect, it } from 'vitest';
 import { SystemUtil } from '../../src/agrona/SystemUtil.js';
-import { IllegalArgumentException, Long, LongOverflowError, NumberFormatException } from '../../src/agrona/jdk.js';
+import { IllegalArgumentException, Long, NumberFormatException } from '../../src/agrona/jdk.js';
 import { assertParsedLong, assertThrows, assertThrowsExactly } from '../support/Assertions.js';
 
 /** The result of parseDuration for a value whose Java result is `expected`, see shouldParseTimesWithSuffix. */
 function assertDuration(value: string, expected: bigint): void {
-    if (expected <= BigInt(Long.MAX_VALUE)) {
-        expect(SystemUtil.parseDuration('', value)).toBe(Number(expected));
-    } else if (/(\d|ns)$/i.test(value)) {
-        const error = assertThrows(LongOverflowError, () => SystemUtil.parseDuration('', value));
-        expect(error.value).toBe(expected);
-    } else {
-        expect(SystemUtil.parseDuration('', value)).toBe(Long.MAX_VALUE);
-    }
+    // adapted: a duration saturates at Long.MAX_VALUE of jdk.ts (2^53 - 1) in every branch (spec D5)
+    expect(SystemUtil.parseDuration('', value)).toBe(
+        expected <= BigInt(Long.MAX_VALUE) ? Number(expected) : Long.MAX_VALUE,
+    );
 }
 
 describe('SystemUtilTest', () => {
@@ -72,9 +68,8 @@ describe('SystemUtilTest', () => {
         expect(exception.message).toBe('test would overflow a long: ' + value);
     });
 
-    // adapted: a result beyond +/-(2^53 - 1) is not returned (spec D5): with no suffix or 'ns' parseDuration throws
-    // LongOverflowError carrying Java's exact value; with 'us', 'ms' or 's' it saturates at Long.MAX_VALUE, which here
-    // is 2^53 - 1. The rows are Java's, then the rows at the 2^53 bound.
+    // adapted: a result beyond 2^53 - 1 saturates at Long.MAX_VALUE of jdk.ts, 2^53 - 1, in every branch (spec D5),
+    // where Java saturates at 2^63 - 1. The rows are Java's, then the rows at the 2^53 bound.
     it.each<[string, bigint]>([
         ['0', 0n],
         ['0ns', 0n],
@@ -117,8 +112,7 @@ describe('SystemUtilTest', () => {
         assertDuration(value, expected);
     });
 
-    // adapted: Long.MAX_VALUE is Java's 2^63 - 1: the bare value and 'ns' throw LongOverflowError with it, the others
-    // saturate at 2^53 - 1 (see shouldParseTimesWithSuffix)
+    // adapted: Java's Long.MAX_VALUE is 2^63 - 1; every suffix saturates at 2^53 - 1 (see shouldParseTimesWithSuffix)
     it.each([
         '9223372036854775807ns',
         '9223372036854775807us',

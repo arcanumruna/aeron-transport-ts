@@ -10,6 +10,7 @@ import {
     StringIndexOutOfBoundsException,
 } from '../../../src/agrona/jdk.js';
 import { assertParsedLong, assertThrows } from '../../support/Assertions.js';
+import { mulberry32 } from '../../support/Random.js';
 
 const { parseIntAscii, parseLongAscii } = AsciiEncoding;
 
@@ -195,10 +196,25 @@ describe('AsciiEncodingExtra', () => {
     });
 
     it('digitCountLongAgreesWithTheStringLengthForRandomNumbers', () => {
+        const random = mulberry32(0x5eed01);
         for (let i = 0; i < 20000; i++) {
-            const value = Math.floor(Math.random() * 2 ** Math.floor(Math.random() * 53));
+            const value = Math.floor(random() * 2 ** Math.floor(random() * 53));
             expect(AsciiEncoding.digitCountLong(value)).toBe(String(value).length);
         }
+    });
+
+    it('digitCountLongOfANegativeNumberIsThatOfItsBigintAndOfLongMinValue', () => {
+        // Java: a negative long has 19 digits (its bits are those of an unsigned value above 2^63)
+        expect(AsciiEncoding.digitCountLong(-1)).toBe(AsciiEncoding.digitCountLong(-1n));
+        expect(AsciiEncoding.digitCountLong(-1)).toBe(19);
+        expect(AsciiEncoding.digitCountLong(-1n)).toBe(19);
+    });
+
+    it('aCharAbove255SpillsIntoTheNextByteAsInJava', () => {
+        // 'ĳ' is U+0133: in Java's readEightBytesLittleEndian its bit 8 is or-ed into the byte of '4' (0x34 -> 0x35),
+        // and its low byte 0x33 reads as '3': 1,2,3,3,5,5,6,7. In readFourBytesLittleEndian (int) the bit is shifted out.
+        expect(AsciiEncoding.parseLongAscii('123ĳ4567', 0, 8)).toBe(12335567);
+        expect(AsciiEncoding.parseIntAscii('123ĳ4567', 0, 8)).toBe(12334567);
     });
 
     it('endOffset', () => {
@@ -252,12 +268,12 @@ describe('AsciiEncodingExtra', () => {
             0xffffffff30303030n,
             0x3939393900000000n,
         ];
+        const random = mulberry32(0x5eed02);
         for (let i = 0; i < 20000; i++) {
             let word = 0n;
             for (let b = 0; b < 8; b++) {
                 // mostly digits, with a bad byte now and then, so that carries and borrows occur
-                const digit =
-                    Math.random() < 0.9 ? 0x30 + Math.floor(Math.random() * 10) : Math.floor(Math.random() * 256);
+                const digit = random() < 0.9 ? 0x30 + Math.floor(random() * 10) : Math.floor(random() * 256);
                 word = (word << 8n) | BigInt(digit);
             }
             cases.push(word);

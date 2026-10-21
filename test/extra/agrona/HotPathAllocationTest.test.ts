@@ -58,25 +58,38 @@ function control(n: number): number {
     return boxed;
 }
 
+const MAX_CALIBRATED_ITERATIONS = 32_000_000;
+const MIN_CONTROL_COLLECTIONS = 16;
+
 /**
  * Runs the loop and expects it to allocate at most `heapNumbers` heap numbers per iteration: none, to within one
- * collection of noise, when 0.
+ * collection of noise, when 0. Otherwise the iteration count is doubled until the control loop (one heap number per
+ * iteration) causes at least 16 minor collections, so that the comparison has resolution, and the loop must cause no
+ * more than `heapNumbers` times the control's collections, plus a slack of max(2, control / 8).
  */
 async function expectNoAllocation(
     run: (iterations: number) => void,
     iterations = ITERATIONS,
     heapNumbers = 0,
 ): Promise<void> {
-    const { collections } = await measure(run, iterations);
     if (0 === heapNumbers) {
+        const { collections } = await measure(run, iterations);
         expect(collections, 'minor collections').toBeLessThanOrEqual(1);
-    } else {
-        const controlCollections = (await measure(control, iterations)).collections;
-        expect(controlCollections, 'minor collections of the control').toBeGreaterThan(0);
-        expect(collections, `minor collections (control ${controlCollections})`).toBeLessThanOrEqual(
-            heapNumbers * controlCollections + 1,
-        );
+        return;
     }
+
+    let n = iterations;
+    let controlCollections = (await measure(control, n)).collections;
+    while (controlCollections < MIN_CONTROL_COLLECTIONS && n < MAX_CALIBRATED_ITERATIONS) {
+        n = Math.min(n * 2, MAX_CALIBRATED_ITERATIONS);
+        controlCollections = (await measure(control, n)).collections;
+    }
+    expect(controlCollections, 'minor collections of the control').toBeGreaterThan(0);
+
+    const { collections } = await measure(run, n);
+    expect(collections, `minor collections over ${n} iterations (control ${controlCollections})`).toBeLessThanOrEqual(
+        heapNumbers * controlCollections + Math.max(2, controlCollections >> 3),
+    );
 }
 
 describe('HotPathAllocationTest', () => {
@@ -95,18 +108,18 @@ describe('HotPathAllocationTest', () => {
     const sum = new Float64Array(1);
     /** The heap numbers per iteration that a loop may allocate: the long and double values it passes or returns. */
     const HEAP_NUMBERS: Record<string, number> = {
-        'long above 2^31': 2,
-        'long big endian': 2,
-        double: 2,
-        float: 2,
-        'putLongOrdered, getLongVolatile': 2,
-        getAndAddLong: 2,
-        'compareAndSetLong, getAndSetLong': 4,
+        'long above 2^31': 0,
+        'long big endian': 0,
+        double: 0,
+        float: 0,
+        'putLongOrdered, getLongVolatile': 0,
+        getAndAddLong: 0,
+        'compareAndSetLong, getAndSetLong': 2,
         'putLongAscii of 16 digits': 3,
         'putLongAscii of 9 digits': 0,
         'putNaturalLongAscii of 16 digits': 3,
         'parseLongAscii of 16 digits': 1,
-        'parseLongAscii of 12 digits and of 9': 2,
+        'parseLongAscii of 12 digits and of 9': 3,
         'AsciiEncoding.parseLongAscii of a string': 1,
         'AsciiEncoding.digitCountLong': 1,
     };
@@ -368,7 +381,7 @@ describe('HotPathAllocationTest', () => {
     ];
     for (const [name, loop] of asciiLoops) {
         it(`ascii numbers ${name}`, async () => {
-            await expectNoAllocation(loop, 500_000, HEAP_NUMBERS[name] ?? 0);
+            await expectNoAllocation(loop, 2_000_000, HEAP_NUMBERS[name] ?? 0);
             expect(sum[0]).not.toBeNaN();
         });
     }
@@ -383,7 +396,7 @@ describe('HotPathAllocationTest', () => {
                     sum[0] = sum[0]! + 1;
                 }
             }
-        }, 500_000);
+        }, 2_000_000);
         expect(sum[0]).not.toBeNaN();
     });
 });

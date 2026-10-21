@@ -149,7 +149,7 @@ export class SystemUtil {
         const length = propertyValue.length;
         let c = propertyValue.charCodeAt(length - 1);
         if (Character.isDigit(c)) {
-            return AsciiEncoding.parseLongAscii(propertyValue, 0, length);
+            return TimeUnit.NANOSECONDS.toNanos(SystemUtil.parseLong(propertyValue, 0, length));
         }
 
         let suffixIndex = length - 1;
@@ -171,7 +171,7 @@ export class SystemUtil {
         switch (String.fromCharCode(suffixStartChar)) {
             case 'n':
             case 'N':
-                return longToNumber(value);
+                return TimeUnit.NANOSECONDS.toNanos(value);
             case 'u':
             case 'U':
                 return TimeUnit.MICROSECONDS.toNanos(value);

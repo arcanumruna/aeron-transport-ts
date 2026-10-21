@@ -32,7 +32,7 @@ import type { MutableDirectBuffer } from '../../src/agrona/MutableDirectBuffer.j
 import { assertEqualsObject, assertNotEqualsObject, assertThrowsExactly } from '../support/Assertions.js';
 import { ITERATIONS_SCALE, ROUND_TRIP_TIMEOUT_MS } from '../support/Iterations.js';
 import { mock } from '../support/Mockito.js';
-import { randomJavaLong } from '../support/Random.js';
+import { randomJavaLong, sampledJavaLong } from '../support/Random.js';
 
 const ROUND_TRIP_ITERATIONS = 10_000_000 / ITERATIONS_SCALE;
 
@@ -100,21 +100,28 @@ export function mutableDirectBufferTests(newBuffer: (capacity: number) => Mutabl
             const index = 16;
             const buffer = newBuffer(64);
 
-            for (let i = 0; i < ROUND_TRIP_ITERATIONS; i++) {
-                // adapted: the full range of a Java long, as a bigint: putLongAscii takes a number, so a value outside
-                // +/-(2^53 - 1) is written as its digits and parseLongAscii throws LongOverflowError carrying it
-                const value = randomJavaLong(i);
-                if (isSafe(value)) {
-                    const length = buffer.putLongAscii(index, Number(value));
-                    const parsedValue = buffer.parseLongAscii(index, length);
-                    assert.strictEqual(parsedValue, Number(value));
-                } else {
-                    const length = buffer.putStringWithoutLengthAscii(index, String(value));
-                    assert.throws(
-                        () => buffer.parseLongAscii(index, length),
-                        (e: unknown) => e instanceof LongOverflowError && e.value === value,
-                    );
+            // adapted: no stack traces for the thrown LongOverflowErrors, which cost most of the time
+            const stackTraceLimit = Error.stackTraceLimit;
+            Error.stackTraceLimit = 0;
+            try {
+                for (let i = 0; i < ROUND_TRIP_ITERATIONS; i++) {
+                    // adapted: the full range of a Java long, as a bigint: putLongAscii takes a number, so a value outside
+                    // +/-(2^53 - 1) is written as its digits and parseLongAscii throws LongOverflowError carrying it
+                    const value = sampledJavaLong(i);
+                    if (isSafe(value)) {
+                        const length = buffer.putLongAscii(index, Number(value));
+                        const parsedValue = buffer.parseLongAscii(index, length);
+                        assert.strictEqual(parsedValue, Number(value));
+                    } else {
+                        const length = buffer.putStringWithoutLengthAscii(index, String(value));
+                        assert.throws(
+                            () => buffer.parseLongAscii(index, length),
+                            (e: unknown) => e instanceof LongOverflowError && e.value === value,
+                        );
+                    }
                 }
+            } finally {
+                Error.stackTraceLimit = stackTraceLimit;
             }
         },
         ROUND_TRIP_TIMEOUT_MS,
@@ -142,20 +149,29 @@ export function mutableDirectBufferTests(newBuffer: (capacity: number) => Mutabl
             const index = 12;
             const buffer = newBuffer(64);
 
-            for (let i = 0; i < ROUND_TRIP_ITERATIONS; i++) {
-                // adapted: as putLongAsciiRoundTrip, for a random long in [0, Long.MAX_VALUE) of Java
-                const value = BigInt.asUintN(63, randomJavaLong(i));
-                if (isSafe(value)) {
-                    const length = buffer.putNaturalLongAscii(index, Number(value));
-                    const parsedValue = buffer.parseNaturalLongAscii(index, length);
-                    assert.strictEqual(parsedValue, Number(value));
-                } else {
-                    const length = buffer.putStringWithoutLengthAscii(index, String(value));
-                    assert.throws(
-                        () => buffer.parseNaturalLongAscii(index, length),
-                        (e: unknown) => e instanceof LongOverflowError && e.value === value,
-                    );
+            // adapted: no stack traces for the thrown LongOverflowErrors, which cost most of the time
+            const stackTraceLimit = Error.stackTraceLimit;
+            Error.stackTraceLimit = 0;
+            try {
+                for (let i = 0; i < ROUND_TRIP_ITERATIONS; i++) {
+                    // adapted: as putLongAsciiRoundTrip, for a random long in [0, Long.MAX_VALUE) of Java
+                    // adapted: only every eighth value is taken whole (the throwing branch is slow), the others are folded into [0, 2^53)
+                    const whole = BigInt.asUintN(63, randomJavaLong(i % 8 === 0 ? i >> 3 : i));
+                    const value = i % 8 === 0 || isSafe(whole) ? whole : BigInt.asUintN(53, whole);
+                    if (isSafe(value)) {
+                        const length = buffer.putNaturalLongAscii(index, Number(value));
+                        const parsedValue = buffer.parseNaturalLongAscii(index, length);
+                        assert.strictEqual(parsedValue, Number(value));
+                    } else {
+                        const length = buffer.putStringWithoutLengthAscii(index, String(value));
+                        assert.throws(
+                            () => buffer.parseNaturalLongAscii(index, length),
+                            (e: unknown) => e instanceof LongOverflowError && e.value === value,
+                        );
+                    }
                 }
+            } finally {
+                Error.stackTraceLimit = stackTraceLimit;
             }
         },
         ROUND_TRIP_TIMEOUT_MS,
