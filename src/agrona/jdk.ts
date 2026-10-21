@@ -31,6 +31,42 @@ export class Exception extends Error {
         super(message, options);
         this.name = new.target.name;
     }
+
+    /** `Throwable.addSuppressed(Throwable)`. */
+    public addSuppressed(exception: Error): void {
+        addSuppressed(this, exception);
+    }
+
+    /** `Throwable.getSuppressed()`. */
+    public getSuppressed(): readonly Error[] {
+        return getSuppressed(this);
+    }
+}
+
+const SUPPRESSED = new WeakMap<Error, Error[]>();
+
+/**
+ * `Throwable.addSuppressed(Throwable)` for any thrown error, as a JS `Error` that is not an {@link Exception} has no
+ * such method.
+ */
+export function addSuppressed(error: Error, suppressed: Error): void {
+    if (error === suppressed) {
+        throw new IllegalArgumentException('Self-suppression not permitted');
+    }
+
+    const list = SUPPRESSED.get(error);
+    if (undefined === list) {
+        SUPPRESSED.set(error, [suppressed]);
+    } else {
+        list.push(suppressed);
+    }
+}
+
+/**
+ * `Throwable.getSuppressed()` for any thrown error.
+ */
+export function getSuppressed(error: Error): readonly Error[] {
+    return SUPPRESSED.get(error) ?? [];
 }
 
 export class RuntimeException extends Exception {}
