@@ -12,12 +12,15 @@ export function javaTestNames(path) {
     const lines = readFileSync(path, 'utf8').split('\n');
     const own = [];
     let pending = false;
+    let open = 0; // unclosed parentheses of a multi-line annotation such as @CsvSource({ ... })
     for (const line of lines) {
-        if (TEST_ANNOTATION.test(line)) {
-            pending = true;
+        if (open > 0 || /^\s*@/.test(line)) {
+            const code = line.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, '');
+            open = Math.max(0, open + (code.match(/\(/g) ?? []).length - (code.match(/\)/g) ?? []).length);
+            if (TEST_ANNOTATION.test(line)) pending = true;
             continue;
         }
-        if (pending && !/^\s*@/.test(line) && line.trim() !== '') {
+        if (pending && line.trim() !== '') {
             const m = METHOD.exec(line);
             if (m) own.push(m[1]);
             pending = false;

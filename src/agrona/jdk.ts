@@ -1,0 +1,204 @@
+// JDK stand-ins for the java.lang / java.nio / java.util.concurrent types that Agrona and its tests use.
+// Not part of Agrona: there is no Java file behind this one (see docs/mapping.md "Notes").
+
+/**
+ * Stand-in for `java.nio.ByteOrder`.
+ */
+export class ByteOrder {
+    public static readonly BIG_ENDIAN: ByteOrder = new ByteOrder('BIG_ENDIAN');
+    public static readonly LITTLE_ENDIAN: ByteOrder = new ByteOrder('LITTLE_ENDIAN');
+
+    private readonly name: string;
+
+    private constructor(name: string) {
+        this.name = name;
+    }
+
+    public static nativeOrder(): ByteOrder {
+        return ByteOrder.LITTLE_ENDIAN;
+    }
+
+    public toString(): string {
+        return this.name;
+    }
+}
+
+/**
+ * Stand-in for `java.lang.Throwable` and its subclasses. Every class sets `name` to its own class name.
+ */
+export class Exception extends Error {
+    public constructor(message?: string, options?: ErrorOptions) {
+        super(message, options);
+        this.name = new.target.name;
+    }
+}
+
+export class RuntimeException extends Exception {}
+
+export class IllegalArgumentException extends RuntimeException {}
+
+export class IllegalStateException extends RuntimeException {}
+
+export class NumberFormatException extends IllegalArgumentException {}
+
+export class ArithmeticException extends RuntimeException {}
+
+export class NullPointerException extends RuntimeException {}
+
+export class UnsupportedOperationException extends RuntimeException {}
+
+export class IndexOutOfBoundsException extends RuntimeException {}
+
+export class ArrayIndexOutOfBoundsException extends IndexOutOfBoundsException {}
+
+/**
+ * Stand-in for `java.lang.Character`. A Java `char` is a UTF-16 code unit held in a `number`.
+ */
+export const Character = {
+    /** `Character.isDigit(char)`: the Unicode general category Nd. */
+    isDigit(ch: number): boolean {
+        return /^\p{Nd}$/u.test(String.fromCharCode(ch));
+    },
+} as const;
+
+/**
+ * Stand-in for `java.lang.Integer`.
+ */
+export const Integer = {
+    MIN_VALUE: -2147483648,
+    MAX_VALUE: 2147483647,
+    SIZE: 32,
+
+    numberOfLeadingZeros(i: number): number {
+        return Math.clz32(i);
+    },
+
+    /** `Integer.parseInt(String)`: decimal ASCII digits only. */
+    parseInt(s: string | null): number {
+        if (null === s) {
+            throw new NumberFormatException('Cannot parse null string: null');
+        }
+
+        if (!/^[+-]?[0-9]+$/.test(s)) {
+            throw new NumberFormatException('For input string: "' + s + '"');
+        }
+
+        const result = Number(s);
+        if (result < Integer.MIN_VALUE || result > Integer.MAX_VALUE) {
+            throw new NumberFormatException('For input string: "' + s + '"');
+        }
+
+        return result + 0;
+    },
+
+    toHexString(i: number): string {
+        return (i >>> 0).toString(16);
+    },
+} as const;
+
+const TWO_POW_32 = 4294967296;
+
+/**
+ * Stand-in for `java.lang.Long`. A Java `long` that is held in a `number` is exact to +/-(2^53 - 1) (spec 5.2), so
+ * {@link Long.MAX_VALUE} and {@link Long.MIN_VALUE} are the largest and smallest values that can be held.
+ */
+export const Long = {
+    MIN_VALUE: Number.MIN_SAFE_INTEGER,
+    MAX_VALUE: Number.MAX_SAFE_INTEGER,
+    SIZE: 64,
+
+    /** `Long.numberOfLeadingZeros(long)` for a `number` holding a safe integer, or a `bigint` holding a long. */
+    numberOfLeadingZeros(i: number | bigint): number {
+        if (typeof i === 'bigint') {
+            if (i < 0n) {
+                return 0;
+            }
+
+            const hi = Number(i >> 32n);
+            return 0 !== hi ? Math.clz32(hi) : 32 + Math.clz32(Number(i & 0xffffffffn));
+        }
+
+        if (i < 0) {
+            return 0;
+        }
+
+        const hi = Math.floor(i / TWO_POW_32);
+        return 0 !== hi ? Math.clz32(hi) : 32 + Math.clz32(i >>> 0);
+    },
+
+    /** The 64-bit `a & b` for two `number`s holding safe integers. */
+    and(a: number, b: number): number {
+        const hi = (Math.floor(a / TWO_POW_32) & Math.floor(b / TWO_POW_32)) | 0;
+        const lo = (a & b) >>> 0;
+        return hi * TWO_POW_32 + lo;
+    },
+} as const;
+
+const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+
+/**
+ * A Java `long` held in a `number`: the exact value, or a `RangeError` if it is outside +/-(2^53 - 1) (spec 5.2).
+ */
+export function longToNumber(value: bigint): number {
+    if (value > MAX_SAFE_BIGINT || value < -MAX_SAFE_BIGINT) {
+        throw new RangeError('long value is outside +/-(2^53 - 1): ' + value);
+    }
+
+    return Number(value);
+}
+
+/**
+ * `BigInteger.longValueExact()`.
+ */
+export function longValueExact(value: bigint): bigint {
+    if (BigInt.asIntN(64, value) !== value) {
+        throw new ArithmeticException('BigInteger out of long range');
+    }
+
+    return value;
+}
+
+/**
+ * Stand-in for `java.util.concurrent.TimeUnit`: the conversions to nanoseconds, saturating at
+ * {@link Long.MAX_VALUE} and {@link Long.MIN_VALUE} as the JDK does.
+ */
+export class TimeUnit {
+    public static readonly NANOSECONDS: TimeUnit = new TimeUnit(1);
+    public static readonly MICROSECONDS: TimeUnit = new TimeUnit(1_000);
+    public static readonly MILLISECONDS: TimeUnit = new TimeUnit(1_000_000);
+    public static readonly SECONDS: TimeUnit = new TimeUnit(1_000_000_000);
+
+    private readonly scale: number;
+
+    private constructor(scale: number) {
+        this.scale = scale;
+    }
+
+    public toNanos(duration: number): number {
+        const max = Math.floor(Long.MAX_VALUE / this.scale);
+        if (duration > max) {
+            return Long.MAX_VALUE;
+        }
+        if (duration < -max) {
+            return Long.MIN_VALUE;
+        }
+
+        return duration * this.scale;
+    }
+}
+
+/**
+ * Stand-in for `java.util.concurrent.ThreadLocalRandom` (there is one thread, so one generator).
+ */
+export class ThreadLocalRandom {
+    private static readonly INSTANCE: ThreadLocalRandom = new ThreadLocalRandom();
+
+    public static current(): ThreadLocalRandom {
+        return ThreadLocalRandom.INSTANCE;
+    }
+
+    /** A random `int` over [{@link Integer.MIN_VALUE}, {@link Integer.MAX_VALUE}]. */
+    public nextInt(): number {
+        return Math.floor(Math.random() * TWO_POW_32) | 0;
+    }
+}

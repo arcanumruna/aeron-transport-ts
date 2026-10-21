@@ -40,6 +40,11 @@ describe('checkTestMapping', () => {
         expect(names.base).toBe('BaseTests');
     });
 
+    it('collects Java test names whose annotations span several lines', () => {
+        const names = javaTestNames(join(fixtures, 'java/pkg/MultiLineAnnotationTest.java'));
+        expect(names.own).toEqual(['alignWithLongValues', 'isX64ArchSystemTest']);
+    });
+
     it('collects TS titles, it.each prefixes and skips', () => {
         const titles = tsTestTitles(read('ts/Sample.test.ts'));
         expect(titles.map((t) => t.name)).toEqual(['shouldDoA', 'shouldDoB', 'shouldDoC']);
