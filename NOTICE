@@ -1,0 +1,15 @@
+aeron-transport-ts
+Copyright 2026 The aeron-transport-ts authors
+
+This product is a TypeScript port of parts of Aeron and Agrona.
+
+Aeron (https://github.com/aeron-io/aeron)
+Copyright 2014-2025 Real Logic Limited.
+Licensed under the Apache License, Version 2.0.
+
+Agrona (https://github.com/aeron-io/agrona)
+Copyright 2014-2025 Real Logic Limited.
+Licensed under the Apache License, Version 2.0.
+
+Each ported file keeps the original copyright notice and states that it was
+modified and ported to TypeScript.
