@@ -20,7 +20,8 @@ import assert from 'node:assert/strict';
 import { describe, expect, it } from 'vitest';
 import { AsciiEncoding } from '../../src/agrona/AsciiEncoding.js';
 import { AsciiNumberFormatException } from '../../src/agrona/AsciiNumberFormatException.js';
-import { Integer, Long, ThreadLocalRandom } from '../../src/agrona/jdk.js';
+import { UnsafeBuffer } from '../../src/agrona/concurrent/UnsafeBuffer.js';
+import { ByteOrder, Integer, Long, ThreadLocalRandom } from '../../src/agrona/jdk.js';
 
 const {
     INT_MAX_DIGITS,
@@ -31,9 +32,15 @@ const {
     digitCountLong,
     getDigit,
     isDigit,
+    isEightDigitAsciiEncodedNumber,
+    isFourDigitsAsciiEncodedNumber,
+    parseEightDigitsLittleEndian,
+    parseFourDigitsLittleEndian,
     parseIntAscii,
     parseLongAscii,
 } = AsciiEncoding;
+
+const { BIG_ENDIAN, LITTLE_ENDIAN } = ByteOrder;
 
 const ITERATIONS = 1_000_000;
 
@@ -214,20 +221,70 @@ describe('AsciiEncodingTest', () => {
         }
     });
 
-    it.skip('shouldDetectFourDigitsAsciiEncodedNumbers', () => {
-        // needs UnsafeBuffer, ported in T3
+    it('shouldDetectFourDigitsAsciiEncodedNumbers', () => {
+        const index = 2;
+        const buffer = new UnsafeBuffer(new Uint8Array(8));
+
+        for (let i = 0; i < 1000; i++) {
+            buffer.putIntAscii(index, i);
+            expect(isFourDigitsAsciiEncodedNumber(buffer.getInt(index, LITTLE_ENDIAN))).toBe(false);
+            expect(isFourDigitsAsciiEncodedNumber(buffer.getInt(index, BIG_ENDIAN))).toBe(false);
+        }
+
+        for (let i = 1000; i < 10000; i++) {
+            buffer.putIntAscii(index, i);
+            expect(isFourDigitsAsciiEncodedNumber(buffer.getInt(index, LITTLE_ENDIAN))).toBe(true);
+            expect(isFourDigitsAsciiEncodedNumber(buffer.getInt(index, BIG_ENDIAN))).toBe(true);
+        }
+
+        buffer.putIntAscii(index, 1234);
+        buffer.putByte(index, c('a'));
+        expect(isFourDigitsAsciiEncodedNumber(buffer.getInt(index, LITTLE_ENDIAN))).toBe(false);
+        expect(isFourDigitsAsciiEncodedNumber(buffer.getInt(index, BIG_ENDIAN))).toBe(false);
     });
 
-    it.skip('shouldParseFourDigitsFromAnAsciiEncodedNumberInLittleEndianByteOrder', () => {
-        // needs UnsafeBuffer, ported in T3
+    it('shouldParseFourDigitsFromAnAsciiEncodedNumberInLittleEndianByteOrder', () => {
+        const index = 2;
+        const buffer = new UnsafeBuffer(new Uint8Array(8));
+
+        for (let i = 1000; i < 10000; i++) {
+            buffer.putIntAscii(index, i);
+            const bytes = buffer.getInt(index, LITTLE_ENDIAN);
+            expect(parseFourDigitsLittleEndian(bytes)).toBe(i);
+        }
     });
 
-    it.skip('shouldDetectEightDigitsAsciiEncodedNumbers', () => {
-        // needs UnsafeBuffer, ported in T3
+    // adapted: the eight bytes are read with getLongBigInt, as 8 ASCII digits are above 2^53 - 1; node:assert instead of
+    // expect in the loop, which costs 10 s for 810,811 iterations
+    it('shouldDetectEightDigitsAsciiEncodedNumbers', () => {
+        const index = 4;
+        const buffer = new UnsafeBuffer(new Uint8Array(16));
+
+        buffer.putIntAscii(index, 1234);
+        assert.strictEqual(isEightDigitAsciiEncodedNumber(buffer.getLongBigInt(index, LITTLE_ENDIAN)), false);
+        assert.strictEqual(isEightDigitAsciiEncodedNumber(buffer.getLongBigInt(index, BIG_ENDIAN)), false);
+
+        for (let i = 10_000_000; i < 100_000_000; i += 111) {
+            buffer.putLongAscii(index, i);
+            assert.strictEqual(isEightDigitAsciiEncodedNumber(buffer.getLongBigInt(index, LITTLE_ENDIAN)), true);
+            assert.strictEqual(isEightDigitAsciiEncodedNumber(buffer.getLongBigInt(index, BIG_ENDIAN)), true);
+        }
+
+        buffer.putByte(index, c('a'));
+        assert.strictEqual(isEightDigitAsciiEncodedNumber(buffer.getLongBigInt(index, LITTLE_ENDIAN)), false);
+        assert.strictEqual(isEightDigitAsciiEncodedNumber(buffer.getLongBigInt(index, BIG_ENDIAN)), false);
     });
 
-    it.skip('shouldParseEightDigitsFromAnAsciiEncodedNumberInLittleEndianByteOrder', () => {
-        // needs UnsafeBuffer, ported in T3
+    // adapted: as shouldDetectEightDigitsAsciiEncodedNumbers, node:assert for 810,811 iterations
+    it('shouldParseEightDigitsFromAnAsciiEncodedNumberInLittleEndianByteOrder', () => {
+        const index = 3;
+        const buffer = new UnsafeBuffer(new Uint8Array(16));
+
+        for (let i = 10_000_000; i < 100_000_000; i += 111) {
+            buffer.putIntAscii(index, i);
+            const bytes = buffer.getLongBigInt(index, LITTLE_ENDIAN);
+            assert.strictEqual(parseEightDigitsLittleEndian(bytes), i);
+        }
     });
 
     it.each([c('0'), c('1'), c('2'), c('3'), c('4'), c('5'), c('6'), c('7'), c('8'), c('9')])(

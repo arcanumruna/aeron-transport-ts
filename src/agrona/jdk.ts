@@ -94,9 +94,35 @@ export const Integer = {
     toHexString(i: number): string {
         return (i >>> 0).toString(16);
     },
+
+    /** `Integer.compare(int, int)`. */
+    compare(x: number, y: number): number {
+        return x < y ? -1 : x === y ? 0 : 1;
+    },
 } as const;
 
 const TWO_POW_32 = 4294967296;
+
+/**
+ * Stand-in for `java.lang.Byte`.
+ */
+export const Byte = {
+    MIN_VALUE: -128,
+    MAX_VALUE: 127,
+
+    /** `Byte.compare(byte, byte)`, which is the difference. */
+    compare(x: number, y: number): number {
+        return x - y;
+    },
+} as const;
+
+/**
+ * Stand-in for `java.lang.Short`.
+ */
+export const Short = {
+    MIN_VALUE: -32768,
+    MAX_VALUE: 32767,
+} as const;
 
 /**
  * Stand-in for `java.lang.Long`. A Java `long` that is held in a `number` is exact to +/-(2^53 - 1) (spec 5.2), so
@@ -124,6 +150,20 @@ export const Long = {
 
         const hi = Math.floor(i / TWO_POW_32);
         return 0 !== hi ? Math.clz32(hi) : 32 + Math.clz32(i >>> 0);
+    },
+
+    /** A `long` held in a `number`: the value, or a `RangeError` if it is not a safe integer. */
+    checkSafe(value: number): number {
+        if (!Number.isSafeInteger(value)) {
+            throw new RangeError('long value is not a safe integer: ' + value);
+        }
+
+        return value;
+    },
+
+    /** `Long.compare(long, long)` for two `number`s holding safe integers. */
+    compare(x: number, y: number): number {
+        return x < y ? -1 : x === y ? 0 : 1;
     },
 
     /** The 64-bit `a & b` for two `number`s holding safe integers. */
@@ -197,8 +237,89 @@ export class ThreadLocalRandom {
         return ThreadLocalRandom.INSTANCE;
     }
 
-    /** A random `int` over [{@link Integer.MIN_VALUE}, {@link Integer.MAX_VALUE}]. */
-    public nextInt(): number {
-        return Math.floor(Math.random() * TWO_POW_32) | 0;
+    /**
+     * A random `int` over [{@link Integer.MIN_VALUE}, {@link Integer.MAX_VALUE}], or over [origin, bound) if given.
+     */
+    public nextInt(origin?: number, bound?: number): number {
+        if (undefined === origin) {
+            return Math.floor(Math.random() * TWO_POW_32) | 0;
+        }
+
+        return origin + Math.floor(Math.random() * (bound! - origin));
+    }
+
+    /** `Random.nextBytes(byte[])`. */
+    public nextBytes(bytes: Uint8Array): void {
+        for (let i = 0; i < bytes.length; i++) {
+            bytes[i] = Math.floor(Math.random() * 256);
+        }
+    }
+}
+
+/**
+ * Stand-in for `java.util.Objects.checkFromIndexSize`.
+ */
+export const Objects = {
+    checkFromIndexSize(fromIndex: number, size: number, length: number): number {
+        if (fromIndex < 0 || size < 0 || length < 0 || size > length - fromIndex) {
+            throw new IndexOutOfBoundsException(
+                `Range [${fromIndex}, ${fromIndex} + ${size}) out of bounds for length ${length}`,
+            );
+        }
+
+        return fromIndex;
+    },
+} as const;
+
+/**
+ * Stand-in for `java.lang.Appendable`, where a `char` is a one character string.
+ */
+export interface Appendable {
+    append(c: string): Appendable;
+}
+
+/**
+ * Stand-in for `new String(bytes, offset, length, StandardCharsets.US_ASCII)`: a byte above 127 is U+FFFD.
+ */
+export function newStringAscii(bytes: Uint8Array, offset: number, length: number): string {
+    let s = '';
+    for (let i = offset, limit = offset + length; i < limit; i++) {
+        const b = bytes[i]!;
+        s += String.fromCharCode(b > 127 ? 0xfffd : b);
+    }
+
+    return s;
+}
+
+/**
+ * The 64-bit `long` at `offset` of a view, as a `number`: a `RangeError` if it is outside +/-(2^53 - 1). It reads two
+ * 32-bit words, so nothing is allocated.
+ */
+export function dataViewGetLong(view: DataView, offset: number, littleEndian: boolean): number {
+    const value = littleEndian
+        ? view.getInt32(offset + 4, true) * TWO_POW_32 + view.getUint32(offset, true)
+        : view.getInt32(offset, false) * TWO_POW_32 + view.getUint32(offset + 4, false);
+    if (!Number.isSafeInteger(value)) {
+        throw new RangeError('long value is outside +/-(2^53 - 1): ' + view.getBigInt64(offset, littleEndian));
+    }
+
+    return value;
+}
+
+/**
+ * Writes a `long` held in a `number` at `offset` of a view: a `RangeError`, with nothing written, if it is not a safe
+ * integer.
+ */
+export function dataViewSetLong(view: DataView, offset: number, value: number, littleEndian: boolean): void {
+    Long.checkSafe(value);
+
+    const hi = Math.floor(value / TWO_POW_32);
+    const lo = value >>> 0;
+    if (littleEndian) {
+        view.setUint32(offset, lo, true);
+        view.setInt32(offset + 4, hi, true);
+    } else {
+        view.setInt32(offset, hi, false);
+        view.setUint32(offset + 4, lo, false);
     }
 }
