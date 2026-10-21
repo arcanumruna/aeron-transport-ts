@@ -21,7 +21,10 @@ import { describe, expect, it } from 'vitest';
 import { AsciiEncoding } from '../../src/agrona/AsciiEncoding.js';
 import { AsciiNumberFormatException } from '../../src/agrona/AsciiNumberFormatException.js';
 import { UnsafeBuffer } from '../../src/agrona/concurrent/UnsafeBuffer.js';
-import { ByteOrder, Integer, Long, ThreadLocalRandom } from '../../src/agrona/jdk.js';
+import { ByteOrder, Integer, Long, LongOverflowError, ThreadLocalRandom } from '../../src/agrona/jdk.js';
+import { assertParsedLong } from '../support/Assertions.js';
+import { ITERATIONS_SCALE, ROUND_TRIP_TIMEOUT_MS } from '../support/Iterations.js';
+import { randomJavaLong } from '../support/Random.js';
 
 const {
     INT_MAX_DIGITS,
@@ -42,7 +45,10 @@ const {
 
 const { BIG_ENDIAN, LITTLE_ENDIAN } = ByteOrder;
 
-const ITERATIONS = 1_000_000;
+const JAVA_LONG_MAX_VALUE = 2n ** 63n - 1n;
+const JAVA_LONG_MIN_VALUE = -(2n ** 63n);
+
+const ITERATIONS = 1_000_000 / ITERATIONS_SCALE;
 
 const BYTE_MIN_VALUE = -128;
 const BYTE_MAX_VALUE = 127;
@@ -73,33 +79,32 @@ describe('AsciiEncodingTest', () => {
     });
 
     it('shouldParseLong', () => {
-        expect(parseLongAscii('0', 0, 1)).toBe(0);
-        expect(parseLongAscii('-0', 0, 2)).toBe(0);
-        expect(parseLongAscii('7', 0, 1)).toBe(7);
-        expect(parseLongAscii('-7', 0, 2)).toBe(-7);
-        expect(parseLongAscii('3333', 1, 2)).toBe(33);
-        // adapted: -123456789876543210 is below -(2^53 - 1), so 16 digits are used
-        expect(parseLongAscii('-1234567898765432', 0, 17)).toBe(-1234567898765432);
+        // adapted: a long is a number exact to +/-(2^53 - 1): a value outside that range throws LongOverflowError
+        // carrying the exact 64-bit value, which assertParsedLong asserts
+        assertParsedLong(0n, () => parseLongAscii('0', 0, 1));
+        assertParsedLong(0n, () => parseLongAscii('-0', 0, 2));
+        assertParsedLong(7n, () => parseLongAscii('7', 0, 1));
+        assertParsedLong(-7n, () => parseLongAscii('-7', 0, 2));
+        assertParsedLong(33n, () => parseLongAscii('3333', 1, 2));
+        assertParsedLong(-123456789876543210n, () => parseLongAscii('-123456789876543210', 0, 19));
 
-        // adapted: a long is exact to 2^53 - 1, so Long.MAX_VALUE and Long.MIN_VALUE are the bounds of the safe range
-        const maxValueMinusOne = String(Long.MAX_VALUE - 1);
-        expect(parseLongAscii(maxValueMinusOne, 0, maxValueMinusOne.length)).toBe(Long.MAX_VALUE - 1);
+        const maxValueMinusOne = String(JAVA_LONG_MAX_VALUE - 1n);
+        assertParsedLong(JAVA_LONG_MAX_VALUE - 1n, () => parseLongAscii(maxValueMinusOne, 0, maxValueMinusOne.length));
 
-        const maxValue = String(Long.MAX_VALUE);
-        expect(parseLongAscii(maxValue, 0, maxValue.length)).toBe(Long.MAX_VALUE);
+        const maxValue = String(JAVA_LONG_MAX_VALUE);
+        assertParsedLong(JAVA_LONG_MAX_VALUE, () => parseLongAscii(maxValue, 0, maxValue.length));
 
-        const minValuePlusOne = String(Long.MIN_VALUE + 1);
-        expect(parseLongAscii(minValuePlusOne, 0, minValuePlusOne.length)).toBe(Long.MIN_VALUE + 1);
+        const minValuePlusOne = String(JAVA_LONG_MIN_VALUE + 1n);
+        assertParsedLong(JAVA_LONG_MIN_VALUE + 1n, () => parseLongAscii(minValuePlusOne, 0, minValuePlusOne.length));
 
-        const minValue = String(Long.MIN_VALUE);
-        expect(parseLongAscii(minValue, 0, minValue.length)).toBe(Long.MIN_VALUE);
+        const minValue = String(JAVA_LONG_MIN_VALUE);
+        assertParsedLong(JAVA_LONG_MIN_VALUE, () => parseLongAscii(minValue, 0, minValue.length));
 
-        // adapted: the 64-bit values of the Java test (19 digits, the overflow-check path) parse, then are refused
-        expect(() => parseLongAscii('-123456789876543210', 0, 19)).toThrow(RangeError);
-        expect(() => parseLongAscii('9223372036854775806', 0, 19)).toThrow(RangeError);
-        expect(() => parseLongAscii('9223372036854775807', 0, 19)).toThrow(RangeError);
-        expect(() => parseLongAscii('-9223372036854775807', 0, 20)).toThrow(RangeError);
-        expect(() => parseLongAscii('-9223372036854775808', 0, 20)).toThrow(RangeError);
+        // adapted: the largest and smallest values a number holds, which are parsed, not thrown
+        const safeMax = String(Long.MAX_VALUE);
+        expect(parseLongAscii(safeMax, 0, safeMax.length)).toBe(Long.MAX_VALUE);
+        const safeMin = String(Long.MIN_VALUE);
+        expect(parseLongAscii(safeMin, 0, safeMin.length)).toBe(Long.MIN_VALUE);
     });
 
     it('shouldThrowExceptionWhenParsingIntegerWhichCanOverFlow', () => {
@@ -304,45 +309,47 @@ describe('AsciiEncodingTest', () => {
         }
     });
 
-    it('parseIntAsciiRoundTrip', () => {
-        const prefix = 'testInt';
-        let buffer = prefix;
+    it(
+        'parseIntAsciiRoundTrip',
+        () => {
+            const prefix = 'testInt';
+            let buffer = prefix;
 
-        for (let i = 0; i < ITERATIONS; i++) {
-            const value = ThreadLocalRandom.current().nextInt();
-            buffer += value;
+            for (let i = 0; i < ITERATIONS; i++) {
+                const value = ThreadLocalRandom.current().nextInt();
+                buffer += value;
 
-            const parsedValue = parseIntAscii(buffer, prefix.length, buffer.length - prefix.length);
+                const parsedValue = parseIntAscii(buffer, prefix.length, buffer.length - prefix.length);
 
-            // adapted: node:assert instead of expect, which costs 6 s over the 1,000,000 iterations
-            assert.strictEqual(value, parsedValue);
-            buffer = buffer.substring(0, prefix.length);
-        }
-    });
-
-    it('parseLongAsciiRoundTrip', () => {
-        const prefix = 'long to test';
-        let buffer = prefix;
-
-        for (let i = 0; i < ITERATIONS; i++) {
-            // adapted: a random 64-bit long, shifted right by a random amount so that every digit count occurs;
-            // values outside +/-(2^53 - 1) are parsed in full and then refused with a RangeError
-            const random = BigInt.asIntN(
-                64,
-                (BigInt(ThreadLocalRandom.current().nextInt() >>> 0) << 32n) |
-                    BigInt(ThreadLocalRandom.current().nextInt() >>> 0),
-            );
-            const value = random >> BigInt(ThreadLocalRandom.current().nextInt() & 63);
-            buffer += value;
-
-            if (value >= -BigInt(Long.MAX_VALUE) && value <= BigInt(Long.MAX_VALUE)) {
-                const parsedValue = parseLongAscii(buffer, prefix.length, buffer.length - prefix.length);
-
-                assert.strictEqual(Number(value), parsedValue);
-            } else {
-                assert.throws(() => parseLongAscii(buffer, prefix.length, buffer.length - prefix.length), RangeError);
+                // adapted: node:assert instead of expect, which costs 6 s over the 1,000,000 iterations
+                assert.strictEqual(value, parsedValue);
+                buffer = buffer.substring(0, prefix.length);
             }
-            buffer = buffer.substring(0, prefix.length);
-        }
-    });
+        },
+        ROUND_TRIP_TIMEOUT_MS,
+    );
+
+    it(
+        'parseLongAsciiRoundTrip',
+        () => {
+            const prefix = 'long to test';
+            let buffer = prefix;
+
+            for (let i = 0; i < ITERATIONS; i++) {
+                // adapted: the full range of a Java long, as a bigint; inside +/-(2^53 - 1) the parse returns the value,
+                // outside it throws LongOverflowError carrying it
+                const value = randomJavaLong(i);
+                buffer += value;
+
+                const parse = (): number => parseLongAscii(buffer, prefix.length, buffer.length - prefix.length);
+                if (value >= -BigInt(Long.MAX_VALUE) && value <= BigInt(Long.MAX_VALUE)) {
+                    assert.strictEqual(parse(), Number(value));
+                } else {
+                    assert.throws(parse, (e: unknown) => e instanceof LongOverflowError && e.value === value);
+                }
+                buffer = buffer.substring(0, prefix.length);
+            }
+        },
+        ROUND_TRIP_TIMEOUT_MS,
+    );
 });

@@ -6,6 +6,7 @@ export class ByteBuffer {
     private readonly view: DataView;
     private byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN;
     private pos = 0;
+    private lim: number;
 
     private constructor(
         private readonly buffer: ArrayBuffer,
@@ -13,6 +14,7 @@ export class ByteBuffer {
         private readonly cap: number,
     ) {
         this.view = new DataView(buffer, offset, cap);
+        this.lim = cap;
     }
 
     public static allocate(capacity: number): ByteBuffer {
@@ -61,12 +63,18 @@ export class ByteBuffer {
         return this;
     }
 
+    public limit(): number {
+        return this.lim;
+    }
+
     public flip(): ByteBuffer {
+        this.lim = this.pos;
+        this.pos = 0;
         return this;
     }
 
     public slice(): ByteBuffer {
-        return new ByteBuffer(this.buffer, this.offset + this.pos, this.cap - this.pos);
+        return new ByteBuffer(this.buffer, this.offset + this.pos, this.lim - this.pos);
     }
 
     public put(index: number, value: number): ByteBuffer;

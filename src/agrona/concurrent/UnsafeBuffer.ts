@@ -79,8 +79,15 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     public wrap(buffer: Uint8Array | ArrayBuffer | DirectBuffer, offset: number, length: number): void;
     public wrap(buffer: Uint8Array | ArrayBuffer | DirectBuffer, offset?: number, length?: number): void {
         if (buffer instanceof ArrayBuffer) {
-            // the Java wrap(ByteBuffer ...): the window is the whole of the ArrayBuffer unless given
-            buffer = new Uint8Array(buffer);
+            // the Java wrap(ByteBuffer ...): the window is the whole of the ArrayBuffer unless given; the view of the
+            // ArrayBuffer that is already wrapped is reused, as the Java reuses the array
+            buffer =
+                undefined !== this._byteArray &&
+                buffer === this._byteArray.buffer &&
+                0 === this._byteArray.byteOffset &&
+                this._byteArray.byteLength === buffer.byteLength
+                    ? this._byteArray
+                    : new Uint8Array(buffer);
         }
 
         if (buffer instanceof Uint8Array) {
@@ -143,11 +150,12 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public verifyAlignment(): void {
-        // A byte array or an ArrayBuffer has no address to inspect: its alignment is the offset of the window in it
-        if (0 !== ((this._byteArray.byteOffset + this._addressOffset) & (UnsafeBuffer.ALIGNMENT - 1))) {
+        // A byte array or an ArrayBuffer has no address to inspect: it is the offset of the window in its ArrayBuffer
+        const address = this._byteArray.byteOffset + this._addressOffset;
+        if (0 !== (address & (UnsafeBuffer.ALIGNMENT - 1))) {
             throw new IllegalStateException(
                 'AtomicBuffer is not correctly aligned: addressOffset=' +
-                    this._addressOffset +
+                    address +
                     ' is not divisible by ' +
                     UnsafeBuffer.ALIGNMENT,
             );
@@ -465,9 +473,10 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
             this._addressOffset +
             ', capacity=' +
             this._capacity +
-            ', byteArray=byte[' +
-            this._byteArray.length +
-            ']' +
+            ', byteArray=' +
+            ('byte[' + this._byteArray.length + ']') +
+            ', byteBuffer=' +
+            'null' +
             '}'
         );
     }

@@ -51,13 +51,40 @@ export class IndexOutOfBoundsException extends RuntimeException {}
 
 export class ArrayIndexOutOfBoundsException extends IndexOutOfBoundsException {}
 
+export class StringIndexOutOfBoundsException extends IndexOutOfBoundsException {}
+
+export class NegativeArraySizeException extends RuntimeException {}
+
+/**
+ * A Java `long` result or stored value outside +/-(2^53 - 1), which a `number` cannot hold (spec D5). `value` is the
+ * exact 64-bit value that Java would have returned.
+ */
+export class LongOverflowError extends RangeError {
+    public readonly value: bigint;
+
+    public constructor(value: bigint) {
+        super('long value is outside +/-(2^53 - 1): ' + value);
+        this.name = 'LongOverflowError';
+        this.value = value;
+    }
+}
+
+const DECIMAL_DIGITS: Uint8Array = (() => {
+    const table = new Uint8Array(0x10000);
+    const nd = /^\p{Nd}$/u;
+    for (let ch = 0; ch < 0x10000; ch++) {
+        table[ch] = nd.test(String.fromCharCode(ch)) ? 1 : 0;
+    }
+    return table;
+})();
+
 /**
  * Stand-in for `java.lang.Character`. A Java `char` is a UTF-16 code unit held in a `number`.
  */
 export const Character = {
-    /** `Character.isDigit(char)`: the Unicode general category Nd. */
+    /** `Character.isDigit(char)`: the Unicode general category Nd, from a table built once. */
     isDigit(ch: number): boolean {
-        return /^\p{Nd}$/u.test(String.fromCharCode(ch));
+        return 1 === DECIMAL_DIGITS[ch & 0xffff];
     },
 } as const;
 
@@ -181,7 +208,7 @@ const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
  */
 export function longToNumber(value: bigint): number {
     if (value > MAX_SAFE_BIGINT || value < -MAX_SAFE_BIGINT) {
-        throw new RangeError('long value is outside +/-(2^53 - 1): ' + value);
+        throw new LongOverflowError(value);
     }
 
     return Number(value);
@@ -214,7 +241,16 @@ export class TimeUnit {
         this.scale = scale;
     }
 
-    public toNanos(duration: number): number {
+    public toNanos(duration: number | bigint): number {
+        if (typeof duration === 'bigint') {
+            // Java saturates at 2^63 - 1; every result above 2^53 - 1 saturates here, so the 64-bit bound is moot
+            const nanos = duration * BigInt(this.scale);
+            if (nanos > MAX_SAFE_BIGINT) {
+                return Long.MAX_VALUE;
+            }
+            return nanos < -MAX_SAFE_BIGINT ? Long.MIN_VALUE : Number(nanos);
+        }
+
         const max = Math.floor(Long.MAX_VALUE / this.scale);
         if (duration > max) {
             return Long.MAX_VALUE;
@@ -300,7 +336,7 @@ export function dataViewGetLong(view: DataView, offset: number, littleEndian: bo
         ? view.getInt32(offset + 4, true) * TWO_POW_32 + view.getUint32(offset, true)
         : view.getInt32(offset, false) * TWO_POW_32 + view.getUint32(offset + 4, false);
     if (!Number.isSafeInteger(value)) {
-        throw new RangeError('long value is outside +/-(2^53 - 1): ' + view.getBigInt64(offset, littleEndian));
+        throw new LongOverflowError(view.getBigInt64(offset, littleEndian));
     }
 
     return value;

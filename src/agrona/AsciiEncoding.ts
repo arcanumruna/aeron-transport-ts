@@ -17,7 +17,7 @@
  */
 // Port of org/agrona/AsciiEncoding.java @ Agrona 2.6.1
 import { AsciiNumberFormatException } from './AsciiNumberFormatException.js';
-import { Integer, Long, longToNumber, longValueExact } from './jdk.js';
+import { Integer, Long, LongOverflowError, longValueExact, StringIndexOutOfBoundsException } from './jdk.js';
 
 const US_ASCII = new TextEncoder();
 
@@ -211,9 +211,16 @@ export class AsciiEncoding {
      * {@code 14}.
      */
     public static digitCountLong(value: number | bigint): number {
-        const v = typeof value === 'bigint' ? value : BigInt(value);
-        const floorLog2 = 63 ^ Long.numberOfLeadingZeros(v | 1n);
-        return Number((AsciiEncoding.LONG_DIGITS[floorLog2]! + (v >> BigInt(floorLog2 >> 2))) >> 52n);
+        if (typeof value === 'bigint') {
+            const floorLog2 = 63 ^ Long.numberOfLeadingZeros(value | 1n);
+            return Number((AsciiEncoding.LONG_DIGITS[floorLog2]! + (value >> BigInt(floorLog2 >> 2))) >> 52n);
+        }
+
+        // a number is below 2^53, where every power of ten is exact: the bits give the digits to within one
+        const positive = value < 1 ? 1 : value;
+        const floorLog2 = 63 - Long.numberOfLeadingZeros(positive);
+        const digits = ((floorLog2 + 1) * 1233) >> 12;
+        return digits + (positive >= AsciiEncoding.LONG_POW_10[digits]! ? 1 : 0);
     }
 
     /**
@@ -252,13 +259,14 @@ export class AsciiEncoding {
      * @param length of the encoded number in characters.
      * @return the parsed value.
      * @throws AsciiNumberFormatException if {@code length <= 0} or {@code cs} is not an int value
+     * @throws StringIndexOutOfBoundsException where Java's {@code charAt} or {@code subSequence} would
      */
     public static parseIntAscii(cs: string, index: number, length: number): number {
         if (length <= 0) {
             throw new AsciiNumberFormatException('empty string: index=' + index + ' length=' + length);
         }
 
-        const negative = AsciiEncoding.MINUS_SIGN === cs.charCodeAt(index);
+        const negative = AsciiEncoding.MINUS_SIGN === AsciiEncoding.charAt(cs, index);
         let i = index;
         if (negative) {
             i++;
@@ -291,14 +299,16 @@ export class AsciiEncoding {
      * @param length of the encoded number in characters.
      * @return the parsed value.
      * @throws AsciiNumberFormatException if {@code length <= 0} or {@code cs} is not a long value
-     * @throws RangeError if the long value is outside +/-(2^53 - 1), which a {@code number} cannot hold
+     * @throws LongOverflowError (a {@code RangeError}) if the long is outside +/-(2^53 - 1), which a {@code number}
+     * cannot hold: its {@code value} is the exact long Java returns
+     * @throws StringIndexOutOfBoundsException where Java's {@code charAt} or {@code subSequence} would
      */
     public static parseLongAscii(cs: string, index: number, length: number): number {
         if (length <= 0) {
             throw new AsciiNumberFormatException('empty string: index=' + index + ' length=' + length);
         }
 
-        const negative = AsciiEncoding.MINUS_SIGN === cs.charCodeAt(index);
+        const negative = AsciiEncoding.MINUS_SIGN === AsciiEncoding.charAt(cs, index);
         let i = index;
         if (negative) {
             i++;
@@ -309,32 +319,30 @@ export class AsciiEncoding {
 
         const end = index + length;
         if (end - i < AsciiEncoding.LONG_MAX_DIGITS) {
-            const tally = AsciiEncoding.parsePositiveLongAscii(cs, index, length, i, end);
-            return longToNumber(negative ? -tally : tally);
+            const tally = AsciiEncoding.parsePositiveLongAscii(cs, index, length, i, end, negative);
+            return negative ? 0 - tally : tally;
         } else if (negative) {
-            return longToNumber(
-                BigInt.asIntN(
-                    64,
-                    -AsciiEncoding.parseLongAsciiOverflowCheck(
-                        cs,
-                        index,
-                        length,
-                        AsciiEncoding.LONG_MIN_VALUE_DIGITS,
-                        i,
-                        end,
-                    ),
-                ),
-            );
-        } else {
-            return longToNumber(
+            return (
+                0 -
                 AsciiEncoding.parseLongAsciiOverflowCheck(
                     cs,
                     index,
                     length,
-                    AsciiEncoding.LONG_MAX_VALUE_DIGITS,
+                    AsciiEncoding.LONG_MIN_VALUE_DIGITS,
                     i,
                     end,
-                ),
+                    negative,
+                )
+            );
+        } else {
+            return AsciiEncoding.parseLongAsciiOverflowCheck(
+                cs,
+                index,
+                length,
+                AsciiEncoding.LONG_MAX_VALUE_DIGITS,
+                i,
+                end,
+                negative,
             );
         }
     }
@@ -372,6 +380,21 @@ export class AsciiEncoding {
     }
 
     /**
+     * {@link isEightDigitAsciiEncodedNumber} for the eight bytes given as the two 32-bit words of the long, without a
+     * `bigint`: the 64-bit add and subtract are done with the carry and the borrow from the low word.
+     *
+     * @param high the four bytes at the higher addresses (the high word of the little-endian long).
+     * @param low  the four bytes at the lower addresses (the low word of the little-endian long).
+     */
+    public static isEightDigitAsciiEncodedNumberWords(high: number, low: number): boolean {
+        const sumLow = (low >>> 0) + 0x46464646;
+        const diffLow = (low >>> 0) - 0x30303030;
+        const sumHigh = high + 0x46464646 + (sumLow > 0xffffffff ? 1 : 0);
+        const diffHigh = high - 0x30303030 - (diffLow < 0 ? 1 : 0);
+        return 0 === (((sumLow | diffLow) & 0x80808080) | ((sumHigh | diffHigh) & 0x80808080));
+    }
+
+    /**
      * Parses an eight-digit number out of an ASCII-encoded value assuming little-endian byte order.
      *
      * @param bytes ASCII-encoded value in little-endian byte order, a long held in a `bigint`.
@@ -387,6 +410,19 @@ export class AsciiEncoding {
                     ((val >> 16n) & 0x000000ff000000ffn) * 0x0000271000000001n,
             ) >> 32n;
         return Number(BigInt.asIntN(32, val));
+    }
+
+    /**
+     * {@link parseEightDigitsLittleEndian} for eight digits given as the two 32-bit words of the long: the first
+     * four digits are the low word.
+     *
+     * @param high the four bytes at the higher addresses.
+     * @param low  the four bytes at the lower addresses.
+     */
+    public static parseEightDigitsLittleEndianWords(high: number, low: number): number {
+        return (
+            AsciiEncoding.parseFourDigitsLittleEndian(low) * 10_000 + AsciiEncoding.parseFourDigitsLittleEndian(high)
+        );
     }
 
     private static parsePositiveIntAscii(
@@ -408,7 +444,7 @@ export class AsciiEncoding {
         }
 
         let digit: number;
-        while (i < end && AsciiEncoding.isDigit((digit = cs.charCodeAt(i)))) {
+        while (i < end && AsciiEncoding.isDigit((digit = AsciiEncoding.charAt(cs, i)))) {
             tally = tally * 10 + (digit - 0x30);
             i++;
         }
@@ -433,13 +469,14 @@ export class AsciiEncoding {
 
         let i = startIndex;
         let tally = 0;
-        const octet = AsciiEncoding.readEightBytesLittleEndian(cs, i);
-        if (AsciiEncoding.isEightDigitAsciiEncodedNumber(octet)) {
-            tally = AsciiEncoding.parseEightDigitsLittleEndian(octet);
+        const high = AsciiEncoding.readHighFourBytesLittleEndian(cs, i);
+        const low = AsciiEncoding.readFourBytesLittleEndian(cs, i);
+        if (AsciiEncoding.isEightDigitAsciiEncodedNumberWords(high, low)) {
+            tally = AsciiEncoding.parseEightDigitsLittleEndianWords(high, low);
             i += 8;
 
             let digit: number;
-            while (i < end && AsciiEncoding.isDigit((digit = cs.charCodeAt(i)))) {
+            while (i < end && AsciiEncoding.isDigit((digit = AsciiEncoding.charAt(cs, i)))) {
                 tally = tally * 10 + (digit - 0x30);
                 i++;
             }
@@ -453,11 +490,15 @@ export class AsciiEncoding {
     }
 
     private static throwParseIntError(cs: string, index: number, length: number): never {
-        throw new AsciiNumberFormatException('error parsing int: ' + cs.substring(index, index + length));
+        throw new AsciiNumberFormatException(
+            'error parsing int: ' + AsciiEncoding.subSequence(cs, index, index + length),
+        );
     }
 
     private static throwParseIntOverflowError(cs: string, index: number, length: number): never {
-        throw new AsciiNumberFormatException('int overflow parsing: ' + cs.substring(index, index + length));
+        throw new AsciiNumberFormatException(
+            'int overflow parsing: ' + AsciiEncoding.subSequence(cs, index, index + length),
+        );
     }
 
     private static parsePositiveLongAscii(
@@ -466,15 +507,28 @@ export class AsciiEncoding {
         length: number,
         startIndex: number,
         end: number,
-    ): bigint {
+        negative: boolean,
+    ): number {
         let i = startIndex;
-        let tally = 0n,
-            octet: bigint;
+        // the tally is a number until it would leave +/-(2^53 - 1), then a bigint, which ends in LongOverflowError
+        let tally = 0,
+            big: bigint | null = null,
+            high: number,
+            low: number;
         while (
             end - i >= 8 &&
-            AsciiEncoding.isEightDigitAsciiEncodedNumber((octet = AsciiEncoding.readEightBytesLittleEndian(cs, i)))
+            AsciiEncoding.isEightDigitAsciiEncodedNumberWords(
+                (high = AsciiEncoding.readHighFourBytesLittleEndian(cs, i)),
+                (low = AsciiEncoding.readFourBytesLittleEndian(cs, i)),
+            )
         ) {
-            tally = tally * 100_000_000n + BigInt(AsciiEncoding.parseEightDigitsLittleEndian(octet));
+            const eightDigits = AsciiEncoding.parseEightDigitsLittleEndianWords(high, low);
+            const next = tally * 100_000_000 + eightDigits;
+            if (null === big && next <= Long.MAX_VALUE) {
+                tally = next;
+            } else {
+                big = (big ?? BigInt(tally)) * 100_000_000n + BigInt(eightDigits);
+            }
             i += 8;
         }
 
@@ -483,18 +537,33 @@ export class AsciiEncoding {
             end - i >= 4 &&
             AsciiEncoding.isFourDigitsAsciiEncodedNumber((quartet = AsciiEncoding.readFourBytesLittleEndian(cs, i)))
         ) {
-            tally = tally * 10_000n + BigInt(AsciiEncoding.parseFourDigitsLittleEndian(quartet));
+            const fourDigits = AsciiEncoding.parseFourDigitsLittleEndian(quartet);
+            const next = tally * 10_000 + fourDigits;
+            if (null === big && next <= Long.MAX_VALUE) {
+                tally = next;
+            } else {
+                big = (big ?? BigInt(tally)) * 10_000n + BigInt(fourDigits);
+            }
             i += 4;
         }
 
         let digit: number;
-        while (i < end && AsciiEncoding.isDigit((digit = cs.charCodeAt(i)))) {
-            tally = tally * 10n + BigInt(digit - 0x30);
+        while (i < end && AsciiEncoding.isDigit((digit = AsciiEncoding.charAt(cs, i)))) {
+            const next = tally * 10 + (digit - 0x30);
+            if (null === big && next <= Long.MAX_VALUE) {
+                tally = next;
+            } else {
+                big = (big ?? BigInt(tally)) * 10n + BigInt(digit - 0x30);
+            }
             i++;
         }
 
         if (i !== end) {
             AsciiEncoding.throwParseLongError(cs, index, length);
+        }
+
+        if (null !== big) {
+            throw AsciiEncoding.longOverflow(big, negative);
         }
 
         return tally;
@@ -507,7 +576,8 @@ export class AsciiEncoding {
         maxValue: Int32Array,
         startIndex: number,
         end: number,
-    ): bigint {
+        negative: boolean,
+    ): number {
         if (end - startIndex > AsciiEncoding.LONG_MAX_DIGITS) {
             AsciiEncoding.throwParseLongOverflowError(cs, index, length);
         }
@@ -515,13 +585,18 @@ export class AsciiEncoding {
         let i = startIndex,
             k = 0;
         let checkOverflow = true;
-        let tally = 0n,
-            octet: bigint;
+        let tally = 0,
+            big: bigint | null = null,
+            high: number,
+            low: number;
         while (
             end - i >= 8 &&
-            AsciiEncoding.isEightDigitAsciiEncodedNumber((octet = AsciiEncoding.readEightBytesLittleEndian(cs, i)))
+            AsciiEncoding.isEightDigitAsciiEncodedNumberWords(
+                (high = AsciiEncoding.readHighFourBytesLittleEndian(cs, i)),
+                (low = AsciiEncoding.readFourBytesLittleEndian(cs, i)),
+            )
         ) {
-            const eightDigits = AsciiEncoding.parseEightDigitsLittleEndian(octet);
+            const eightDigits = AsciiEncoding.parseEightDigitsLittleEndianWords(high, low);
             if (checkOverflow) {
                 if (eightDigits > maxValue[k]!) {
                     AsciiEncoding.throwParseLongOverflowError(cs, index, length);
@@ -530,13 +605,18 @@ export class AsciiEncoding {
                 }
                 k++;
             }
-            tally = BigInt.asIntN(64, tally * 100_000_000n + BigInt(eightDigits));
+            const next = tally * 100_000_000 + eightDigits;
+            if (null === big && next <= Long.MAX_VALUE) {
+                tally = next;
+            } else {
+                big = (big ?? BigInt(tally)) * 100_000_000n + BigInt(eightDigits);
+            }
             i += 8;
         }
 
         let digit: number;
         let lastDigits = 0;
-        while (i < end && AsciiEncoding.isDigit((digit = cs.charCodeAt(i)))) {
+        while (i < end && AsciiEncoding.isDigit((digit = AsciiEncoding.charAt(cs, i)))) {
             lastDigits = lastDigits * 10 + (digit - 0x30);
             i++;
         }
@@ -547,36 +627,73 @@ export class AsciiEncoding {
             AsciiEncoding.throwParseLongOverflowError(cs, index, length);
         }
 
-        return BigInt.asIntN(64, tally * 1000n + BigInt(lastDigits));
+        if (null === big) {
+            const result = tally * 1000 + lastDigits;
+            if (result <= Long.MAX_VALUE) {
+                return result;
+            }
+            big = BigInt(tally);
+        }
+
+        throw AsciiEncoding.longOverflow(BigInt.asIntN(64, big * 1000n + BigInt(lastDigits)), negative);
+    }
+
+    /**
+     * The error for a long outside +/-(2^53 - 1): the long Java returns for the digits parsed to `magnitude`, negated
+     * (with the 64-bit wrap of {@code -Long.MIN_VALUE}) for a minus sign.
+     */
+    private static longOverflow(magnitude: bigint, negative: boolean): LongOverflowError {
+        return new LongOverflowError(negative ? BigInt.asIntN(64, -magnitude) : magnitude);
     }
 
     private static throwParseLongError(cs: string, index: number, length: number): never {
-        throw new AsciiNumberFormatException('error parsing long: ' + cs.substring(index, index + length));
+        throw new AsciiNumberFormatException(
+            'error parsing long: ' + AsciiEncoding.subSequence(cs, index, index + length),
+        );
     }
 
     private static throwParseLongOverflowError(cs: string, index: number, length: number): never {
-        throw new AsciiNumberFormatException('long overflow parsing: ' + cs.substring(index, index + length));
+        throw new AsciiNumberFormatException(
+            'long overflow parsing: ' + AsciiEncoding.subSequence(cs, index, index + length),
+        );
     }
 
     private static readFourBytesLittleEndian(cs: string, index: number): number {
         return (
-            (cs.charCodeAt(index + 3) << 24) |
-            (cs.charCodeAt(index + 2) << 16) |
-            (cs.charCodeAt(index + 1) << 8) |
-            cs.charCodeAt(index)
+            (AsciiEncoding.charAt(cs, index + 3) << 24) |
+            (AsciiEncoding.charAt(cs, index + 2) << 16) |
+            (AsciiEncoding.charAt(cs, index + 1) << 8) |
+            AsciiEncoding.charAt(cs, index)
         );
     }
 
-    private static readEightBytesLittleEndian(cs: string, index: number): bigint {
-        return BigInt.asIntN(
-            64,
-            (BigInt(cs.charCodeAt(index + 7)) << 56n) |
-                (BigInt(cs.charCodeAt(index + 6)) << 48n) |
-                (BigInt(cs.charCodeAt(index + 5)) << 40n) |
-                (BigInt(cs.charCodeAt(index + 4)) << 32n) |
-                (BigInt(cs.charCodeAt(index + 3)) << 24n) |
-                (BigInt(cs.charCodeAt(index + 2)) << 16n) |
-                BigInt((cs.charCodeAt(index + 1) << 8) | cs.charCodeAt(index)),
-        );
+    /**
+     * The high word of Java's {@code readEightBytesLittleEndian}: the bytes {@code index + 4} to {@code index + 7},
+     * with the bits of {@code charAt(index + 3)} above the eighth (a char above 255) that Java's shifts carry into it.
+     */
+    private static readHighFourBytesLittleEndian(cs: string, index: number): number {
+        return AsciiEncoding.readFourBytesLittleEndian(cs, index + 4) | (cs.charCodeAt(index + 3) >>> 8);
+    }
+
+    /**
+     * Java's {@code CharSequence.charAt}.
+     */
+    private static charAt(cs: string, index: number): number {
+        if (index < 0 || index >= cs.length) {
+            throw new StringIndexOutOfBoundsException('Index ' + index + ' out of bounds for length ' + cs.length);
+        }
+
+        return cs.charCodeAt(index);
+    }
+
+    /**
+     * Java's {@code CharSequence.subSequence}.
+     */
+    private static subSequence(cs: string, start: number, end: number): string {
+        if (start < 0 || start > end || end > cs.length) {
+            throw new StringIndexOutOfBoundsException('begin ' + start + ', end ' + end + ', length ' + cs.length);
+        }
+
+        return cs.substring(start, end);
     }
 }

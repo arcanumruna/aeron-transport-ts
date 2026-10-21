@@ -16,13 +16,13 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of org/agrona/concurrent/UnsafeBufferTest.java @ Agrona 2.6.1
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BufferUtil } from '../../../src/agrona/BufferUtil.js';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import type { DirectBuffer } from '../../../src/agrona/DirectBuffer.js';
-import { IndexOutOfBoundsException } from '../../../src/agrona/jdk.js';
+import { ByteOrder, IllegalStateException, IndexOutOfBoundsException } from '../../../src/agrona/jdk.js';
 import type { MutableDirectBuffer } from '../../../src/agrona/MutableDirectBuffer.js';
-import { assertEqualsObject, assertNotEqualsObject, assertThrowsExactly } from '../../support/Assertions.js';
+import { assertIs, assertIsNot, assertThrowsExactly } from '../../support/Assertions.js';
 import { ByteBuffer } from '../../support/ByteBuffer.js';
 import { mutableDirectBufferTests } from '../MutableDirectBufferTests.js';
 
@@ -34,9 +34,16 @@ describe('UnsafeBufferTest', () => {
     const VALUE = 42;
     const ADJUSTMENT_OFFSET = 3;
 
-    const wibbleBytes = US_ASCII.encode('Wibble');
-    const wobbleBytes = US_ASCII.encode('Wobble');
-    const wibbleBytes2 = US_ASCII.encode('Wibble2');
+    let wibbleBytes: Uint8Array;
+    let wobbleBytes: Uint8Array;
+    let wibbleBytes2: Uint8Array;
+
+    // JUnit creates an instance of the test class, and so these fields, for each test
+    beforeEach(() => {
+        wibbleBytes = US_ASCII.encode('Wibble');
+        wobbleBytes = US_ASCII.encode('Wobble');
+        wibbleBytes2 = US_ASCII.encode('Wibble2');
+    });
 
     const newBuffer = (capacity: number): MutableDirectBuffer => new UnsafeBuffer(new Uint8Array(capacity));
 
@@ -50,21 +57,21 @@ describe('UnsafeBufferTest', () => {
     it('shouldEqualOnInstance', () => {
         const wibbleBuffer = new UnsafeBuffer(wibbleBytes);
 
-        assertEqualsObject(wibbleBuffer, wibbleBuffer);
+        assertIs(wibbleBuffer, wibbleBuffer);
     });
 
     it('shouldEqualOnContent', () => {
         const wibbleBufferOne = new UnsafeBuffer(wibbleBytes);
         const wibbleBufferTwo = new UnsafeBuffer(wibbleBytes.slice());
 
-        assertEqualsObject(wibbleBufferTwo, wibbleBufferOne);
+        assertIs(wibbleBufferOne, wibbleBufferTwo);
     });
 
     it('shouldNotEqual', () => {
         const wibbleBuffer = new UnsafeBuffer(wibbleBytes);
         const wobbleBuffer = new UnsafeBuffer(wobbleBytes);
 
-        assertNotEqualsObject(wobbleBuffer, wibbleBuffer);
+        assertIsNot(wibbleBuffer, wobbleBuffer);
     });
 
     it('shouldEqualOnHashCode', () => {
@@ -178,20 +185,39 @@ describe('UnsafeBufferTest', () => {
         expect(buffer.getByte(index)).toBe(0);
     });
 
-    it.skip('parseIntAsciiIsNotDependentOnTheBufferEndianness', () => {
-        // no direct memory / ByteBuffer in JS: the byte order of a ByteBuffer does not exist for an ArrayBuffer
+    // adapted: the ByteBuffer is the test/support stand-in, wrapped through its ArrayBuffer
+    it.each(byteOrders())('parseIntAsciiIsNotDependentOnTheBufferEndianness %s', (byteOrder) => {
+        const index = 13;
+        const value = 1690021;
+        const buffer = new UnsafeBuffer(ByteBuffer.allocate(32).order(byteOrder).arrayBuffer());
+        const length = buffer.putIntAscii(index, value);
+
+        expect(buffer.parseIntAscii(index, length)).toBe(value);
     });
 
-    it.skip('parseLongAsciiIsNotDependentOnTheBufferEndianness', () => {
-        // no direct memory / ByteBuffer in JS: the byte order of a ByteBuffer does not exist for an ArrayBuffer
+    // adapted: as parseIntAsciiIsNotDependentOnTheBufferEndianness
+    it.each(byteOrders())('parseLongAsciiIsNotDependentOnTheBufferEndianness %s', (byteOrder) => {
+        const index = 4;
+        const value = 16900210032;
+        const buffer = new UnsafeBuffer(ByteBuffer.allocate(64).order(byteOrder).arrayBuffer());
+        const length = buffer.putLongAscii(index, value);
+
+        expect(buffer.parseLongAscii(index, length)).toBe(value);
     });
 
-    it.skip('verifyAlignmentThrowsIllegalStateExceptionIfBufferCreatedFromImproperlyAlignedDirectByteBuffer', () => {
-        // no direct memory / ByteBuffer in JS: allocateDirectAligned cannot return an improperly aligned buffer
-    });
+    // adapted: allocateDirectAligned returns an ArrayBuffer, so the buffer is a window at byteOffset `alignment`
+    it.each([1, 2, 4])(
+        'verifyAlignmentThrowsIllegalStateExceptionIfBufferCreatedFromImproperlyAlignedDirectByteBuffer %s',
+        (alignment) => {
+            const buffer = new UnsafeBuffer(allocateDirectAligned(99 + alignment, alignment), alignment, 99);
+            assertThrowsExactly(IllegalStateException, () => buffer.verifyAlignment());
+        },
+    );
 
-    it.skip('verifyAlignmentThrowsIllegalStateExceptionIfBufferCreatedFromAnUnalignedAddress', () => {
-        // no direct memory / ByteBuffer in JS: there is no raw memory address constructor
+    // adapted: the address 1133 is the offset 1133 of a window in an ArrayBuffer
+    it('verifyAlignmentThrowsIllegalStateExceptionIfBufferCreatedFromAnUnalignedAddress', () => {
+        const buffer = new UnsafeBuffer(new ArrayBuffer(1133 + 8), 1133, 8);
+        assertThrowsExactly(IllegalStateException, () => buffer.verifyAlignment());
     });
 
     it.each([8, 16, 64, 512])('verifyAlignmentWorksIfDirectBufferAlignedOnEightByteBoundaries %s', (alignment) => {
@@ -221,6 +247,10 @@ describe('UnsafeBufferTest', () => {
         expect(buffer.addressOffset()).toBe(src.addressOffset() + offset);
         expect(buffer.wrapAdjustment()).toBe(src.wrapAdjustment() + offset);
     });
+
+    function byteOrders(): ByteOrder[] {
+        return [ByteOrder.BIG_ENDIAN, ByteOrder.LITTLE_ENDIAN];
+    }
 
     function shouldExposePositionAtWhichByteBufferGetsWrapped(byteBuffer: ByteBuffer): void {
         const wibbleBuffer = new UnsafeBuffer(

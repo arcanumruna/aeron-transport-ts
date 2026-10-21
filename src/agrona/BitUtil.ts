@@ -16,7 +16,15 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of org/agrona/BitUtil.java @ Agrona 2.6.1
-import { ArrayIndexOutOfBoundsException, IllegalArgumentException, Integer, Long, ThreadLocalRandom } from './jdk.js';
+import {
+    ArrayIndexOutOfBoundsException,
+    IllegalArgumentException,
+    Integer,
+    Long,
+    NegativeArraySizeException,
+    StringIndexOutOfBoundsException,
+    ThreadLocalRandom,
+} from './jdk.js';
 
 const US_ASCII = new TextDecoder();
 
@@ -136,7 +144,8 @@ export class BitUtil {
      * @return The next power of 2 or the value itself if it is a power of 2.
      */
     public static findNextPositivePowerOfTwoLong(value: number): number {
-        return 2 ** ((Long.SIZE - Long.numberOfLeadingZeros(value - 1)) & 63);
+        Long.checkSafe(value);
+        return Long.checkSafe(2 ** ((Long.SIZE - Long.numberOfLeadingZeros(value - 1)) & 63));
     }
 
     /**
@@ -166,7 +175,7 @@ export class BitUtil {
      * @return the value aligned to the next boundary.
      */
     public static alignLong(value: number, alignment: number): number {
-        return Long.and(value + (alignment - 1), -alignment);
+        return Long.checkSafe(Long.and(Long.checkSafe(Long.checkSafe(value) + (alignment - 1)), -alignment));
     }
 
     /**
@@ -200,13 +209,29 @@ export class BitUtil {
         offset: number = 0,
         length: number = buffer.length,
     ): Uint8Array {
+        if (length << 1 < 0) {
+            throw new NegativeArraySizeException(String(length << 1));
+        }
         const outputBuffer = new Uint8Array(length << 1);
 
         for (let i = 0; i < length << 1; i += 2) {
-            const b =
-                typeof buffer === 'string'
-                    ? (buffer.charCodeAt(offset + (i >> 1)) << 24) >> 24
-                    : (buffer[offset + (i >> 1)]! << 24) >> 24;
+            const index = offset + (i >> 1);
+            let b: number;
+            if (typeof buffer === 'string') {
+                if (index < 0 || index >= buffer.length) {
+                    throw new StringIndexOutOfBoundsException(
+                        `Index ${index} out of bounds for length ${buffer.length}`,
+                    );
+                }
+                b = (buffer.charCodeAt(index) << 24) >> 24;
+            } else {
+                if (index < 0 || index >= buffer.length) {
+                    throw new ArrayIndexOutOfBoundsException(
+                        `Index ${index} out of bounds for length ${buffer.length}`,
+                    );
+                }
+                b = (buffer[index]! << 24) >> 24;
+            }
 
             outputBuffer[i] = BitUtil.HEX_DIGIT_TABLE[(b >> 4) & 0x0f]!;
             outputBuffer[i + 1] = BitUtil.HEX_DIGIT_TABLE[b & 0x0f]!;
@@ -261,6 +286,7 @@ export class BitUtil {
      * @return true if the number is even otherwise false.
      */
     public static isEvenLong(value: number): boolean {
+        Long.checkSafe(value);
         return (value & BitUtil.LAST_DIGIT_MASK) === 0;
     }
 
@@ -281,6 +307,7 @@ export class BitUtil {
      * @return true if the number is a positive power of 2, otherwise false.
      */
     public static isPowerOfTwoLong(value: number): boolean {
+        Long.checkSafe(value);
         return value > 0 && Long.and(value, -value) === value;
     }
 
@@ -292,7 +319,7 @@ export class BitUtil {
      * @return the next value, or zero if max is reached.
      */
     public static next(current: number, max: number): number {
-        let next = current + 1;
+        let next = (current + 1) | 0;
         if (next === max) {
             next = 0;
         }
@@ -309,10 +336,10 @@ export class BitUtil {
      */
     public static previous(current: number, max: number): number {
         if (0 === current) {
-            return max - 1;
+            return (max - 1) | 0;
         }
 
-        return current - 1;
+        return (current - 1) | 0;
     }
 
     /**
@@ -353,7 +380,7 @@ export class BitUtil {
             throw new IllegalArgumentException('alignment must be a power of 2: alignment=' + alignment);
         }
 
-        return Long.and(address, alignment - 1) === 0;
+        return Long.and(Long.checkSafe(address), alignment - 1) === 0;
     }
 
     /**

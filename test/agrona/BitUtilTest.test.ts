@@ -76,9 +76,8 @@ describe('BitUtilTest', () => {
         const maxMultiple = Long.MAX_VALUE - remainder;
 
         expect(alignLong(maxMultiple, alignment)).toBe(maxMultiple);
-        // adapted: a long is a number, so aligning Long.MAX_VALUE does not wrap to Long.MIN_VALUE; it gives the next
-        // multiple, 2^53, which is still exact
-        expect(alignLong(Long.MAX_VALUE, alignment)).toBe(Long.MAX_VALUE + 1);
+        // adapted: Java wraps to Long.MIN_VALUE; the aligned value, 2^53, is not a safe integer, so alignLong throws
+        expect(() => alignLong(Long.MAX_VALUE, alignment)).toThrow(RangeError);
     });
 
     it.each([

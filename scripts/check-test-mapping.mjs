@@ -4,8 +4,42 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const TEST_ANNOTATION = /^\s*@(Test|ParameterizedTest|RepeatedTest|TestTemplate)\b/;
 const METHOD = /^\s*(?:(?:public|protected|private|static|final|synchronized)\s+)*[\w<>[\],\s]+?\s+(\w+)\s*\(/;
+
+const TEST_NAME = /^(?:[\w.]+\.)?(Test|ParameterizedTest|RepeatedTest|TestTemplate)$/;
+
+/**
+ * Consumes the annotations at the start of a line (`@Test`, `@ValueSource(ints = { 1 })`), including one whose
+ * parentheses stay open at the end of the line.
+ * @returns the rest of the line, whether a test annotation was seen, and the parentheses still open
+ */
+function consumeAnnotations(line) {
+    let i = 0;
+    let isTest = false;
+    for (;;) {
+        while (/\s/.test(line[i] ?? '')) i++;
+        if (line[i] !== '@') break;
+        const name = /^@([\w.]+)/.exec(line.slice(i));
+        if (!name) break;
+        if (TEST_NAME.test(name[1])) isTest = true;
+        i += name[0].length;
+        while (/\s/.test(line[i] ?? '')) i++;
+        if (line[i] === '(') {
+            let depth = 0;
+            for (; i < line.length; i++) {
+                const c = line[i];
+                if (c === '"' || c === "'") i = skipString(line, i) - 1;
+                else if (c === '(') depth++;
+                else if (c === ')' && --depth === 0) {
+                    i++;
+                    break;
+                }
+            }
+            if (depth > 0) return { rest: '', isTest, open: depth };
+        }
+    }
+    return { rest: line.slice(i), isTest, open: 0 };
+}
 
 /** Test method names declared in a Java test file, and the simple name of the class it extends (if any). */
 export function javaTestNames(path) {
@@ -14,14 +48,17 @@ export function javaTestNames(path) {
     let pending = false;
     let open = 0; // unclosed parentheses of a multi-line annotation such as @CsvSource({ ... })
     for (const line of lines) {
-        if (open > 0 || /^\s*@/.test(line)) {
+        if (open > 0) {
             const code = line.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, '');
             open = Math.max(0, open + (code.match(/\(/g) ?? []).length - (code.match(/\)/g) ?? []).length);
-            if (TEST_ANNOTATION.test(line)) pending = true;
             continue;
         }
-        if (pending && line.trim() !== '') {
-            const m = METHOD.exec(line);
+        if (/^\s*(\/\/|\/\*|\*)/.test(line)) continue; // a comment line between the annotation and the method
+        const { rest, isTest, open: stillOpen } = consumeAnnotations(line);
+        open = stillOpen;
+        if (isTest) pending = true;
+        if (pending && rest.trim() !== '') {
+            const m = METHOD.exec(rest);
             if (m) own.push(m[1]);
             pending = false;
         }
@@ -54,7 +91,7 @@ function matchParen(src, open) {
 /** `it` titles in a TS test file: name (title up to the first space), and whether it is skipped. */
 export function tsTestTitles(src) {
     const out = [];
-    const re = /\bit((?:\.(?:skip|only|todo|each|fails))*)\s*\(/g;
+    const re = /\bit((?:\.(?:skip|only|todo|each|fails))*)\s*(?:<[^()]*>)?\s*\(/g;
     let m;
     while ((m = re.exec(src)) !== null) {
         const mods = m[1];

@@ -17,20 +17,37 @@
  */
 // Port of org/agrona/BufferUtilTest.java @ Agrona 2.6.1
 import { describe, expect, it } from 'vitest';
+import { BitUtil } from '../../src/agrona/BitUtil.js';
+import { UnsafeBuffer } from '../../src/agrona/concurrent/UnsafeBuffer.js';
 import { BufferUtil } from '../../src/agrona/BufferUtil.js';
 import { IllegalArgumentException, IndexOutOfBoundsException, Long } from '../../src/agrona/jdk.js';
+
+const { CACHE_LINE_LENGTH, SIZE_OF_LONG, isAligned } = BitUtil;
 
 describe('BufferUtilTest', () => {
     it('shouldDetectNonPowerOfTwoAlignment', () => {
         expect(() => BufferUtil.allocateDirectAligned(1, 3)).toThrow(IllegalArgumentException);
     });
 
-    it.skip('shouldAlignToWordBoundary', () => {
-        // no direct memory / ByteBuffer in JS: an ArrayBuffer has no address to be aligned
+    // adapted: an ArrayBuffer has no address; its window starts at byteOffset 0, which is aligned
+    it('shouldAlignToWordBoundary', () => {
+        const capacity = 128;
+        const byteBuffer = BufferUtil.allocateDirectAligned(capacity, SIZE_OF_LONG);
+
+        const address = new Uint8Array(byteBuffer).byteOffset;
+        expect(isAligned(address, SIZE_OF_LONG)).toBe(true);
+        new UnsafeBuffer(byteBuffer).verifyAlignment();
+        expect(byteBuffer.byteLength).toBe(capacity);
     });
 
-    it.skip('shouldAlignToCacheLineBoundary', () => {
-        // no direct memory / ByteBuffer in JS: an ArrayBuffer has no address to be aligned
+    // adapted: as shouldAlignToWordBoundary
+    it('shouldAlignToCacheLineBoundary', () => {
+        const capacity = 128;
+        const byteBuffer = BufferUtil.allocateDirectAligned(capacity, CACHE_LINE_LENGTH);
+
+        const address = new Uint8Array(byteBuffer).byteOffset;
+        expect(isAligned(address, CACHE_LINE_LENGTH)).toBe(true);
+        expect(byteBuffer.byteLength).toBe(capacity);
     });
 
     it.skip('freeIsANoOpIfDirectBufferIsNull', () => {

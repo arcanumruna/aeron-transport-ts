@@ -31,7 +31,7 @@ import {
     IndexOutOfBoundsException,
     Integer,
     Long,
-    longToNumber,
+    LongOverflowError,
     newStringAscii,
     NumberFormatException,
     Objects,
@@ -51,9 +51,9 @@ const {
     MINUS_SIGN,
     ZERO,
     isDigit,
-    isEightDigitAsciiEncodedNumber,
+    isEightDigitAsciiEncodedNumberWords,
     isFourDigitsAsciiEncodedNumber,
-    parseEightDigitsLittleEndian,
+    parseEightDigitsLittleEndianWords,
     parseFourDigitsLittleEndian,
 } = AsciiEncoding;
 const { ARRAY_BASE_OFFSET, NATIVE_BYTE_ORDER, NULL_BYTES } = BufferUtil;
@@ -63,18 +63,65 @@ const UTF_8_ENCODER = new TextEncoder();
 const UTF_8_DECODER = new TextDecoder('utf-8', { ignoreBOM: true });
 
 /**
- * `Unsafe.copyMemory` between two byte arrays.
+ * The array if it is a view of the whole of its ArrayBuffer, which can address any byte of it.
+ */
+function wholeView(array: Uint8Array): Uint8Array | null {
+    return 0 === array.byteOffset && array.byteLength === array.buffer.byteLength ? array : null;
+}
+
+/**
+ * `Unsafe.copyMemory` between two byte arrays, which moves bytes as memmove does when they overlap, and allocates
+ * nothing: no `subarray` is made.
  */
 function copyMemory(src: Uint8Array, srcOffset: number, dst: Uint8Array, dstOffset: number, length: number): void {
     if (src === dst) {
         dst.copyWithin(dstOffset, srcOffset, srcOffset + length);
-    } else if (length < 64) {
+    } else if (src.buffer === dst.buffer) {
+        const from = src.byteOffset + srcOffset;
+        const to = dst.byteOffset + dstOffset;
+        const whole = wholeView(dst) ?? wholeView(src);
+        if (null !== whole) {
+            whole.copyWithin(to, from, from + length);
+        } else if (to <= from) {
+            for (let i = 0; i < length; i++) {
+                dst[dstOffset + i] = src[srcOffset + i]!;
+            }
+        } else {
+            for (let i = length - 1; i >= 0; i--) {
+                dst[dstOffset + i] = src[srcOffset + i]!;
+            }
+        }
+    } else if (0 === srcOffset && length === src.length) {
+        dst.set(src, dstOffset);
+    } else {
         for (let i = 0; i < length; i++) {
             dst[dstOffset + i] = src[srcOffset + i]!;
         }
-    } else {
-        dst.set(src.subarray(srcOffset, srcOffset + length), dstOffset);
     }
+}
+
+/**
+ * `String.getBytes(UTF_8)`: a lone surrogate is encoded as '?', where `TextEncoder` writes U+FFFD.
+ */
+function encodeUtf8(value: string): Uint8Array {
+    if ((value as string & { isWellFormed(): boolean }).isWellFormed()) {
+        return UTF_8_ENCODER.encode(value);
+    }
+
+    let wellFormed = '';
+    for (let i = 0; i < value.length; i++) {
+        const c = value.charCodeAt(i);
+        if (c >= 0xd800 && c <= 0xdbff && i + 1 < value.length && (value.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+            wellFormed += value.charAt(i) + value.charAt(i + 1);
+            i++;
+        } else if (c >= 0xd800 && c <= 0xdfff) {
+            wellFormed += '?';
+        } else {
+            wellFormed += value.charAt(i);
+        }
+    }
+
+    return UTF_8_ENCODER.encode(wellFormed);
 }
 
 /**
@@ -542,7 +589,7 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
             }
 
             const maxEncodedLength = arg2;
-            const bytes = value !== null ? UTF_8_ENCODER.encode(value) : NULL_BYTES;
+            const bytes = value !== null ? encodeUtf8(value) : NULL_BYTES;
             if (bytes.length > maxEncodedLength) {
                 throw new IllegalArgumentException('Encoded string larger than maximum size: ' + maxEncodedLength);
             }
@@ -557,7 +604,7 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
             return STR_HEADER_LEN + bytes.length;
         } else {
             const maxEncodedLength = arg1;
-            const bytes = value !== null ? UTF_8_ENCODER.encode(value) : NULL_BYTES;
+            const bytes = value !== null ? encodeUtf8(value) : NULL_BYTES;
             if (bytes.length > maxEncodedLength) {
                 throw new IllegalArgumentException('Encoded string larger than maximum size: ' + maxEncodedLength);
             }
@@ -587,7 +634,7 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
     }
 
     public putStringWithoutLengthUtf8(index: number, value: string | null): number {
-        const bytes = value !== null ? UTF_8_ENCODER.encode(value) : NULL_BYTES;
+        const bytes = value !== null ? encodeUtf8(value) : NULL_BYTES;
         this.ensureCapacity(index, bytes.length);
 
         copyMemory(bytes, ARRAY_BASE_OFFSET, this._byteArray, this._addressOffset + index, bytes.length);
@@ -626,11 +673,9 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
         }
 
         if (length < LONG_MAX_DIGITS) {
-            return longToNumber(this.parsePositiveLongAscii(index, length, index, index + length));
+            return this.parsePositiveLongAscii(index, length, index, index + length, false);
         } else {
-            return longToNumber(
-                this.parseLongAsciiOverflowCheck(index, length, LONG_MAX_VALUE_DIGITS, index, index + length),
-            );
+            return this.parseLongAsciiOverflowCheck(index, length, LONG_MAX_VALUE_DIGITS, index, index + length, false);
         }
     }
 
@@ -686,14 +731,12 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
 
         const end = index + length;
         if (end - i < LONG_MAX_DIGITS) {
-            const tally = this.parsePositiveLongAscii(index, length, i, end);
-            return longToNumber(negative ? -tally : tally);
+            const tally = this.parsePositiveLongAscii(index, length, i, end, negative);
+            return negative ? 0 - tally : tally;
         } else if (negative) {
-            return longToNumber(
-                BigInt.asIntN(64, -this.parseLongAsciiOverflowCheck(index, length, LONG_MIN_VALUE_DIGITS, i, end)),
-            );
+            return 0 - this.parseLongAsciiOverflowCheck(index, length, LONG_MIN_VALUE_DIGITS, i, end, negative);
         } else {
-            return longToNumber(this.parseLongAsciiOverflowCheck(index, length, LONG_MAX_VALUE_DIGITS, i, end));
+            return this.parseLongAsciiOverflowCheck(index, length, LONG_MAX_VALUE_DIGITS, i, end, negative);
         }
     }
 
@@ -998,9 +1041,10 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
 
         let i = startIndex;
         let tally = 0;
-        const octet = array.getBigInt64(offset + i, true);
-        if (isEightDigitAsciiEncodedNumber(octet)) {
-            tally = parseEightDigitsLittleEndian(octet);
+        const low = array.getInt32(offset + i, true);
+        const high = array.getInt32(offset + i + 4, true);
+        if (isEightDigitAsciiEncodedNumberWords(high, low)) {
+            tally = parseEightDigitsLittleEndianWords(high, low);
             i += 8;
 
             let digit: number;
@@ -1027,32 +1071,68 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
         );
     }
 
-    private parsePositiveLongAscii(index: number, length: number, startIndex: number, end: number): bigint {
+    private parsePositiveLongAscii(
+        index: number,
+        length: number,
+        startIndex: number,
+        end: number,
+        negative: boolean,
+    ): number {
         const offset = this._addressOffset;
         const array = this._dataView;
 
         let i = startIndex;
-        let tally = 0n,
-            octet: bigint;
-        while (end - i >= 8 && isEightDigitAsciiEncodedNumber((octet = array.getBigInt64(offset + i, true)))) {
-            tally = tally * 100_000_000n + BigInt(parseEightDigitsLittleEndian(octet));
+        // the tally is a number until it would leave +/-(2^53 - 1), then a bigint, which ends in LongOverflowError
+        let tally = 0,
+            big: bigint | null = null,
+            high: number,
+            low: number;
+        while (
+            end - i >= 8 &&
+            isEightDigitAsciiEncodedNumberWords(
+                (high = array.getInt32(offset + i + 4, true)),
+                (low = array.getInt32(offset + i, true)),
+            )
+        ) {
+            const eightDigits = parseEightDigitsLittleEndianWords(high, low);
+            const next = tally * 100_000_000 + eightDigits;
+            if (null === big && next <= Long.MAX_VALUE) {
+                tally = next;
+            } else {
+                big = (big ?? BigInt(tally)) * 100_000_000n + BigInt(eightDigits);
+            }
             i += 8;
         }
 
         let quartet: number;
         while (end - i >= 4 && isFourDigitsAsciiEncodedNumber((quartet = array.getInt32(offset + i, true)))) {
-            tally = tally * 10_000n + BigInt(parseFourDigitsLittleEndian(quartet));
+            const fourDigits = parseFourDigitsLittleEndian(quartet);
+            const next = tally * 10_000 + fourDigits;
+            if (null === big && next <= Long.MAX_VALUE) {
+                tally = next;
+            } else {
+                big = (big ?? BigInt(tally)) * 10_000n + BigInt(fourDigits);
+            }
             i += 4;
         }
 
         let digit: number;
         while (i < end && isDigit((digit = array.getInt8(offset + i)))) {
-            tally = tally * 10n + BigInt(digit - 0x30);
+            const next = tally * 10 + (digit - 0x30);
+            if (null === big && next <= Long.MAX_VALUE) {
+                tally = next;
+            } else {
+                big = (big ?? BigInt(tally)) * 10n + BigInt(digit - 0x30);
+            }
             i++;
         }
 
         if (i !== end) {
             this.throwParseLongError(index, length);
+        }
+
+        if (null !== big) {
+            throw AbstractMutableDirectBuffer.longOverflow(big, negative);
         }
 
         return tally;
@@ -1064,7 +1144,8 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
         maxValue: Int32Array,
         startIndex: number,
         end: number,
-    ): bigint {
+        negative: boolean,
+    ): number {
         if (end - startIndex > LONG_MAX_DIGITS) {
             this.throwParseLongOverflowError(index, length);
         }
@@ -1075,10 +1156,18 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
         let i = startIndex,
             k = 0;
         let checkOverflow = true;
-        let tally = 0n,
-            octet: bigint;
-        while (end - i >= 8 && isEightDigitAsciiEncodedNumber((octet = array.getBigInt64(offset + i, true)))) {
-            const eightDigits = parseEightDigitsLittleEndian(octet);
+        let tally = 0,
+            big: bigint | null = null,
+            high: number,
+            low: number;
+        while (
+            end - i >= 8 &&
+            isEightDigitAsciiEncodedNumberWords(
+                (high = array.getInt32(offset + i + 4, true)),
+                (low = array.getInt32(offset + i, true)),
+            )
+        ) {
+            const eightDigits = parseEightDigitsLittleEndianWords(high, low);
             if (checkOverflow) {
                 if (eightDigits > maxValue[k]!) {
                     this.throwParseLongOverflowError(index, length);
@@ -1088,7 +1177,12 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
                 k++;
             }
 
-            tally = BigInt.asIntN(64, tally * 100_000_000n + BigInt(eightDigits));
+            const next = tally * 100_000_000 + eightDigits;
+            if (null === big && next <= Long.MAX_VALUE) {
+                tally = next;
+            } else {
+                big = (big ?? BigInt(tally)) * 100_000_000n + BigInt(eightDigits);
+            }
             i += 8;
         }
 
@@ -1105,7 +1199,23 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
             this.throwParseLongOverflowError(index, length);
         }
 
-        return BigInt.asIntN(64, tally * 1000n + BigInt(lastDigits));
+        if (null === big) {
+            const result = tally * 1000 + lastDigits;
+            if (result <= Long.MAX_VALUE) {
+                return result;
+            }
+            big = BigInt(tally);
+        }
+
+        throw AbstractMutableDirectBuffer.longOverflow(BigInt.asIntN(64, big * 1000n + BigInt(lastDigits)), negative);
+    }
+
+    /**
+     * The error for a long outside +/-(2^53 - 1): the long Java returns for the digits parsed to `magnitude`, negated
+     * (with the 64-bit wrap of {@code -Long.MIN_VALUE}) for a minus sign.
+     */
+    private static longOverflow(magnitude: bigint, negative: boolean): LongOverflowError {
+        return new LongOverflowError(negative ? BigInt.asIntN(64, -magnitude) : magnitude);
     }
 
     private throwParseLongError(index: number, length: number): never {

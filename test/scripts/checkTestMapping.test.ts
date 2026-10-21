@@ -45,6 +45,20 @@ describe('checkTestMapping', () => {
         expect(names.own).toEqual(['alignWithLongValues', 'isX64ArchSystemTest']);
     });
 
+    it('collects Java test names declared on the line of the annotation and after a comment', () => {
+        const names = javaTestNames(join(fixtures, 'java/pkg/OneLineAnnotationTest.java'));
+        expect(names.own).toEqual(['shouldA', 'shouldB', 'shouldC', 'shouldD', 'shouldE']);
+    });
+
+    it('collects TS titles of it.each with a type argument', () => {
+        const src =
+            "it.each<[string, bigint]>([['a', 1n]])('shouldDoA %s', () => {});\nit.skip.each<number>([1])('shouldDoB %s', () => {});";
+        expect(tsTestTitles(src)).toEqual([
+            { name: 'shouldDoA', skip: false },
+            { name: 'shouldDoB', skip: true },
+        ]);
+    });
+
     it('collects TS titles, it.each prefixes and skips', () => {
         const titles = tsTestTitles(read('ts/Sample.test.ts'));
         expect(titles.map((t) => t.name)).toEqual(['shouldDoA', 'shouldDoB', 'shouldDoC']);

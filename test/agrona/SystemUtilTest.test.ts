@@ -18,26 +18,43 @@
 // Port of org/agrona/SystemUtilTest.java @ Agrona 2.6.1
 import { describe, expect, it } from 'vitest';
 import { SystemUtil } from '../../src/agrona/SystemUtil.js';
-import { IllegalArgumentException, Long, NumberFormatException } from '../../src/agrona/jdk.js';
-import { assertThrows, assertThrowsExactly } from '../support/Assertions.js';
+import { IllegalArgumentException, Long, LongOverflowError, NumberFormatException } from '../../src/agrona/jdk.js';
+import { assertParsedLong, assertThrows, assertThrowsExactly } from '../support/Assertions.js';
+
+/** The result of parseDuration for a value whose Java result is `expected`, see shouldParseTimesWithSuffix. */
+function assertDuration(value: string, expected: bigint): void {
+    if (expected <= BigInt(Long.MAX_VALUE)) {
+        expect(SystemUtil.parseDuration('', value)).toBe(Number(expected));
+    } else if (/(\d|ns)$/i.test(value)) {
+        const error = assertThrows(LongOverflowError, () => SystemUtil.parseDuration('', value));
+        expect(error.value).toBe(expected);
+    } else {
+        expect(SystemUtil.parseDuration('', value)).toBe(Long.MAX_VALUE);
+    }
+}
 
 describe('SystemUtilTest', () => {
-    // adapted: a long is exact to 2^53 - 1, so the rows that use Long.MAX_VALUE (and the multiples of 'k', 'm' and
-    // 'g' that reach it) use Long.MAX_VALUE = 2^53 - 1 instead, which keeps the same boundaries
-    it.each([
-        ['0', 0],
-        ['42', 42],
-        ['5k', 5120],
-        ['2K', 2048],
-        ['1m', 1048576],
-        ['10M', 10485760],
-        ['4g', 4294967296],
-        ['10G', 10737418240],
-        ['8388607g', 9007198180999168],
-        ['8589934591m', 9007199253692416],
-        ['8796093022207k', 9007199254739968],
+    // adapted: a long is a number exact to +/-(2^53 - 1) (spec D5): a result beyond it throws LongOverflowError
+    // carrying the exact value, which assertParsedLong asserts. The rows are Java's, then the rows at the 2^53 bound.
+    it.each<[string, bigint]>([
+        ['0', 0n],
+        ['42', 42n],
+        ['5k', 5120n],
+        ['2K', 2048n],
+        ['1m', 1048576n],
+        ['10M', 10485760n],
+        ['4g', 4294967296n],
+        ['10G', 10737418240n],
+        ['8589934591g', 9223372035781033984n],
+        ['8796093022207m', 9223372036853727232n],
+        ['9007199254740991k', 9223372036854774784n],
+        ['8388607g', 9007198180999168n],
+        ['8589934591m', 9007199253692416n],
+        ['8796093022207k', 9007199254739968n],
+        ['8796093022208k', 9007199254740992n],
+        ['8388608g', 9007199254740992n],
     ])('shouldParseSizesWithSuffix %s', (value, expected) => {
-        expect(SystemUtil.parseSize('', value)).toBe(expected);
+        assertParsedLong(expected, () => SystemUtil.parseSize('', value));
     });
 
     it.each([[null], ['']])('shouldRejectEmptySizeValue %s', (value) => {
@@ -50,58 +67,68 @@ describe('SystemUtilTest', () => {
         expect(exception.message).toBe('abc must be positive: ' + value);
     });
 
-    // adapted: the first value of each row is the first value above the 2^53 - 1 bound, not above Long.MAX_VALUE
-    it.each(['8796093022208k', '8589934592m', '8388608g'])('shouldThrowWhenParseSizeOverflows %s', (value) => {
+    it.each(['9007199254740992k', '8796093022208m', '8589934592g'])('shouldThrowWhenParseSizeOverflows %s', (value) => {
         const exception = assertThrows(NumberFormatException, () => SystemUtil.parseSize('test', value));
         expect(exception.message).toBe('test would overflow a long: ' + value);
     });
 
-    // adapted: rows that use Long.MAX_VALUE or reach it use Long.MAX_VALUE = 2^53 - 1 instead
-    it.each([
-        ['0', 0],
-        ['0ns', 0],
-        ['0us', 0],
-        ['0ms', 0],
-        ['0s', 0],
-        ['1', 1],
-        ['1ns', 1],
-        ['4NS', 4],
-        ['44444nS', 44444],
-        ['1024', 1024],
-        ['1us', 1000],
-        ['5us', 5000],
-        ['7US', 7000],
-        ['9uS', 9000],
-        ['12Us', 12000],
-        ['1ms', 1000000],
-        ['123ms', 123000000],
-        ['456MS', 456000000],
-        ['789mS', 789000000],
-        ['2Ms', 2000000],
-        ['1s', 1000000000],
-        ['1S', 1000000000],
-        ['42s', 42000000000],
-        ['9007199254740991', 9007199254740991],
-        ['2147483647', 2147483647],
-        ['9007199254740991ns', 9007199254740991],
-        ['9007199254740us', 9007199254740000],
-        ['9007199254ms', 9007199254000000],
-        ['9007199s', 9007199000000000],
+    // adapted: a result beyond +/-(2^53 - 1) is not returned (spec D5): with no suffix or 'ns' parseDuration throws
+    // LongOverflowError carrying Java's exact value; with 'us', 'ms' or 's' it saturates at Long.MAX_VALUE, which here
+    // is 2^53 - 1. The rows are Java's, then the rows at the 2^53 bound.
+    it.each<[string, bigint]>([
+        ['0', 0n],
+        ['0ns', 0n],
+        ['0us', 0n],
+        ['0ms', 0n],
+        ['0s', 0n],
+        ['1', 1n],
+        ['1ns', 1n],
+        ['4NS', 4n],
+        ['44444nS', 44444n],
+        ['1024', 1024n],
+        ['1us', 1000n],
+        ['5us', 5000n],
+        ['7US', 7000n],
+        ['9uS', 9000n],
+        ['12Us', 12000n],
+        ['1ms', 1000000n],
+        ['123ms', 123000000n],
+        ['456MS', 456000000n],
+        ['789mS', 789000000n],
+        ['2Ms', 2000000n],
+        ['1s', 1000000000n],
+        ['1S', 1000000000n],
+        ['42s', 42000000000n],
+        ['9223372036854775807', 9223372036854775807n],
+        ['2147483647', 2147483647n],
+        ['9223372036854775807ns', 9223372036854775807n],
+        ['9223372036854775us', 9223372036854775000n],
+        ['9223372036854ms', 9223372036854000000n],
+        ['9223372036s', 9223372036000000000n],
+        ['9007199254740991', 9007199254740991n],
+        ['9007199254740991ns', 9007199254740991n],
+        ['9007199254740us', 9007199254740000n],
+        ['9007199254ms', 9007199254000000n],
+        ['9007199s', 9007199000000000n],
+        ['9007199254741us', 9007199254741000n],
+        ['9007199255ms', 9007199255000000n],
+        ['9007200s', 9007200000000000n],
     ])('shouldParseTimesWithSuffix %s', (value, expected) => {
-        expect(SystemUtil.parseDuration('', value)).toBe(expected);
+        assertDuration(value, expected);
     });
 
-    // adapted: Long.MAX_VALUE = 2^53 - 1; the rows are the first values that exceed it for each suffix
+    // adapted: Long.MAX_VALUE is Java's 2^63 - 1: the bare value and 'ns' throw LongOverflowError with it, the others
+    // saturate at 2^53 - 1 (see shouldParseTimesWithSuffix)
     it.each([
-        '9007199254740991ns',
-        '9007199254740991us',
-        '9007199254740991ms',
-        '9007199254740991s',
-        '9007199254741us',
-        '9007199255ms',
-        '9007200s',
+        '9223372036854775807ns',
+        '9223372036854775807us',
+        '9223372036854775807ms',
+        '9223372036854775807s',
+        '9223372036854776us',
+        '9223372036855ms',
+        '9223372037s',
     ])('shouldReturnLongMaxValueIfExceedsForSuffix %s', (value) => {
-        expect(SystemUtil.parseDuration('', value)).toBe(Long.MAX_VALUE);
+        assertDuration(value, 9223372036854775807n);
     });
 
     it.each([[null], ['']])('shouldRejectEmptyDurationValue %s', (value) => {

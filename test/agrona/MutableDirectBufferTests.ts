@@ -21,12 +21,20 @@ import { expect, it } from 'vitest';
 import { AbstractMutableDirectBuffer } from '../../src/agrona/AbstractMutableDirectBuffer.js';
 import { AsciiNumberFormatException } from '../../src/agrona/AsciiNumberFormatException.js';
 import { UnsafeBuffer } from '../../src/agrona/concurrent/UnsafeBuffer.js';
-import { Integer, IndexOutOfBoundsException, Long, ThreadLocalRandom } from '../../src/agrona/jdk.js';
+import {
+    Integer,
+    IndexOutOfBoundsException,
+    Long,
+    LongOverflowError,
+    ThreadLocalRandom,
+} from '../../src/agrona/jdk.js';
 import type { MutableDirectBuffer } from '../../src/agrona/MutableDirectBuffer.js';
 import { assertEqualsObject, assertNotEqualsObject, assertThrowsExactly } from '../support/Assertions.js';
+import { ITERATIONS_SCALE, ROUND_TRIP_TIMEOUT_MS } from '../support/Iterations.js';
 import { mock } from '../support/Mockito.js';
+import { randomJavaLong } from '../support/Random.js';
 
-const ROUND_TRIP_ITERATIONS = 10_000_000;
+const ROUND_TRIP_ITERATIONS = 10_000_000 / ITERATIONS_SCALE;
 
 const US_ASCII = new TextEncoder();
 
@@ -69,56 +77,89 @@ export function mutableDirectBufferTests(newBuffer: (capacity: number) => Mutabl
         expect(buffer.getStringWithoutLengthAscii(0, length), messageSupplier()).toBe(String(value));
     });
 
-    it('putIntAsciiRoundTrip', () => {
-        const index = 4;
-        const buffer = newBuffer(64);
+    it(
+        'putIntAsciiRoundTrip',
+        () => {
+            const index = 4;
+            const buffer = newBuffer(64);
 
-        for (let i = 0; i < ROUND_TRIP_ITERATIONS; i++) {
-            const value = ThreadLocalRandom.current().nextInt();
-            const length = buffer.putIntAscii(index, value);
-            const parsedValue = buffer.parseIntAscii(index, length);
-            // adapted: node:assert instead of expect, which costs seconds over 10,000,000 iterations
-            assert.strictEqual(parsedValue, value);
-        }
-    }, 120_000);
+            for (let i = 0; i < ROUND_TRIP_ITERATIONS; i++) {
+                const value = ThreadLocalRandom.current().nextInt();
+                const length = buffer.putIntAscii(index, value);
+                const parsedValue = buffer.parseIntAscii(index, length);
+                // adapted: node:assert instead of expect, which costs seconds over 10,000,000 iterations
+                assert.strictEqual(parsedValue, value);
+            }
+        },
+        ROUND_TRIP_TIMEOUT_MS,
+    );
 
-    it('putLongAsciiRoundTrip', () => {
-        const index = 16;
-        const buffer = newBuffer(64);
+    it(
+        'putLongAsciiRoundTrip',
+        () => {
+            const index = 16;
+            const buffer = newBuffer(64);
 
-        for (let i = 0; i < ROUND_TRIP_ITERATIONS; i++) {
-            // adapted: a random long within +/-(2^53 - 1) with a random number of digits, since a long is a number
-            const value = randomLong();
-            const length = buffer.putLongAscii(index, value);
-            const parsedValue = buffer.parseLongAscii(index, length);
-            assert.strictEqual(parsedValue, value);
-        }
-    }, 120_000);
+            for (let i = 0; i < ROUND_TRIP_ITERATIONS; i++) {
+                // adapted: the full range of a Java long, as a bigint: putLongAscii takes a number, so a value outside
+                // +/-(2^53 - 1) is written as its digits and parseLongAscii throws LongOverflowError carrying it
+                const value = randomJavaLong(i);
+                if (isSafe(value)) {
+                    const length = buffer.putLongAscii(index, Number(value));
+                    const parsedValue = buffer.parseLongAscii(index, length);
+                    assert.strictEqual(parsedValue, Number(value));
+                } else {
+                    const length = buffer.putStringWithoutLengthAscii(index, String(value));
+                    assert.throws(
+                        () => buffer.parseLongAscii(index, length),
+                        (e: unknown) => e instanceof LongOverflowError && e.value === value,
+                    );
+                }
+            }
+        },
+        ROUND_TRIP_TIMEOUT_MS,
+    );
 
-    it('putNaturalIntAsciiRoundTrip', () => {
-        const index = 8;
-        const buffer = newBuffer(64);
+    it(
+        'putNaturalIntAsciiRoundTrip',
+        () => {
+            const index = 8;
+            const buffer = newBuffer(64);
 
-        for (let i = 0; i < ROUND_TRIP_ITERATIONS; i++) {
-            const value = ThreadLocalRandom.current().nextInt(0, Integer.MAX_VALUE);
-            const length = buffer.putNaturalIntAscii(index, value);
-            const parsedValue = buffer.parseNaturalIntAscii(index, length);
-            assert.strictEqual(parsedValue, value);
-        }
-    }, 120_000);
+            for (let i = 0; i < ROUND_TRIP_ITERATIONS; i++) {
+                const value = ThreadLocalRandom.current().nextInt(0, Integer.MAX_VALUE);
+                const length = buffer.putNaturalIntAscii(index, value);
+                const parsedValue = buffer.parseNaturalIntAscii(index, length);
+                assert.strictEqual(parsedValue, value);
+            }
+        },
+        ROUND_TRIP_TIMEOUT_MS,
+    );
 
-    it('putNaturalLongAsciiRoundTrip', () => {
-        const index = 12;
-        const buffer = newBuffer(64);
+    it(
+        'putNaturalLongAsciiRoundTrip',
+        () => {
+            const index = 12;
+            const buffer = newBuffer(64);
 
-        for (let i = 0; i < ROUND_TRIP_ITERATIONS; i++) {
-            // adapted: a random natural long below Long.MAX_VALUE (2^53 - 1) with a random number of digits
-            const value = Math.abs(randomLong());
-            const length = buffer.putNaturalLongAscii(index, value);
-            const parsedValue = buffer.parseNaturalLongAscii(index, length);
-            assert.strictEqual(parsedValue, value);
-        }
-    }, 120_000);
+            for (let i = 0; i < ROUND_TRIP_ITERATIONS; i++) {
+                // adapted: as putLongAsciiRoundTrip, for a random long in [0, Long.MAX_VALUE) of Java
+                const value = BigInt.asUintN(63, randomJavaLong(i));
+                if (isSafe(value)) {
+                    const length = buffer.putNaturalLongAscii(index, Number(value));
+                    const parsedValue = buffer.parseNaturalLongAscii(index, length);
+                    assert.strictEqual(parsedValue, Number(value));
+                } else {
+                    const length = buffer.putStringWithoutLengthAscii(index, String(value));
+                    assert.throws(
+                        () => buffer.parseNaturalLongAscii(index, length),
+                        (e: unknown) => e instanceof LongOverflowError && e.value === value,
+                    );
+                }
+            }
+        },
+        ROUND_TRIP_TIMEOUT_MS,
+    );
 
     it.each([11, 64, 1011])('setMemory %s', (length) => {
         const index = 2;
@@ -436,11 +477,8 @@ export function mutableDirectBufferTests(newBuffer: (capacity: number) => Mutabl
     });
 }
 
-/** A random long in +/-(2^53 - 1) with a random number of digits. */
-function randomLong(): number {
-    const random =
-        (ThreadLocalRandom.current().nextInt() >> 11) * 4294967296 + (ThreadLocalRandom.current().nextInt() >>> 0);
-    return Math.trunc(random / 2 ** (ThreadLocalRandom.current().nextInt() & 31));
+function isSafe(value: bigint): boolean {
+    return value >= -BigInt(Long.MAX_VALUE) && value <= BigInt(Long.MAX_VALUE);
 }
 
 function valuesAndLengths(): [number, number][] {

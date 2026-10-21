@@ -18,7 +18,14 @@
 // Port of org/agrona/SystemUtil.java @ Agrona 2.6.1
 import { AsciiEncoding } from './AsciiEncoding.js';
 import { Strings } from './Strings.js';
-import { Character, IllegalArgumentException, Long, NumberFormatException, TimeUnit } from './jdk.js';
+import {
+    Character,
+    IllegalArgumentException,
+    LongOverflowError,
+    longToNumber,
+    NumberFormatException,
+    TimeUnit,
+} from './jdk.js';
 
 /**
  * Utilities for inspecting the system.
@@ -27,9 +34,11 @@ export class SystemUtil {
     private static readonly ONE_GIGABYTE = 1024 * 1024 * 1024;
     private static readonly ONE_MEGABYTE = 1024 * 1024;
     private static readonly ONE_KILOBYTE = 1024;
-    private static readonly MAX_G_VALUE = Math.floor(Long.MAX_VALUE / SystemUtil.ONE_GIGABYTE);
-    private static readonly MAX_M_VALUE = Math.floor(Long.MAX_VALUE / SystemUtil.ONE_MEGABYTE);
-    private static readonly MAX_K_VALUE = Math.floor(Long.MAX_VALUE / SystemUtil.ONE_KILOBYTE);
+    // the bounds are Java's, on the full 64-bit long, as bigints; a result outside +/-(2^53 - 1) is a LongOverflowError
+    private static readonly JAVA_LONG_MAX_VALUE = 2n ** 63n - 1n;
+    private static readonly MAX_G_VALUE = SystemUtil.JAVA_LONG_MAX_VALUE / BigInt(SystemUtil.ONE_GIGABYTE);
+    private static readonly MAX_M_VALUE = SystemUtil.JAVA_LONG_MAX_VALUE / BigInt(SystemUtil.ONE_MEGABYTE);
+    private static readonly MAX_K_VALUE = SystemUtil.JAVA_LONG_MAX_VALUE / BigInt(SystemUtil.ONE_KILOBYTE);
 
     private static readonly ONE_MICROSECOND_NS = 1_000;
     private static readonly ONE_MILLISECOND_NS = SystemUtil.ONE_MICROSECOND_NS * 1000;
@@ -55,7 +64,7 @@ export class SystemUtil {
             return AsciiEncoding.parseLongAscii(propertyValue, 0, propertyValue.length);
         }
 
-        const value = AsciiEncoding.parseLongAscii(propertyValue, 0, suffixIndex);
+        const value = SystemUtil.parseLong(propertyValue, 0, suffixIndex);
 
         switch (String.fromCharCode(lastCharacter)) {
             case 'k':
@@ -63,21 +72,21 @@ export class SystemUtil {
                 if (value > SystemUtil.MAX_K_VALUE) {
                     throw new NumberFormatException(propertyName + ' would overflow a long: ' + propertyValue);
                 }
-                return value * SystemUtil.ONE_KILOBYTE;
+                return longToNumber(value * BigInt(SystemUtil.ONE_KILOBYTE));
             }
             case 'm':
             case 'M': {
                 if (value > SystemUtil.MAX_M_VALUE) {
                     throw new NumberFormatException(propertyName + ' would overflow a long: ' + propertyValue);
                 }
-                return value * SystemUtil.ONE_MEGABYTE;
+                return longToNumber(value * BigInt(SystemUtil.ONE_MEGABYTE));
             }
             case 'g':
             case 'G': {
                 if (value > SystemUtil.MAX_G_VALUE) {
                     throw new NumberFormatException(propertyName + ' would overflow a long: ' + propertyValue);
                 }
-                return value * SystemUtil.ONE_GIGABYTE;
+                return longToNumber(value * BigInt(SystemUtil.ONE_GIGABYTE));
             }
             default:
                 throw new NumberFormatException(propertyName + ': ' + propertyValue + ' should end with: k, m, or g.');
@@ -127,7 +136,7 @@ export class SystemUtil {
      * Parse a string representation of a time duration with an optional suffix of 's', 'ms', 'us', or 'ns' to
      * indicate seconds, milliseconds, microseconds, or nanoseconds respectively.
      * <p>
-     * If the resulting duration is greater than {@link Long#MAX_VALUE} then {@link Long#MAX_VALUE} is used.
+     * If the resulting duration is greater than {@link Long#MAX_VALUE} (here 2^53 - 1) then {@link Long#MAX_VALUE} is used.
      *
      * @param propertyName  associated with the duration value.
      * @param propertyValue to be parsed.
@@ -157,12 +166,12 @@ export class SystemUtil {
             SystemUtil.throwInvalidDurationFormat(propertyName, propertyValue);
         }
 
-        const value = AsciiEncoding.parseLongAscii(propertyValue, 0, suffixIndex);
+        const value = SystemUtil.parseLong(propertyValue, 0, suffixIndex);
 
         switch (String.fromCharCode(suffixStartChar)) {
             case 'n':
             case 'N':
-                return value;
+                return longToNumber(value);
             case 'u':
             case 'U':
                 return TimeUnit.MICROSECONDS.toNanos(value);
@@ -214,6 +223,21 @@ export class SystemUtil {
         }
 
         return durationNs + 'ns';
+    }
+
+    /**
+     * {@link AsciiEncoding.parseLongAscii} as a `bigint`, so that a long outside +/-(2^53 - 1) keeps its value for the
+     * overflow checks of the callers (this is configuration parsing, not a hot path).
+     */
+    private static parseLong(propertyValue: string, index: number, length: number): bigint {
+        try {
+            return BigInt(AsciiEncoding.parseLongAscii(propertyValue, index, length));
+        } catch (e) {
+            if (e instanceof LongOverflowError) {
+                return e.value;
+            }
+            throw e;
+        }
     }
 
     private static validateNonNegative(
