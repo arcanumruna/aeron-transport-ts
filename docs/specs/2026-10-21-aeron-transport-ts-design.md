@@ -96,7 +96,7 @@ They become plain bounded FIFOs (a port of `OneToOneConcurrentArrayQueue` with n
 
 ```
 Node event loop
- ├─ dgram 'message' events ──► UdpTransportPoller receive ring (preallocated slots)
+ ├─ dgram 'message' events ──► per-transport ReceiveRing (bounded) + AgentRunner.wake()
  └─ AgentRunner (setImmediate / timer, IdleStrategy) ──► AgentInvoker.invoke()
         CompositeAgent: DriverConductor.doWork(nowNs)
                         Sender.doWork(nowNs)     — poll control socket ring, send data/setup/heartbeats/RTTM
@@ -110,18 +110,114 @@ Node event loop
   `IdleStrategy` port (`BackoffIdleStrategy`, `SleepingIdleStrategy`, `NoOpIdleStrategy`) mapped onto timers
   when idle. It never busy-spins the event loop. Users may instead call `aeron.doWork()` themselves (the
   `AgentInvoker` API).
+- **Wake-ups (D8).** When idle, the runner sleeps on a timer, and nothing in Aeron's code would wake it early. Three
+  events therefore call `AgentRunner.wake()`, which schedules at most one `setImmediate` per loop turn:
+  - a datagram arriving on any socket;
+  - libuv's send queue draining (the send callback);
+  - a client call through the `Aeron` facade (`offer`, `tryClaim` commit, add or remove publication or
+    subscription, close).
 
-### 4.2 Sockets
-- `UdpChannelTransport` wraps `dgram.Socket` (`udp4` / `udp6`, `reuseAddr`, multicast membership, TTL,
-  `SO_RCVBUF` / `SO_SNDBUF` via `setRecvBufferSize` / `setSendBufferSize`).
-- **Receive:** Aeron polls sockets with `recvfrom`; Node delivers datagrams as events. `UdpTransportPoller` keeps
-  Aeron's `pollTransports()` API. The `'message'` handler copies each datagram into a slot of a preallocated
-  receive ring. `pollTransports()` drains the ring and calls `onFrame`/`onDataPacket` exactly as Aeron's poller
-  calls them. A full ring drops the datagram and increments a counter; Aeron's protocol treats that like any lost
-  packet.
-- **Send:** `socket.send()` is asynchronous and never returns `EAGAIN`. `sendto` therefore always reports the full
-  length as sent (Aeron's success path). The outstanding-send count is tracked so a stuck socket shows up in a
-  counter, the same as Aeron's short-send counter.
+  Otherwise a message would wait up to one sleep period. The ported classes are unchanged; the hooks sit in the
+  transport wrapper and the facade.
+
+### 4.2 UDP I/O model (deviations D1, D2, D7)
+Aeron's driver calls non-blocking `recvfrom` / `sendto` and gets the answer at once. Node has no such calls:
+`dgram` pushes received datagrams as events and hands sends to libuv. This section states what Aeron relies on,
+what Node does (measured, not assumed), and how the port keeps each guarantee. The measurements are kept as
+contract tests (`test/system/dgramContract.test.ts`), so a Node upgrade that changes any of them fails CI.
+
+#### What Aeron's code relies on (Java 1.53.3)
+| # | Guarantee | Where |
+|---|---|---|
+| R1 | Receive is a non-blocking pull of **one datagram per transport per `pollTransports()`**, processed synchronously inside `Receiver.doWork` / `Sender.doWork`, in kernel order per socket. Unread datagrams wait in the kernel; overflow is a kernel drop. | `DataTransportPoller.poll/receive`, `UdpChannelTransport.receive` |
+| R2 | A receive error never stops the agent: `PortUnreachableException` is ignored, anything else goes to the `errorHandler`. | `UdpChannelTransport.receive`, `DataTransportPoller.poll` |
+| S1 | When `send` returns, the bytes have been copied to the kernel or not sent at all. The caller **reuses the buffer at once**: `smBuffer`, `nakBuffer`, `rttMeasurementBuffer`, heartbeat and setup buffers, and the term-buffer view. One `smBuffer` is sent to several addresses in a loop (`sendToAll`). | `SendChannelEndpoint.send`, `ReceiveChannelEndpoint.sendTo`, `MultiSndDestination.send` |
+| S2 | A full socket send buffer makes `send` return 0. The caller counts a **short send** and does not advance (`senderPosition` stays, the heartbeat/setup/resend is retried next cycle). This back-pressure bounds buffering to `SO_SNDBUF`. | `NetworkPublication.sendData/resend/heartbeatMessageCheck`, `SHORT_SENDS` |
+| S3 | A send error returns 0 (treated as a short send): `PortUnreachableException` is ignored, other `IOException`s are counted and logged by `onSendError`. | `SendChannelEndpoint.send`, `UdpChannelTransport.onSendError` |
+| S4 | Bind, connect, multicast membership and socket options happen synchronously when an endpoint opens; a failure throws inside the conductor command and is reported to the client. | `UdpChannelTransport.openDatagramChannel` |
+
+#### What Node 22 `dgram` does (measured)
+| # | Behaviour |
+|---|---|
+| N1 | With the default `lookup`, `send(buf, port, ip)` reads `buf` **after** `send()` returns (the DNS lookup runs on `nextTick`, even for an IP literal). Changing the buffer right after `send()` changed the bytes on the wire. A direct port would corrupt every reused send buffer. |
+| N2 | With a **synchronous `lookup`** option and IP literals, `bind`, `connect` and the send hand-off all run inside the call. When libuv's send queue is empty, Node first tries `uv_udp_try_send`, so the bytes are in the kernel when `send()` returns. |
+| N3 | When the kernel send buffer is full, `send()` does not fail: libuv **queues the datagram without limit**, holding a reference to the caller's buffer (no copy; `req.list = list // Keep reference alive`). 2,000 sends to an off-host address queued 1,997 datagrams (2.8 MB). `getSendQueueCount()` exposes the queue. On loopback the queue never formed. |
+| N4 | Send errors (`EMSGSIZE`, ...) arrive only through the callback, on a later tick; with no callback they are dropped silently. |
+| N5 | On a **connected** socket an ICMP port-unreachable arrives as an `'error'` event (`ECONNREFUSED`, `recvmsg`). With no `'error'` listener the process crashes. Unconnected sockets never see it. |
+| N6 | With a synchronous `lookup`, a bind failure is emitted as `'error'` **inside** `bind()`, and socket options work right after `bind()`. |
+| N7 | Each `'message'` brings a newly allocated `Buffer` and `rinfo` that the handler owns. libuv delivers them in bursts (32, then 160 in one loop turn), never during synchronous JS. |
+| N8 | `close()` cancels queued sends (their callbacks get `ECANCELED`). |
+
+#### Design
+**Sockets (S4, N2, N5, N6).** Every socket is created with a synchronous `lookup` that accepts IP literals only, so
+`bind`, `connect`, membership and options are synchronous, as in Java. An `'error'` listener is attached before
+`bind`. A bind error raised inside `bind()` is caught and rethrown from `openDatagramChannel`, so the conductor sees
+the same exception at the same point. Host names never reach a socket (see D7).
+
+**Receive (R1, R2, N7) — D1.** Each `UdpChannelTransport` owns a `ReceiveRing`: a fixed array of slots
+(`Buffer` reference, length, source address), with a slot cap and a byte budget equal to the channel's `SO_RCVBUF`.
+- The `'message'` handler only stores the reference (no copy, N7) and wakes the agent runner (§4.1). When the ring
+  is full it drops the datagram and increments a new `RECEIVE_RING_DROPS` system counter. The kernel buffer plus the
+  ring is at most twice `SO_RCVBUF`, never unbounded, and a drop there is the same event as a kernel drop in Java.
+- `UdpChannelTransport.receive(byteBuffer)` keeps Aeron's signature. It pops one slot, copies the datagram into
+  the poller's preallocated receive buffer (the same buffer Java receives into) and returns the source address. The
+  ported `DataTransportPoller` / `ControlTransportPoller` code is unchanged: one datagram per transport per poll,
+  frames dispatched inside `doWork`, in socket order.
+- Source addresses are `InetSocketAddress` objects interned per transport by `(ip, port)`, so a peer always yields
+  the same instance (Aeron stores and compares them) and steady traffic allocates nothing. The intern table is
+  bounded.
+- `'error'` events: `ECONNREFUSED` is ignored (Java ignores `PortUnreachableException`); any other error is held
+  on the transport and handed to the `errorHandler` at the next poll, inside the agent's duty cycle.
+- `close()` closes the socket and clears the ring, as closing a Java channel discards unread datagrams.
+
+**Send (S1–S3, N1, N3, N4, N8) — D2.** `UdpChannelTransport` gets one preallocated **send slot**
+(`MAX_UDP_PAYLOAD_LENGTH` bytes) and one preallocated completion callback per socket. `send` /`sendTo` becomes:
+1. If `socket.getSendQueueCount() > 0`, return 0. This is Java's `EAGAIN`: the caller counts a short send and
+   retries next cycle (S2). It also caps libuv's queue at **one datagram per socket**.
+2. Copy the datagram into the send slot.
+3. `socket.send(slot, 0, length, [port, ip,] onSendComplete)`.
+4. Return `length`.
+
+Why this holds:
+- **S1 holds for every caller buffer.** Node only ever references the send slot, and step 1 ensures the slot is
+  never overwritten while libuv still holds it (N3). Aeron's reused buffers (`smBuffer` looped over
+  destinations, the term buffer) are safe to change as soon as `send` returns.
+- **S2 holds.** Buffering is bounded to `SO_SNDBUF` + one datagram, and short sends, `SHORT_SENDS` and the sender's
+  no-advance path behave as in Java. For MDC, a short send to one destination gives the same result as in Java:
+  nothing advances and next cycle sends to every destination again.
+- **S3 holds, with one recorded difference.** `onSendComplete(err)` ignores `ECONNREFUSED` and `ECANCELED`. Any
+  other error is held on the transport and reported through `onSendError` at the next duty cycle. The difference:
+  Java learns of the error synchronously and retries that datagram, while the port has already reported it as
+  sent, so the datagram counts as lost. The protocol recovers it as any other loss: NAK and retransmit for data;
+  SM, NAK, setup, heartbeat and RTTM are all re-sent on timers. An error that repeats every time (for example
+  `EMSGSIZE`) shows as a rising error count, just as Java shows a rising short-send count.
+- **Cost.** One `memcpy` of at most one MTU per datagram, plus whatever `dgram` allocates internally per call
+  (§5.3).
+
+**Rejected alternatives.**
+- *Fire-and-forget `send` (the first draft):* buffers are corrupted (N1, N3) and the queue is unbounded (N3).
+- *A fresh `Buffer` per send:* correct, but allocates per datagram; the slot plus the queue rule gives the same
+  safety without allocating.
+- *Calling Node's internal UDP handle* (`handle.send` returns the synchronous result): it is not a public API.
+- *Dispatching frames straight from the `'message'` handler:* no re-entrancy risk, but frames would be processed
+  outside the receiver's duty cycle (before its SM/NAK and liveness steps). That breaks R1's one-per-transport
+  pacing and makes the ported poller code diverge.
+- *A native add-on (`recvmmsg` / `sendmmsg`):* out of scope (no native add-ons).
+
+**Tests for this design** (phase 2, before `UdpChannelTransport` is ported):
+- `dgramContract.test.ts` asserts N1–N8. N3 needs a route off the host and is skipped, with the reason logged, when
+  the network has none.
+- `UdpChannelTransport` unit tests:
+  - a buffer changed after `send` arrives unchanged, on both the synchronous and the queued path (the queued path
+    uses an injected socket whose queue count is held at 1);
+  - a send while the queue is non-empty returns 0 and the slot is untouched;
+  - deferred errors reach the `errorHandler` at the next poll, and `ECONNREFUSED` / `ECANCELED` never do;
+  - a ring overflow drops and counts;
+  - one datagram per transport per poll;
+  - `close()` clears the ring;
+  - a bind failure throws synchronously.
+- A `NetworkPublication` / `Sender` test with a socket that short-sends for N cycles asserts that `senderPosition`
+  holds, `SHORT_SENDS` counts N, and no byte is lost or duplicated at the receiver.
 
 ### 4.3 The in-process `Aeron` facade
 `Aeron.addPublication(channel, streamId)`, `addExclusivePublication`, `addSubscription(channel, streamId,
@@ -174,9 +270,13 @@ These are ported as they are, with the same states, transitions and timeouts.
 ### 5.3 Hot path (allocation discipline)
 On the per-frame paths (`offer`, sender scan and send, receiver `onDataPacket` → `TermRebuilder.insert`, image
 `poll`, SM and NAK handling) the port allocates nothing per message. Buffers, flyweights, receive-ring slots and
-send scratch are preallocated, and no closure is created per frame. The one unavoidable allocation is the `Buffer`
-that Node's `dgram` creates for each received datagram. It is copied into the ring slot straight away and dropped.
-This is recorded as deviation D1 (§6).
+send scratch are preallocated, and no closure is created per frame. Node's
+`dgram` itself allocates per datagram, and the port cannot avoid it without native code:
+- on receive, the `Buffer` and `rinfo` of each `'message'`;
+- on send, a `SendWrap`, a one-element list, a `Buffer` view and a `nextTick` entry per `send()`.
+
+The port's own code allocates nothing per datagram. The benches report allocations per message, so the `dgram`
+floor stays visible (§4.2).
 
 ### 5.4 TypeScript paradigm, Java logic
 The code is the Java code expressed in TypeScript, not a redesign. The same classes, fields, branches, loops and
@@ -196,12 +296,14 @@ Any deviation outside this list is a bug in the port.
 
 | # | Deviation | Reason |
 |---|---|---|
-| D1 | Receive is event-driven into a preallocated ring, then polled (§4.2); one `Buffer` allocation per datagram by `dgram`. | Node has no synchronous `recvfrom`. |
-| D2 | `sendto` never partially sends or returns `EAGAIN`; an outstanding-send counter replaces the short-send path. | `dgram.send` is asynchronous. |
+| D1 | Receive: `'message'` events fill a bounded per-transport ring (byte budget = `SO_RCVBUF`, overflow counted in `RECEIVE_RING_DROPS`); `receive()` pops one datagram per poll into the same receive buffer as Java (§4.2). | Node has no synchronous `recvfrom`. |
+| D2 | Send: copy into a per-socket send slot; a non-empty libuv send queue returns 0 (Java's `EAGAIN` / short send); asynchronous send errors are reported at the next duty cycle and count as a lost datagram (§4.2). | `dgram.send` is asynchronous, queues without limit and keeps a reference to the buffer. |
 | D3 | `INVOKER` threading only; `DEDICATED` / `SHARED` / `SHARED_NETWORK` are not offered. | One JS thread. (Worker threads may be added later.) |
 | D4 | Log buffers and counters live in memory; no CnC or `.logbuffer` files. | No external driver process. |
 | D5 | Positions are capped at 2^53 − 1 instead of Aeron's term-count limit. | JS `number`; `bigint` on the hot path is too slow. |
 | D6 | Socket options Node cannot set (`SO_TIMESTAMP`, `IP_MULTICAST_IF` by index on some platforms, `IP_PMTUDISC`) are ignored with a counter. | Not exposed by `dgram`. |
+| D7 | Host names are resolved with `dns.lookup` before a command reaches the conductor (the `Aeron` facade's add calls return promises), and periodic re-resolution delivers its result back to the conductor as a command. Sockets only ever see IP literals. | Java's resolver blocks the conductor; Node's is asynchronous. |
+| D8 | `AgentRunner.wake()` on datagram arrival, send-queue drain and facade calls (§4.1). | A timer-based idle sleep must not delay I/O. |
 
 ## 7. Code layout and tooling
 ```
@@ -217,7 +319,7 @@ aeron-transport-ts/
   bench/...                 latency and throughput benches
   docs/specs, docs/plans, docs/mapping.md
 ```
-- TypeScript 5.x with `strict` and `noUncheckedIndexedAccess`; ESM; Node ≥ 22; no runtime dependencies.
+- TypeScript 6.x with `strict` and `noUncheckedIndexedAccess`; ESM; Node ≥ 22; no runtime dependencies.
 - Test runner: **vitest**. `describe` matches the Java class, `it` / `it.each` matches each `@Test` /
   `@ParameterizedTest`, and Mockito becomes `vi.fn()` / hand-written fakes with the same verifications.
 - Lint and format: eslint + prettier. CI runs typecheck, lint and unit tests, then interop against the C driver
