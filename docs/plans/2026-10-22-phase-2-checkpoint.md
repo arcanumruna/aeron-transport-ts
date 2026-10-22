@@ -18,6 +18,7 @@ Owner rule: 64-bit values keep Aeron's exact layout and true 64-bit semantics (n
 | T5 | Epoch-nanos halves (D17), hash sets, error log | merged |
 | T8 | `jdkNet` stand-ins (D20): `InetAddress`, `InetSocketAddress`, `NetworkInterface` | merged (4180569) |
 | T9 | `UdpChannel`, `ControlMode`, `InvalidChannelException` | merged (e43d6d2) |
+| T6 | Command flyweights, CnC layout, client status (`receiverId`/`groupTag` as `bigint`) | merged (29105c6) |
 | — | Flaky allocation-test fix (consumer closure hoisted out of the measured loop) | merged (b59d4d9) |
 
 Run all checks after every merge:
@@ -31,10 +32,9 @@ The WIP snapshots were taken while the agents were still working. Treat them as 
 |---|---|---|---|
 | `wip/t2b-stripes` | T2b: true 64-bit atomics on shared buffers via a 1024-stripe lock table (D16) | Review done; fix round in progress (fast path, spin cap with a test-only setter, kill tests, allocation at 2^40, D16 text, bench) | Finish the fixes, verify, merge **first**, close #10 with the SHA |
 | `wip/t3-reviewed` | T3: bench gate (PASS / FAIL / NO_VERDICT, exit codes 0/1/2/3), `releaseFence` (D21), large-position allocation tests | Reviewed and fixed (d72ed58) | Merge after T2b. Resolve where D21 goes (after D20). Check the 20 `SharedNoAllocation` tests turn green, tighten `LARGE_POSITION_HEAP_NUMBERS`, run `bench:gate` on an idle host (exit 3 means a loaded host) |
-| `wip/t6-commands` | T6: command flyweights, CnC layout, client status | Review done; fix round in progress (bigint `receiverId`/`groupTag`, §5.2/D5/D20 text, `| 0` wraps, SAB allocation tests, kill tests) | Verify the fixes, then merge |
-| `wip/t7a-status` | T7a: driver `status/*`, `DutyCycleTracker`, `ThreadingMode`, `DriverManagedResource`, `SessionKey`, full `AeronCounters`, `DutyCycleStallTrackerTest`; splits the plan into T7a/T7b | Implementation in progress, not yet reviewed | Opus review, fix round, merge. On the `AeronCounters.ts` conflict with T6, keep T7a's full file |
+| `wip/t7a-status` | T7a: driver `status/*`, `DutyCycleTracker`, `ThreadingMode`, `DriverManagedResource`, `SessionKey`, full `AeronCounters`, `DutyCycleStallTrackerTest`; splits the plan into T7a/T7b | Implementation in progress, not yet reviewed | Opus review, fix round, merge. On the `AeronCounters.ts` add/add conflict with the merged T6, keep T7a's full file |
 
-Merge order: T2b → T3 → T6 → T7a.
+Merge order: T2b → T3 → T7a.
 
 ## Not started (dependency order)
 
