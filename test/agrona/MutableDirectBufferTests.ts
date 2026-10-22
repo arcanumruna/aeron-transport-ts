@@ -32,6 +32,8 @@ import type { MutableDirectBuffer } from '../../src/agrona/MutableDirectBuffer.j
 import { assertEqualsObject, assertNotEqualsObject, assertThrowsExactly } from '../support/Assertions.js';
 import { ITERATIONS_SCALE, ROUND_TRIP_TIMEOUT_MS } from '../support/Iterations.js';
 import { mock } from '../support/Mockito.js';
+import type { Backing } from '../support/Backing.js';
+import { ARRAY_BACKING } from '../support/Backing.js';
 import { randomJavaLong, sampledJavaLong } from '../support/Random.js';
 
 const ROUND_TRIP_ITERATIONS = 10_000_000 / ITERATIONS_SCALE;
@@ -45,8 +47,12 @@ const toByte = (value: number): number => (value << 24) >> 24;
  * Base class containing a common set of tests for {@link MutableDirectBuffer} implementations.
  *
  * @param newBuffer allocate a new buffer with the specified capacity.
+ * @param backing    the store of the destination buffers of the tests that make their own (spec D16).
  */
-export function mutableDirectBufferTests(newBuffer: (capacity: number) => MutableDirectBuffer): void {
+export function mutableDirectBufferTests(
+    newBuffer: (capacity: number) => MutableDirectBuffer,
+    backing: Backing = ARRAY_BACKING,
+): void {
     it('shouldThrowExceptionWhenOutOfBounds', () => {
         const buffer = newBuffer(10);
         const index = buffer.capacity();
@@ -351,7 +357,7 @@ export function mutableDirectBufferTests(newBuffer: (capacity: number) => Mutabl
 
     // adapted: ExpandableArrayBuffer and ExpandableDirectByteBuffer are not ported, and the UnsafeBuffers over a heap
     // and a direct ByteBuffer are over an ArrayBuffer
-    it.each(mutableBuffers())('getBytesShouldCopyIntoDestinationBuffer %s', (dest) => {
+    it.each(mutableBuffers(backing))('getBytesShouldCopyIntoDestinationBuffer %s', (dest) => {
         const srcIndex = 20;
         const dstIndex = 13;
         const length = 49;
@@ -368,7 +374,7 @@ export function mutableDirectBufferTests(newBuffer: (capacity: number) => Mutabl
     });
 
     // adapted: same rows as getBytesShouldCopyIntoDestinationBuffer
-    it.each(mutableBuffers())('putBytesShouldCopyBytesFromTheSourceBuffer %s', (src) => {
+    it.each(mutableBuffers(backing))('putBytesShouldCopyBytesFromTheSourceBuffer %s', (src) => {
         const srcIndex = 13;
         const dstIndex = 6;
         const length = 28;
@@ -530,6 +536,6 @@ function nonParsableLongValues(): [string, number][] {
     ];
 }
 
-function mutableBuffers(): MutableDirectBuffer[] {
-    return [new UnsafeBuffer(new Uint8Array(64)), new UnsafeBuffer(new ArrayBuffer(64))];
+function mutableBuffers(backing: Backing): MutableDirectBuffer[] {
+    return [new UnsafeBuffer(backing.bytes(64)), new UnsafeBuffer(backing.arrayBuffer(64))];
 }

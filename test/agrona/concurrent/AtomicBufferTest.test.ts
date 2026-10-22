@@ -18,13 +18,12 @@
 // Port of org/agrona/concurrent/AtomicBufferTest.java @ Agrona 2.6.1
 import { describe, expect, it } from 'vitest';
 import { BitUtil } from '../../../src/agrona/BitUtil.js';
-import { BufferUtil } from '../../../src/agrona/BufferUtil.js';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { Byte, ByteOrder, Integer, Short } from '../../../src/agrona/jdk.js';
+import { BACKINGS } from '../../support/Backing.js';
 import { ByteBuffer } from '../../support/ByteBuffer.js';
 
 const { SIZE_OF_LONG } = BitUtil;
-const { allocateDirectAligned } = BufferUtil;
 const { BIG_ENDIAN, LITTLE_ENDIAN, nativeOrder } = ByteOrder;
 
 const US_ASCII = new TextEncoder();
@@ -37,7 +36,7 @@ function newUnsafeBuffer(buffer: ByteBuffer): UnsafeBuffer {
     return new UnsafeBuffer(buffer.arrayBuffer(), buffer.arrayOffset(), buffer.capacity());
 }
 
-describe('AtomicBufferTest', () => {
+describe.each(BACKINGS)('AtomicBufferTest over $name', (backing) => {
     const BUFFER_CAPACITY = 64;
     const INDEX = 8;
 
@@ -432,7 +431,7 @@ describe('AtomicBufferTest', () => {
     });
 
     it('verifyIntOpaqueOperations', () => {
-        const unsafeBuffer = new UnsafeBuffer(new Uint8Array(4));
+        const unsafeBuffer = new UnsafeBuffer(backing.bytes(4));
         const index = 0;
         expect(unsafeBuffer.getIntOpaque(index)).toBe(0);
         unsafeBuffer.putIntOpaque(index, 10);
@@ -442,7 +441,7 @@ describe('AtomicBufferTest', () => {
     });
 
     it('verifyIntReleaseAcquireOperations', () => {
-        const unsafeBuffer = new UnsafeBuffer(new Uint8Array(4));
+        const unsafeBuffer = new UnsafeBuffer(backing.bytes(4));
         const index = 0;
         expect(unsafeBuffer.getIntAcquire(index)).toBe(0);
         unsafeBuffer.putIntRelease(index, 10);
@@ -452,7 +451,7 @@ describe('AtomicBufferTest', () => {
     });
 
     it('verifyLongOpaqueOperations', () => {
-        const unsafeBuffer = new UnsafeBuffer(new Uint8Array(8));
+        const unsafeBuffer = new UnsafeBuffer(backing.bytes(8));
         const index = 0;
         expect(unsafeBuffer.getLongOpaque(index)).toBe(0);
         unsafeBuffer.putLongOpaque(index, 10);
@@ -462,7 +461,7 @@ describe('AtomicBufferTest', () => {
     });
 
     it('verifyLongReleaseAcquireOperations', () => {
-        const unsafeBuffer = new UnsafeBuffer(new Uint8Array(8));
+        const unsafeBuffer = new UnsafeBuffer(backing.bytes(8));
         const index = 0;
         expect(unsafeBuffer.getLongAcquire(index)).toBe(0);
         unsafeBuffer.putLongRelease(index, 10);
@@ -489,14 +488,14 @@ describe('AtomicBufferTest', () => {
 
     function nativeBuffers(): ByteBuffer[] {
         return [
-            ByteBuffer.allocate(BUFFER_CAPACITY).order(LITTLE_ENDIAN),
-            ByteBuffer.allocateDirect(BUFFER_CAPACITY).order(BIG_ENDIAN),
-            sliceBuffer(ByteBuffer.allocate(BUFFER_CAPACITY * 2).position(BUFFER_CAPACITY)),
+            ByteBuffer.allocate(BUFFER_CAPACITY, backing.shared).order(LITTLE_ENDIAN),
+            ByteBuffer.allocateDirect(BUFFER_CAPACITY, backing.shared).order(BIG_ENDIAN),
+            sliceBuffer(ByteBuffer.allocate(BUFFER_CAPACITY * 2, backing.shared).position(BUFFER_CAPACITY)),
         ];
     }
 
     function atomicBuffers(): ByteBuffer[] {
         // adapted: allocateDirectAligned returns an ArrayBuffer, which the ByteBuffer stand-in wraps
-        return [ByteBuffer.wrap(allocateDirectAligned(BUFFER_CAPACITY, SIZE_OF_LONG)).order(nativeOrder())];
+        return [ByteBuffer.wrap(backing.aligned(BUFFER_CAPACITY, SIZE_OF_LONG)).order(nativeOrder())];
     }
 });
