@@ -679,12 +679,27 @@ describe('DutyCycleTracker and DutyCycleStallTracker', () => {
         expect(exceeded.get()).toBe(1);
         expect(f.manager.getCounterValue(max.id())).toBe(7);
 
-        // stored: the next duration is from T0 + 100
-        const again = new DutyCycleStallTracker(f.manager.newCounter('max2'), exceeded, 10);
-        again.update(T0 + 100);
-        again.measureAndUpdate(T0 + 109);
-        expect(exceeded.get()).toBe(1);
         expect(tracker.toString()).toContain('DutyCycleStallTracker{maxCycleTime=AtomicCounter{');
+    });
+
+    // Mutation: the time stored only when the max counter is open (inside the isClosed() guard).
+    it('a closed max counter still stores the time of the update', () => {
+        const f = newFixture(ARRAY_BACKING);
+        const max = f.manager.newCounter('max');
+        const durations: number[] = [];
+        const tracker = new (class extends DutyCycleStallTracker {
+            public override reportMeasurement(durationNs: number): void {
+                durations.push(durationNs);
+                super.reportMeasurement(durationNs);
+            }
+        })(max, f.manager.newCounter('exceeded'), 10);
+        tracker.update(T0);
+
+        max.close();
+        tracker.measureAndUpdate(T0 + 100);
+        tracker.measureAndUpdate(T0 + 109);
+
+        expect(durations).toEqual([100, 9]);
     });
 
     // Mutation: the accessors return the wrong counter, or the constructor stores the arguments swapped.

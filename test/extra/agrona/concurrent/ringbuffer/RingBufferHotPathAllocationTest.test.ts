@@ -27,8 +27,8 @@ type Case = 'writeAndRead' | 'tryClaimCommitAndRead' | 'tryClaimAbortAndRead' | 
 /**
  * Interim allowances of the `LargePosition` cases: the heap numbers per iteration (write + read, claim + commit + read
  * and so on) that a case may allocate, each the minimum bound that passes over an ArrayBuffer (many-to-one measures 4
- * or 5 depending on how V8 inlines the loop, so 5; one-to-one 4; `size`, the positions and the heartbeat: 3 for
- * many-to-one, 4 for one-to-one). They are caused by the `long` paths of `jdk.ts` and `UnsafeBuffer`, which box a position above 2^31 across calls that are not
+ * or 5 depending on how V8 inlines the loop, so 5; one-to-one 4; `size`, the positions and the heartbeat: 4, as
+ * many-to-one measures 3 or 4 depending on the inlining). They are caused by the `long` paths of `jdk.ts` and `UnsafeBuffer`, which box a position above 2^31 across calls that are not
  * inlined; both are owned by T2b, whose fix round drives these numbers down to 0 (issue #19, heap numbers at large
  * positions). The SharedArrayBuffer cases use the same bounds, except where `SHARED_LARGE_POSITION_HEAP_NUMBERS`
  * overrides them.
@@ -39,7 +39,7 @@ export const LARGE_POSITION_HEAP_NUMBERS: Readonly<Record<'many-to-one' | 'one-t
         tryClaimCommitAndRead: 5,
         tryClaimAbortAndRead: 5,
         controlledRead: 5,
-        sizeAndPositions: 3,
+        sizeAndPositions: 4,
     },
     'one-to-one': {
         writeAndRead: 4,
