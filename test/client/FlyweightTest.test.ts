@@ -18,6 +18,7 @@
 // Port of io/aeron/FlyweightTest.java @ 1.53.3
 import { beforeEach, describe, expect, it } from 'vitest';
 import { UnsafeBuffer } from '../../src/agrona/concurrent/UnsafeBuffer.js';
+import { PublicationMessageFlyweight } from '../../src/client/command/PublicationMessageFlyweight.js';
 import { DataHeaderFlyweight } from '../../src/client/protocol/DataHeaderFlyweight.js';
 import { HeaderFlyweight } from '../../src/client/protocol/HeaderFlyweight.js';
 import { NakFlyweight } from '../../src/client/protocol/NakFlyweight.js';
@@ -33,6 +34,8 @@ describe('Flyweight', () => {
     let decodeDataHeader: DataHeaderFlyweight;
     let encodeNakHeader: NakFlyweight;
     let decodeNakHeader: NakFlyweight;
+    let encodePublication: PublicationMessageFlyweight;
+    let decodePublication: PublicationMessageFlyweight;
 
     beforeEach(() => {
         const arrayBuffer = new ArrayBuffer(512);
@@ -45,6 +48,8 @@ describe('Flyweight', () => {
         decodeDataHeader = new DataHeaderFlyweight();
         encodeNakHeader = new NakFlyweight();
         decodeNakHeader = new NakFlyweight();
+        encodePublication = new PublicationMessageFlyweight();
+        decodePublication = new PublicationMessageFlyweight();
     });
 
     it('shouldWriteCorrectValuesForGenericHeaderFields', () => {
@@ -153,6 +158,14 @@ describe('Flyweight', () => {
         expect(decodeNakHeader.length()).toBe(512);
     });
 
-    // uses the out-of-scope command/PublicationMessageFlyweight
-    it.skip('shouldEncodeAndDecodeChannelsCorrectly', () => {});
+    it('shouldEncodeAndDecodeChannelsCorrectly', () => {
+        encodePublication.wrap(aBuff, 0);
+
+        const channel = 'aeron:udp?endpoint=localhost:4000';
+        encodePublication.channel(channel);
+
+        decodePublication.wrap(aBuff, 0);
+
+        expect(decodePublication.channel()).toBe(channel);
+    });
 });
