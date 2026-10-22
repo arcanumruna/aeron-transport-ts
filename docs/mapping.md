@@ -75,6 +75,10 @@ the counts are current, and every `it.skip` is listed with its reason.
 | `aeron:aeron-client/src/main/java/io/aeron/ErrorCode.java` | `src/client/ErrorCode.ts` | The enum is a class with one `static readonly` instance per constant, in the Java ordinal order, with `name()`, `ordinal()`, `values()`, `toString()`, `value()` and `get(value)`. `ERROR_CODES` is built by a private static method after the constants. |
 | `aeron:aeron-client/src/main/java/io/aeron/Aeron.java` | `src/client/Aeron.ts` | Only `NULL_VALUE`; the rest is in "Not ported" until phase 2. |
 | `aeron:aeron-client/src/main/java/io/aeron/CommonContext.java` | `src/client/CommonContext.ts` | The `static final` string and number constants (every `*_PARAM_NAME`, `*_PROP_NAME`, `*_VALUE`, `UDP_MEDIA`, `IPC_MEDIA`, `SPY_PREFIX`, ...) and the nested enum `InferableBoolean` (with `parse`; it is the exported class `InferableBoolean`, reachable as `CommonContext.InferableBoolean`). Java `long` constants are `number` (D5). The rest of the class is in "Not ported" until phase 2. |
+| `aeron:aeron-client/src/main/java/io/aeron/protocol/HeaderFlyweight.java` | `src/client/protocol/HeaderFlyweight.ts` | Extends `UnsafeBuffer`. The `ByteBuffer` constructor is an `ArrayBuffer` / `Uint8Array` one (spec D9); the `UnsafeBuffer` one is kept. Each getter / setter pair (`version`, `flags`, `headerType`, `frameLength`) is one method with an optional argument, the getter when it is `undefined`; the setters return `HeaderFlyweight` as in Java. `short` and `int` are `number`. `flagsToChars` returns a `string[]` (a `char[]`). `appendFlagsAsChars` has no `IOException` catch: `Appendable.append` throws no checked exception. |
+| `aeron:aeron-client/src/main/java/io/aeron/protocol/DataHeaderFlyweight.java` | `src/client/protocol/DataHeaderFlyweight.ts` | As `HeaderFlyweight`. The static `fragmentLength`, `sessionId(UnsafeBuffer, int)`, `streamId`, `termId`, `termOffset`, `reservedValue` keep their names beside the instance ones of the same name. The reserved value and `DEFAULT_RESERVE_VALUE` are `bigint` (an opaque 64-bit wire value, spec 5.2), read and written little-endian with `getLongBigInt` / `putLongBigInt`. |
+| `aeron:aeron-client/src/main/java/io/aeron/protocol/NakFlyweight.java` | `src/client/protocol/NakFlyweight.ts` | As `HeaderFlyweight`. `isValid` inlines `FrameDescriptor.isFrameAligned` (`FRAME_ALIGNMENT` 32): `FrameDescriptor` is ported in T9, which switches the call. |
+| `aeron:aeron-client/src/main/java/io/aeron/protocol/StatusMessageFlyweight.java` | `src/client/protocol/StatusMessageFlyweight.ts` | As `NakFlyweight`. `receiverId` and `groupTag` are `bigint` (spec 5.2); `groupTag(Long)` takes `bigint \| null`, and `groupTag()` returns `0n` when there is no tag. `getLongUnaligned` and `putLongUnaligned` are one `getLongBigInt` / `putLongBigInt` call, little-endian: the byte-by-byte shifts of Java build the same value, and the big-endian branch (`ByteOrder.nativeOrder() != LITTLE_ENDIAN`) is never taken. |
 
 ## Tests
 
@@ -98,6 +102,10 @@ the counts are current, and every `it.skip` is listed with its reason.
 | `agrona:agrona/src/test/java/org/agrona/concurrent/status/CountersManagerTest.java` | `test/agrona/concurrent/status/CountersManagerTest.test.ts` | 26 | 26 | `InOrder` + `verifyNoMoreInteractions` are an exact `mock.calls` list. |
 | `agrona:agrona/src/test/java/org/agrona/concurrent/status/AtomicCounterTest.java` | `test/agrona/concurrent/status/AtomicCounterTest.test.ts` | 1 | 1 | The `ByteBuffer.allocateDirect` buffer is the `ArrayBuffer` of the test stand-in. |
 | `agrona:agrona/src/test/java/org/agrona/concurrent/status/UnsafeBufferPositionTest.java` | `test/agrona/concurrent/status/UnsafeBufferPositionTest.test.ts` | 5 | 5 | As `AtomicCounterTest`. |
+| `aeron:aeron-client/src/test/java/io/aeron/protocol/HeaderFlyweightTest.java` | `test/client/protocol/HeaderFlyweightTest.test.ts` | 2 | 2 | `StringBuilder` is a small `Appendable` class in the test. |
+| `aeron:aeron-client/src/test/java/io/aeron/protocol/NakFlyweightTest.java` | `test/client/protocol/NakFlyweightTest.test.ts` | 5 | 5 | `TERM_MIN_LENGTH` is a local constant until T9 ports `LogBufferDescriptor`. The flyweight is rebuilt in `beforeEach` (JUnit makes a new instance per test). |
+| `aeron:aeron-client/src/test/java/io/aeron/protocol/StatusMessageFlyweightTest.java` | `test/client/protocol/StatusMessageFlyweightTest.test.ts` | 4 | 4 | As `NakFlyweightTest`. |
+| `aeron:aeron-client/src/test/java/io/aeron/FlyweightTest.java` | `test/client/FlyweightTest.test.ts` | 6 | 6 | 1 skipped. `ByteBuffer.allocate(512)` is an `ArrayBuffer`, read back with an `Int8Array` for `buffer.get(i)`; the `int` literals above 2^31 are `0x... \| 0`. |
 
 ## Skipped tests
 
@@ -134,6 +142,7 @@ the counts are current, and every `it.skip` is listed with its reason.
 | `test/agrona/BufferUtilTest.test.ts` | shouldBoundsCheckByteBufferIndexWithoutLongOverflow | no direct memory / ByteBuffer in JS: `boundsCheck(ByteBuffer, long, int)` is not ported |
 | `test/agrona/concurrent/AgentRunnerTest.test.ts` | shouldInterruptRunnerThreadIfCloseCallIsItselfInterruped | needs a runner thread blocked in `doWork` (`Thread.sleep`) and a second thread that calls `close()` and is interrupted while it joins. A duty cycle on the one JS thread cannot be pre-empted and `close()` has nothing to wait for. The interrupted-caller path is covered by `AgentRunnerExtraTest` (`closeFromAnInterruptedCallerInterruptsTheRunnerAndRestoresTheCallersFlag`). |
 | `test/agrona/concurrent/AgentRunnerTest.test.ts` | shouldInterruptRunnerThreadIfCloseDoesNotCompleteWithinCloseBudget | needs `doWork` to block for `Integer.MAX_VALUE` ms until `close()` times out and interrupts it, twice. A blocking duty cycle would block the event loop and the close timeout cannot expire. |
+| `test/client/FlyweightTest.test.ts` | shouldEncodeAndDecodeChannelsCorrectly | uses the out-of-scope `command/PublicationMessageFlyweight` |
 
 ## Adapted tests
 
@@ -198,6 +207,9 @@ exact to +/-(2^53 - 1) (spec 5.2, D5), so `Long.MAX_VALUE` / `Long.MIN_VALUE` in
 | `test/agrona/concurrent/AgentInvokerTest.test.ts`, `AgentRunnerTest.test.ts`, `CompositeAgentTest.test.ts` | (all) | `mock(Agent.class)` and `mock(ErrorHandler.class)` are the hand fakes of `test/support/MockAgent.ts` (`vi.fn()` per method, `doWork` returns 0); `verify(m).x()` is `toHaveBeenCalledTimes(1)`; `verifyNoMoreInteractions(mockAgent)` is the exact call count of each method, `roleName` included; `reset(mockAgent)` is `resetAgent`. |
 | `test/agrona/concurrent/status/CountersManagerTest.test.ts` | shouldStoreMultipleLabels, shouldFreeAndReuseCounters, shouldStoreMetaData, shouldStoreRawData | `InOrder` with `verifyNoMoreInteractions` is an equality on the whole `mock.calls` list; `ArgumentCaptor` is the argument taken from `mock.calls`. `reader.forEach(metaData)` is `forEachMetaData` (rename). The `0xF_FFFF_FFFFL` value is `0xf_ffff_ffff`. |
 | `test/agrona/concurrent/status/CountersManagerTest.test.ts` | shouldRejectOversizeKeys | `fail(...)` throws an assertion error that the `catch (IllegalArgumentException)` must not swallow, so the catch rethrows anything that is not an `IllegalArgumentException`. |
+| `test/client/FlyweightTest.test.ts` | shouldReadAndWriteDataHeaderCorrectly, shouldEncodeAndDecodeNakCorrectly | The `int` literals `0xdeadbeef` and `0x99887766` are above 2^31, so they are `0xdeadbeef \| 0` and `0x99887766 \| 0` (the same `int`). |
+| `test/client/FlyweightTest.test.ts` | shouldWriteCorrectValuesForGenericHeaderFields | `(byte)0xC0` is `(0xc0 << 24) >> 24` (-64), what `Int8Array` returns for the byte. |
+| `test/client/protocol/NakFlyweightTest.test.ts`, `StatusMessageFlyweightTest.test.ts` | (all) | `LogBufferDescriptor.TERM_MIN_LENGTH` is the local constant `64 * 1024` until T9. |
 
 ## Renames
 
