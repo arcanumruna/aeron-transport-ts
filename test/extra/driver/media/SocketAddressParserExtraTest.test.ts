@@ -2,7 +2,11 @@
 // host names, the port bounds and malformed input, each asserting Java's exception type and message.
 import { afterEach, describe, expect, it } from 'vitest';
 import { AsciiNumberFormatException } from '../../../../src/agrona/AsciiNumberFormatException.js';
-import { IllegalArgumentException, NullPointerException } from '../../../../src/agrona/jdk.js';
+import {
+    IllegalArgumentException,
+    NullPointerException,
+    StringIndexOutOfBoundsException,
+} from '../../../../src/agrona/jdk.js';
 import { DefaultNameResolver } from '../../../../src/driver/DefaultNameResolver.js';
 import { Inet4Address, Inet6Address, InetAddress } from '../../../../src/driver/jdkNet.js';
 import { SocketAddressParser } from '../../../../src/driver/media/SocketAddressParser.js';
@@ -210,5 +214,13 @@ describe('SocketAddressParserExtraTest', () => {
         const e = assertThrowsExactly(IllegalArgumentException, () => SocketAddressParser.isMulticastAddress(value));
 
         expect(e.message).toBe(message);
+    });
+
+    it('failsIsMulticastAddressOfAOneCharacterIpV6HostLikeJavasSubstring', () => {
+        const e = assertThrowsExactly(StringIndexOutOfBoundsException, () =>
+            SocketAddressParser.isMulticastAddress('[:]:1'),
+        );
+
+        expect(e.message).toBe('begin 0, end 2, length 1');
     });
 });

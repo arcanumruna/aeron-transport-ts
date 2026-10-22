@@ -8,6 +8,13 @@ import { NamedInterface } from '../../../../src/driver/media/NamedInterface.js';
 import { UnresolvedInterface } from '../../../../src/driver/media/UnresolvedInterface.js';
 import { assertThrowsExactly } from '../../../support/Assertions.js';
 
+const hostInterfaces = NetworkInterface.getNetworkInterfaces();
+const hasLength = (n: number) => (i: NetworkInterface) =>
+    i.getInterfaceAddresses().some((a) => a.getAddress().getAddress().length === n);
+const ipV4Interface = hostInterfaces.find(hasLength(4));
+const withoutIpV6Interface = hostInterfaces.find((i) => !hasLength(16)(i));
+const ipV4LoopbackInterface = hostInterfaces.find((i) => i.isLoopback() && hasLength(4)(i));
+
 const FORMAT = "expected format is '{interface_name}' or '{interface_name}:port', but got ";
 
 describe('InterfaceSpecExtraTest', () => {
@@ -79,13 +86,9 @@ describe('InterfaceSpecExtraTest', () => {
             expect(e.message).toBe('unknown interface no-such-if0');
         });
 
-        it('resolvesTheFirstAddressOfTheFamilyOfAnInterfaceOfTheHost', () => {
-            const ifc = NetworkInterface.getNetworkInterfaces().find((i) =>
-                i.getInterfaceAddresses().some((a) => a.getAddress().getAddress().length === 4),
-            );
-            if (undefined === ifc) {
-                return; // a host without an IPv4 address
-            }
+        it.skipIf(undefined === ipV4Interface)('resolvesTheFirstAddressOfTheFamilyOfAnInterfaceOfTheHost', () => {
+            // skipped on a host without an IPv4 address
+            const ifc = ipV4Interface as NetworkInterface;
 
             const resolved = new NamedInterface(ifc.getName(), 4321).resolve(false, StandardProtocolFamily.INET);
 
@@ -94,13 +97,9 @@ describe('InterfaceSpecExtraTest', () => {
             expect(resolved.address.getPort()).toBe(4321);
         });
 
-        it('throwsWhenTheInterfaceHasNoAddressOfTheFamily', () => {
-            const ifc = NetworkInterface.getNetworkInterfaces().find(
-                (i) => !i.getInterfaceAddresses().some((a) => a.getAddress().getAddress().length === 16),
-            );
-            if (undefined === ifc) {
-                return; // every interface of the host has an IPv6 address
-            }
+        it.skipIf(undefined === withoutIpV6Interface)('throwsWhenTheInterfaceHasNoAddressOfTheFamily', () => {
+            // skipped on a host where every interface has an IPv6 address
+            const ifc = withoutIpV6Interface as NetworkInterface;
 
             const e = assertThrowsExactly(IllegalStateException, () =>
                 new NamedInterface(ifc.getName(), 0).resolve(false, StandardProtocolFamily.INET6),
@@ -189,15 +188,8 @@ describe('InterfaceSpecExtraTest', () => {
             expect(e.message).toBe('Unable to find multicast or loopback interface matching criteria: /192.0.2.1/32');
         });
 
-        it('findsALoopbackInterfaceOfTheHost', () => {
-            const lo = NetworkInterface.getNetworkInterfaces().find(
-                (i) =>
-                    i.isLoopback() && i.getInterfaceAddresses().some((a) => a.getAddress().getAddress().length === 4),
-            );
-            if (undefined === lo) {
-                return; // a host without an IPv4 loopback interface
-            }
-
+        it.skipIf(undefined === ipV4LoopbackInterface)('findsALoopbackInterfaceOfTheHost', () => {
+            // skipped on a host without an IPv4 loopback interface
             const resolved = InterfaceSearchAddress.parse('127.0.0.1:99/8').resolve(false, StandardProtocolFamily.INET);
 
             expect(resolved.localInterface?.isLoopback()).toBe(true);

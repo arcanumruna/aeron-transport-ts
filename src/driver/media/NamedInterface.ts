@@ -18,7 +18,7 @@
 // Port of io/aeron/driver/media/NamedInterface.java @ 1.53.3
 import { IllegalArgumentException, IllegalStateException, NumberFormatException } from '../../agrona/jdk.js';
 import { Strings } from '../../agrona/Strings.js';
-import { InetSocketAddress, type InterfaceAddress, NetworkInterface, type ProtocolFamily } from '../jdkNet.js';
+import { InetSocketAddress, NetworkInterface, type ProtocolFamily } from '../jdkNet.js';
 import { NetworkUtil } from './NetworkUtil.js';
 import { ResolvedInterface } from './ResolvedInterface.js';
 import type { UnresolvedInterface } from './UnresolvedInterface.js';
@@ -50,7 +50,7 @@ export class NamedInterface implements UnresolvedInterface {
         localInterface: NetworkInterface,
         protocolFamily: ProtocolFamily,
     ): InetSocketAddress {
-        for (const interfaceAddress of localInterface.getInterfaceAddresses() as InterfaceAddress[]) {
+        for (const interfaceAddress of localInterface.getInterfaceAddresses()) {
             const address = interfaceAddress.getAddress();
             if (getProtocolFamily(address) === protocolFamily) {
                 return new InetSocketAddress(address, this.port);

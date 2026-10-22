@@ -17,7 +17,7 @@
  */
 // Port of io/aeron/driver/media/SocketAddressParser.java @ 1.53.3
 import { AsciiEncoding } from '../../agrona/AsciiEncoding.js';
-import { IllegalArgumentException, NullPointerException } from '../../agrona/jdk.js';
+import { IllegalArgumentException, NullPointerException, StringIndexOutOfBoundsException } from '../../agrona/jdk.js';
 import { Strings } from '../../agrona/Strings.js';
 import { InetSocketAddress } from '../jdkNet.js';
 import type { NameResolver } from '../NameResolver.js';
@@ -99,6 +99,9 @@ export class SocketAddressParser {
         } else {
             result = SocketAddressParser.tryParseIpV6(hostAndPort);
             if (null !== result) {
+                if (result.host.length < 2) {
+                    throw new StringIndexOutOfBoundsException('begin 0, end 2, length ' + result.host.length);
+                }
                 const firstByte = result.host.substring(0, 2);
                 return 'ff' === firstByte.toLowerCase();
             }

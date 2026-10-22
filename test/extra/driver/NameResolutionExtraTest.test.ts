@@ -1,8 +1,9 @@
 // Tests that Aeron does not have (spec 8.2): the name cache of DefaultNameResolver (spec D7) and the java.net
-// stand-ins (spec D17) that it and the address parsers stand on.
+// stand-ins (spec D20) that it and the address parsers stand on.
 import { afterEach, describe, expect, it } from 'vitest';
 import { IllegalArgumentException } from '../../../src/agrona/jdk.js';
 import { DefaultNameResolver } from '../../../src/driver/DefaultNameResolver.js';
+import { expectNoAllocation } from '../../support/Allocation.js';
 import {
     Inet4Address,
     Inet6Address,
@@ -10,6 +11,7 @@ import {
     InetSocketAddress,
     UnknownHostException,
 } from '../../../src/driver/jdkNet.js';
+import { SocketAddressParser } from '../../../src/driver/media/SocketAddressParser.js';
 import { assertEqualsObject, assertThrowsExactly } from '../../support/Assertions.js';
 
 const resolver = new DefaultNameResolver();
@@ -28,8 +30,22 @@ describe('NameResolutionExtraTest', () => {
             const address = InetAddress.getByName('203.0.113.5');
             DefaultNameResolver.cache('cached.example', address);
 
-            expect(resolver.resolve('cached.example', 'endpoint', false)).toBe(address);
-            expect(resolver.resolve('cached.example', 'control', true)).toBe(address);
+            assertEqualsObject(address, resolver.resolve('cached.example', 'endpoint', false));
+            expect((resolver.resolve('Cached.Example', 'control', true) as InetAddress).getHostName()).toBe(
+                'Cached.Example',
+            );
+        });
+
+        it('cachedNameKeepsTheHostNameAsTyped', () => {
+            DefaultNameResolver.cache('SomeHost', InetAddress.getByAddress(null, Uint8Array.of(10, 1, 2, 3)));
+            try {
+                const a = SocketAddressParser.parse('somehost:40123', 'endpoint', false, DefaultNameResolver.INSTANCE);
+
+                expect(a.getHostString()).toBe('somehost');
+                expect(a.toString()).toBe('somehost/10.1.2.3:40123');
+            } finally {
+                DefaultNameResolver.clearCache();
+            }
         });
 
         it('ignoresTheCaseOfTheName', () => {
@@ -211,6 +227,74 @@ describe('NameResolutionExtraTest', () => {
             expect(a.hashCode()).toBe(b.hashCode());
             expect(a.equals(InetSocketAddress.createUnresolved('host.example', 81))).toBe(false);
             expect(a.equals(new InetSocketAddress(InetAddress.getByName('10.0.0.1'), 80))).toBe(false);
+        });
+
+        it('resolvesALiteralHostNameInTheTwoArgumentConstructor', () => {
+            const a = new InetSocketAddress('10.1.2.3', 80);
+
+            expect(a.isUnresolved()).toBe(false);
+            expect((a.getAddress() as InetAddress).getHostAddress()).toBe('10.1.2.3');
+            expect(a.getPort()).toBe(80);
+        });
+
+        it('keepsTheHostNameOfAnUncachedNameUnresolved', () => {
+            const a = new InetSocketAddress('uncached.example', 80);
+
+            expect(a.isUnresolved()).toBe(true);
+            expect(a.getHostString()).toBe('uncached.example');
+            expect(a.getAddress()).toBeNull();
+        });
+
+        it('rejectsAPortAboveRangeInTheTwoArgumentConstructor', () => {
+            const e = assertThrowsExactly(IllegalArgumentException, () => new InetSocketAddress('10.1.2.3', 65536));
+
+            expect(e.message).toBe('port out of range:65536');
+        });
+    });
+
+    describe('allocation and memoization', () => {
+        it('equalsOfInet4AddressAllocatesNothing', async () => {
+            const a = InetAddress.getByName('10.1.2.3');
+            const b = InetAddress.getByName('10.1.2.4');
+            let hits = 0;
+
+            await expectNoAllocation((n) => {
+                for (let i = 0; i < n; i++) {
+                    if (a.equals(b)) {
+                        hits++;
+                    }
+                }
+            });
+            expect(hits).toBe(0);
+        });
+
+        it('equalsOfInet6AddressAllocatesNothing', async () => {
+            const a = InetAddress.getByName('2001:db8::1');
+            const b = InetAddress.getByName('2001:db8::2');
+            let hits = 0;
+
+            await expectNoAllocation((n) => {
+                for (let i = 0; i < n; i++) {
+                    if (a.equals(b)) {
+                        hits++;
+                    }
+                }
+            });
+            expect(hits).toBe(0);
+        });
+
+        it.each(['10.1.2.3', '2001:db8::1'])('memoizesTheHostAddressOf %s', async (literal) => {
+            const a = InetAddress.getByName(literal);
+            const first = a.getHostAddress();
+            let length = 0;
+
+            expect(a.getHostAddress()).toBe(first);
+            await expectNoAllocation((n) => {
+                for (let i = 0; i < n; i++) {
+                    length += a.getHostAddress().length;
+                }
+            });
+            expect(length).toBeGreaterThan(0);
         });
     });
 });

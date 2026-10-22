@@ -30,11 +30,6 @@ import type { NameResolverAgent } from './NameResolverAgent.js';
  */
 export class DefaultNameResolver implements NameResolverAgent {
     /**
-     * Singleton instance which can be used to avoid allocation.
-     */
-    public static readonly INSTANCE = new DefaultNameResolver();
-
-    /**
      * Add (or replace) the address of a host name, as `dns.lookup` found it. The name is case-insensitive.
      *
      * @param name    the host name.
@@ -50,6 +45,11 @@ export class DefaultNameResolver implements NameResolverAgent {
     public static clearCache(): void {
         InetAddress.nameCache.clear();
     }
+
+    /**
+     * Singleton instance which can be used to avoid allocation.
+     */
+    public static readonly INSTANCE = new DefaultNameResolver();
 
     /**
      * {@inheritDoc}

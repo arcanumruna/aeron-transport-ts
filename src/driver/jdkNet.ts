@@ -15,7 +15,7 @@
  *
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
-// JDK stand-ins for java.net (spec D17): InetAddress, Inet4Address, Inet6Address, InetSocketAddress, InterfaceAddress,
+// JDK stand-ins for java.net (spec D20): InetAddress, Inet4Address, Inet6Address, InetSocketAddress, InterfaceAddress,
 // NetworkInterface, ProtocolFamily and the exceptions the driver's address code throws and catches.
 import { networkInterfaces } from 'node:os';
 import { Exception, IllegalArgumentException, Integer } from '../agrona/jdk.js';
@@ -357,7 +357,7 @@ export abstract class InetAddress {
 
         const key = host.toLowerCase();
         if ('localhost' === key) {
-            return new Inet4Address('localhost', Uint8Array.of(127, 0, 0, 1));
+            return new Inet4Address(host, Uint8Array.of(127, 0, 0, 1));
         }
 
         const cached = InetAddress.nameCache.get(key);
@@ -365,7 +365,7 @@ export abstract class InetAddress {
             throw new UnknownHostException(host + ': Name or service not known');
         }
 
-        return cached;
+        return cached.withHostName(host);
     }
 
     /** `InetAddress.getByAddress(String, byte[])` (the host name may be null). */
@@ -392,6 +392,9 @@ export abstract class InetAddress {
     }
 
     public abstract getHostAddress(): string;
+
+    /** A copy of this address that holds hostName (what Java's name lookup returns for the name asked for). */
+    public abstract withHostName(hostName: string): InetAddress;
 
     public getHostName(): string {
         return null !== this.hostName ? this.hostName : this.getHostAddress();
@@ -423,12 +426,22 @@ export class Inet4Address extends InetAddress {
         super(address, hostName);
     }
 
+    private hostAddress: string | null = null;
+
     public getHostAddress(): string {
-        return this.address.join('.');
+        if (null === this.hostAddress) {
+            this.hostAddress = this.address.join('.');
+        }
+
+        return this.hostAddress;
+    }
+
+    public withHostName(hostName: string): InetAddress {
+        return new Inet4Address(hostName, this.address);
     }
 
     public isAnyLocalAddress(): boolean {
-        return 0 === this.address.reduce((a, b) => a | b, 0);
+        return allZero(this.address);
     }
 
     public isLoopbackAddress(): boolean {
@@ -440,7 +453,7 @@ export class Inet4Address extends InetAddress {
     }
 
     public equals(other: unknown): boolean {
-        return other instanceof Inet4Address && this.address.every((b, i) => b === other.address[i]);
+        return other instanceof Inet4Address && sameBytes(this.address, other.address);
     }
 
     public hashCode(): number {
@@ -465,7 +478,17 @@ export class Inet6Address extends InetAddress {
         return this.scopeId ?? 0;
     }
 
+    private hostAddress: string | null = null;
+
+    public withHostName(hostName: string): InetAddress {
+        return new Inet6Address(hostName, this.address, this.scopeId, this.scopeIfName);
+    }
+
     public getHostAddress(): string {
+        if (null !== this.hostAddress) {
+            return this.hostAddress;
+        }
+
         const parts: string[] = [];
         for (let i = 0; i < 8; i++) {
             parts.push((((this.address[i << 1] as number) << 8) | (this.address[(i << 1) + 1] as number)).toString(16));
@@ -478,11 +501,12 @@ export class Inet6Address extends InetAddress {
             s += '%' + this.scopeId;
         }
 
+        this.hostAddress = s;
         return s;
     }
 
     public isAnyLocalAddress(): boolean {
-        return 0 === this.address.reduce((a, b) => a | b, 0);
+        return allZero(this.address);
     }
 
     public isLoopbackAddress(): boolean {
@@ -500,7 +524,7 @@ export class Inet6Address extends InetAddress {
     }
 
     public equals(other: unknown): boolean {
-        return other instanceof Inet6Address && this.address.every((b, i) => b === other.address[i]);
+        return other instanceof Inet6Address && sameBytes(this.address, other.address);
     }
 
     public hashCode(): number {
@@ -521,6 +545,26 @@ export class Inet6Address extends InetAddress {
     }
 }
 
+function allZero(address: Uint8Array): boolean {
+    for (let i = 0; i < address.length; i++) {
+        if (0 !== address[i]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+    for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 function checkPort(port: number): number {
     if (port < 0 || port > 0xffff) {
         throw new IllegalArgumentException('port out of range:' + port);
@@ -530,8 +574,7 @@ function checkPort(port: number): number {
 }
 
 /**
- * Stand-in for `java.net.InetSocketAddress`: an address and a port, or (unresolved) a host name and a port. The
- * constructor `(String hostname, int port)` that resolves is not ported; use {@link InetAddress.getByName}.
+ * Stand-in for `java.net.InetSocketAddress`: an address and a port, or (unresolved) a host name and a port.
  */
 export class InetSocketAddress {
     private readonly hostname: string | null;
@@ -540,10 +583,26 @@ export class InetSocketAddress {
 
     /**
      * `new InetSocketAddress(port)` is the wildcard address, `new InetSocketAddress(addr, port)` a resolved one (a null
-     * `addr` is the wildcard). `unresolvedHost` is for {@link createUnresolved} only (Java has a private constructor).
+     * `addr` is the wildcard), `new InetSocketAddress(hostname, port)` resolves the name through
+     * {@link InetAddress.getByName} and is unresolved, keeping the name, when that throws {@link UnknownHostException}.
+     * `unresolvedHost` is for {@link createUnresolved} only (Java has a private constructor).
      */
-    public constructor(portOrAddress: number | InetAddress | null, port?: number, unresolvedHost?: string) {
-        if (undefined !== unresolvedHost) {
+    public constructor(portOrAddress: number | string | InetAddress | null, port?: number, unresolvedHost?: string) {
+        if (typeof portOrAddress === 'string') {
+            let addr: InetAddress | null = null;
+            let host: string | null = null;
+            try {
+                addr = InetAddress.getByName(portOrAddress);
+            } catch (e) {
+                if (!(e instanceof UnknownHostException)) {
+                    throw e;
+                }
+                host = portOrAddress;
+            }
+            this.port = checkPort(port as number);
+            this.addr = addr;
+            this.hostname = host;
+        } else if (undefined !== unresolvedHost) {
             this.port = checkPort(port as number);
             this.addr = null;
             this.hostname = unresolvedHost;
@@ -701,9 +760,15 @@ export class NetworkInterface {
                 const slash = entry.cidr?.lastIndexOf('/') ?? -1;
                 const prefix = null !== entry.cidr && slash >= 0 ? Number(entry.cidr.substring(slash + 1)) : 0;
                 const octets = InetAddress.getByName(entry.address.split('%')[0] as string).getAddress();
+                const scoped = 'IPv6' === entry.family && 0 !== entry.scopeid;
                 const address =
                     'IPv6' === entry.family
-                        ? new Inet6Address(null, octets, entry.scopeid, null)
+                        ? new Inet6Address(
+                              null,
+                              octets,
+                              scoped ? (entry.scopeid as number) : null,
+                              scoped ? name : null,
+                          )
                         : InetAddress.getByAddress(null, octets);
                 list.push(new InterfaceAddress(address, null, prefix));
             }
@@ -722,6 +787,19 @@ export class NetworkInterface {
         for (const ifc of NetworkInterface.getNetworkInterfaces()) {
             if (ifc.name === name) {
                 return ifc;
+            }
+        }
+
+        return null;
+    }
+
+    /** `NetworkInterface.getByInetAddress(InetAddress)`: the interface that has the address, or null. */
+    public static getByInetAddress(addr: InetAddress): NetworkInterface | null {
+        for (const ifc of NetworkInterface.getNetworkInterfaces()) {
+            for (const ia of ifc.addresses) {
+                if (ia.getAddress().equals(addr)) {
+                    return ifc;
+                }
             }
         }
 
