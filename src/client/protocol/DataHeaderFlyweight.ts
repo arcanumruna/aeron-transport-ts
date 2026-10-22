@@ -19,7 +19,7 @@
 import { BufferUtil } from '../../agrona/BufferUtil.js';
 import { BitUtil } from '../../agrona/BitUtil.js';
 import { UnsafeBuffer } from '../../agrona/concurrent/UnsafeBuffer.js';
-import { ByteOrder } from '../../agrona/jdk.js';
+import { ByteOrder, Long } from '../../agrona/jdk.js';
 import { HeaderFlyweight } from './HeaderFlyweight.js';
 
 const { CACHE_LINE_LENGTH } = BitUtil;
@@ -322,7 +322,7 @@ export class DataHeaderFlyweight extends HeaderFlyweight {
             return this.getLongBigInt(DataHeaderFlyweight.RESERVED_VALUE_OFFSET, LITTLE_ENDIAN);
         }
 
-        this.putLongBigInt(DataHeaderFlyweight.RESERVED_VALUE_OFFSET, reservedValue, LITTLE_ENDIAN);
+        this.putLongBigInt(DataHeaderFlyweight.RESERVED_VALUE_OFFSET, Long.checkInt64(reservedValue), LITTLE_ENDIAN);
 
         return this;
     }

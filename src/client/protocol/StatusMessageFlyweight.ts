@@ -18,7 +18,7 @@
 // Port of io/aeron/protocol/StatusMessageFlyweight.java @ 1.53.3
 import { BitUtil } from '../../agrona/BitUtil.js';
 import { UnsafeBuffer } from '../../agrona/concurrent/UnsafeBuffer.js';
-import { ByteOrder } from '../../agrona/jdk.js';
+import { ByteOrder, Long } from '../../agrona/jdk.js';
 import { AeronException } from '../exceptions/AeronException.js';
 import { HeaderFlyweight } from './HeaderFlyweight.js';
 
@@ -279,6 +279,7 @@ export class StatusMessageFlyweight extends HeaderFlyweight {
         }
 
         if (null !== groupTag) {
+            Long.checkInt64(groupTag);
             this.frameLength(StatusMessageFlyweight.HEADER_LENGTH + SIZE_OF_LONG);
             this.putLongUnaligned(StatusMessageFlyweight.GROUP_TAG_FIELD_OFFSET, groupTag);
         } else {
@@ -316,11 +317,11 @@ export class StatusMessageFlyweight extends HeaderFlyweight {
      * little-endian branch only.
      *
      * @param offset of the field to put.
-     * @param value  of the field to put, a `bigint` wrapped to 64 bits as a Java `long` is.
+     * @param value  of the field to put, a `bigint`; a `RangeError` if it is outside [-2^63, 2^63 - 1] (spec D5).
      * @return this for fluent API.
      */
     public putLongUnaligned(offset: number, value: bigint): StatusMessageFlyweight {
-        this.putLongBigInt(offset, value, LITTLE_ENDIAN);
+        this.putLongBigInt(offset, Long.checkInt64(value), LITTLE_ENDIAN);
 
         return this;
     }

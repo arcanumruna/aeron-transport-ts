@@ -120,6 +120,9 @@ Paths below are relative to `aeron-client/src/{main,test}/java/io/aeron/` (Aeron
   `| 0` exactly where Java truncates. `rawTail` (term id in the high 32 bits, offset in the low 32) is held as two
   `int` halves of the 64-bit metadata slot, read/written with the same method names.
 - Tests: `logbuffer/HeaderTest` (6), `logbuffer/HeaderWriterTest` (2), `logbuffer/LogBufferDescriptorTest` (4).
+- Replace the T7 stand-ins: switch `NakFlyweight` and `StatusMessageFlyweight` from their local `FRAME_ALIGNMENT` to
+  `FrameDescriptor.isFrameAligned`, and the two ported tests (`NakFlyweightTest`, `StatusMessageFlyweightTest`) from
+  their local term length to `LogBufferDescriptor.TERM_MIN_LENGTH`.
 
 ### T10 — Log buffers, part 2: readers, scanners, rebuild, gap fill, unblock
 - Sources: `logbuffer/{TermReader, TermScanner, TermBlockScanner, TermGapScanner, TermRebuilder, TermGapFiller,
@@ -157,7 +160,7 @@ Paths below are relative to `aeron-client/src/{main,test}/java/io/aeron/` (Aeron
 
 ## Interaction matrix
 Phase 1 is pure code; the ported tests carry most of the matrix. The extra tests below live in
-`test/extra/<path>/<Name>.extra.test.ts`, so mapped test files stay one-to-one.
+`test/extra/<path>/<Name>ExtraTest.test.ts`, so mapped test files stay one-to-one.
 
 | Area | Operations | Entities / values | Orderings / timings |
 |---|---|---|---|

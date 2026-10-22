@@ -29,6 +29,102 @@ const CODES: [ErrorCode, string, number][] = [
     [ErrorCode.UNKNOWN_CODE_VALUE, 'UNKNOWN_CODE_VALUE', -1],
 ];
 
+// Every public constant of CommonContext.java that has a literal value, extracted mechanically from the Java source
+// (the values are Java's, not read back from the port). NULL_SESSION_ID is Aeron.NULL_VALUE (-1).
+const COMMON_CONTEXT_CONSTANTS: [string, string | number][] = [
+    ['NULL_SESSION_ID', -1],
+    ['PRINT_CONFIGURATION_ON_START_PROP_NAME', 'aeron.print.configuration'],
+    ['DRIVER_TIMEOUT_PROP_NAME', 'aeron.driver.timeout'],
+    ['DEBUG_TIMEOUT_PROP_NAME', 'aeron.debug.timeout'],
+    ['DEFAULT_DRIVER_TIMEOUT_MS', 10000],
+    ['AERON_DIR_PROP_NAME', 'aeron.dir'],
+    ['ENABLE_EXPERIMENTAL_FEATURES_PROP_NAME', 'aeron.enable.experimental.features'],
+    ['FALLBACK_LOGGER_PROP_NAME', 'aeron.fallback.logger'],
+    ['EVENT_LOG', 'aeron.event.log'],
+    ['EVENT_LOG_READER_CLASSNAME_PROP_NAME', 'aeron.event.log.reader.classname'],
+    ['EVENT_LOG_READER_CLASSNAME_DEFAULT', 'io.aeron.logging.CborLoggerReaderAgent'],
+    ['ARCHIVE_EVENT_LOG', 'aeron.event.archive.log'],
+    ['CLUSTER_EVENT_LOG', 'aeron.event.cluster.log'],
+    ['IPC_MEDIA', 'ipc'],
+    ['UDP_MEDIA', 'udp'],
+    ['IPC_CHANNEL', 'aeron:ipc'],
+    ['UDP_CHANNEL', 'aeron:udp'],
+    ['SPY_PREFIX', 'aeron-spy:'],
+    ['ENDPOINT_PARAM_NAME', 'endpoint'],
+    ['INTERFACE_PARAM_NAME', 'interface'],
+    ['INITIAL_TERM_ID_PARAM_NAME', 'init-term-id'],
+    ['TERM_ID_PARAM_NAME', 'term-id'],
+    ['TERM_OFFSET_PARAM_NAME', 'term-offset'],
+    ['TERM_LENGTH_PARAM_NAME', 'term-length'],
+    ['MTU_LENGTH_PARAM_NAME', 'mtu'],
+    ['TTL_PARAM_NAME', 'ttl'],
+    ['MDC_CONTROL_PARAM_NAME', 'control'],
+    ['MDC_CONTROL_MODE_PARAM_NAME', 'control-mode'],
+    ['MDC_CONTROL_MODE_MANUAL', 'manual'],
+    ['MDC_CONTROL_MODE_DYNAMIC', 'dynamic'],
+    ['CONTROL_MODE_RESPONSE', 'response'],
+    ['SESSION_ID_PARAM_NAME', 'session-id'],
+    ['LINGER_PARAM_NAME', 'linger'],
+    ['RELIABLE_STREAM_PARAM_NAME', 'reliable'],
+    ['TAGS_PARAM_NAME', 'tags'],
+    ['TAG_PREFIX', 'tag:'],
+    ['SPARSE_PARAM_NAME', 'sparse'],
+    ['ALIAS_PARAM_NAME', 'alias'],
+    ['EOS_PARAM_NAME', 'eos'],
+    ['TETHER_PARAM_NAME', 'tether'],
+    ['GROUP_PARAM_NAME', 'group'],
+    ['REJOIN_PARAM_NAME', 'rejoin'],
+    ['CONGESTION_CONTROL_PARAM_NAME', 'cc'],
+    ['FLOW_CONTROL_PARAM_NAME', 'fc'],
+    ['GROUP_TAG_PARAM_NAME', 'gtag'],
+    ['SPIES_SIMULATE_CONNECTION_PARAM_NAME', 'ssc'],
+    ['SOCKET_SNDBUF_PARAM_NAME', 'so-sndbuf'],
+    ['SOCKET_RCVBUF_PARAM_NAME', 'so-rcvbuf'],
+    ['RECEIVER_WINDOW_LENGTH_PARAM_NAME', 'rcv-wnd'],
+    ['MEDIA_RCV_TIMESTAMP_OFFSET_PARAM_NAME', 'media-rcv-ts-offset'],
+    ['CHANNEL_RECEIVE_TIMESTAMP_OFFSET_PARAM_NAME', 'channel-rcv-ts-offset'],
+    ['CHANNEL_SEND_TIMESTAMP_OFFSET_PARAM_NAME', 'channel-snd-ts-offset'],
+    ['RESERVED_OFFSET', 'reserved'],
+    ['RESPONSE_ENDPOINT_PARAM_NAME', 'response-endpoint'],
+    ['RESPONSE_CORRELATION_ID_PARAM_NAME', 'response-correlation-id'],
+    ['PROTOTYPE_CORRELATION_ID', 'prototype'],
+    ['NAK_DELAY_PARAM_NAME', 'nak-delay'],
+    ['UNTETHERED_WINDOW_LIMIT_TIMEOUT_PARAM_NAME', 'untethered-window-limit-timeout'],
+    ['UNTETHERED_LINGER_TIMEOUT_PARAM_NAME', 'untethered-linger-timeout'],
+    ['UNTETHERED_RESTING_TIMEOUT_PARAM_NAME', 'untethered-resting-timeout'],
+    ['MAX_RESEND_PARAM_NAME', 'max-resend'],
+    ['STREAM_ID_PARAM_NAME', 'stream-id'],
+    ['PUBLICATION_WINDOW_LENGTH_PARAM_NAME', 'pub-wnd'],
+    ['SECURE_RANDOM_ALGORITHM_PROP_NAME', 'aeron.secure.random.algorithm'],
+    ['THREAD_NAMING_PROP_NAME', 'aeron.thread.naming'],
+    ['THREAD_NAMING_CLASSIC', 'classic'],
+    ['THREAD_NAMING_NEW', 'new'],
+    ['THREAD_NAMING_DEFAULT', 'classic'],
+    ['EVENT_LOG_FILENAME_PROP_NAME', 'aeron.event.log.filename'],
+    ['EVENT_LOG_FILE_MAX_LENGTH', 'aeron.event.log.file.max.length'],
+    ['EVENT_LOG_RENDER_DATA_PROP_NAME', 'aeron.event.log.render.data'],
+];
+
+describe('CommonContextConstantsExtraTest', () => {
+    it('coversEveryJavaConstant', () => {
+        expect(COMMON_CONTEXT_CONSTANTS.length).toBe(71);
+    });
+
+    it.each(COMMON_CONTEXT_CONSTANTS)('%s is the Java value', (name, expected) => {
+        expect((CommonContext as unknown as Record<string, unknown>)[name]).toBe(expected);
+    });
+});
+
+describe('NestedEnumTypesExtraTest', () => {
+    it('theNestedEnumsAreTypesAsWellAsValues', () => {
+        const category: AeronException.Category = AeronException.Category.WARN;
+        const inferable: CommonContext.InferableBoolean = CommonContext.InferableBoolean.INFER;
+
+        expect(new AeronException(category).category()).toBe(Category.WARN);
+        expect(inferable).toBe(InferableBoolean.INFER);
+    });
+});
+
 describe('ErrorCode', () => {
     it.each(CODES)('getReturnsTheCodeOfItsValue %s', (code, name, value) => {
         expect(code.value()).toBe(value);
@@ -213,6 +309,9 @@ describe('AeronException subclasses', () => {
             ['boom', 'boom'],
             ['ERROR -', 'ERROR -'],
             ['WARN -', 'WARN -'],
+            ['WARN - x', 'x'],
+            ['WARN - ', 'WARN - '],
+            ['ERROR - ', ''],
             ['', ''],
         ];
 
