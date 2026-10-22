@@ -123,6 +123,8 @@ Paths below are relative to `aeron-client/src/{main,test}/java/io/aeron/` (Aeron
 - Replace the T7 stand-ins: switch `NakFlyweight` and `StatusMessageFlyweight` from their local `FRAME_ALIGNMENT` to
   `FrameDescriptor.isFrameAligned`, and the two ported tests (`NakFlyweightTest`, `StatusMessageFlyweightTest`) from
   their local term length to `LogBufferDescriptor.TERM_MIN_LENGTH`.
+- Delete the T12 stand-in `src/client/ChannelUriLogBuffer.ts`: switch the `ChannelUri` and `ChannelUriStringBuilder`
+  imports to `FrameDescriptor` / `LogBufferDescriptor`, and remove its row from `docs/mapping.md`.
 
 ### T10 — Log buffers, part 2: readers, scanners, rebuild, gap fill, unblock
 - Sources: `logbuffer/{TermReader, TermScanner, TermBlockScanner, TermGapScanner, TermRebuilder, TermGapFiller,

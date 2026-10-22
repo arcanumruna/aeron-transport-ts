@@ -5,9 +5,11 @@ import { describe, expect, it } from 'vitest';
 import {
     IllegalArgumentException,
     IllegalStateException,
+    NullPointerException,
     NumberFormatException,
     TimeUnit,
 } from '../../../src/agrona/jdk.js';
+import { AsciiNumberFormatException } from '../../../src/agrona/AsciiNumberFormatException.js';
 import { ChannelUri } from '../../../src/client/ChannelUri.js';
 import { ChannelUriStringBuilder } from '../../../src/client/ChannelUriStringBuilder.js';
 import { CommonContext } from '../../../src/client/CommonContext.js';
@@ -161,8 +163,8 @@ describe('ChannelUri extra', () => {
         });
 
         it('getTagOfAnEmptyOrMalformedTagThrows', () => {
-            expect(() => ChannelUri.getTag('tag:')).toThrow();
-            expect(() => ChannelUri.getTag('tag:abc')).toThrow();
+            expect(() => ChannelUri.getTag('tag:')).toThrow(AsciiNumberFormatException);
+            expect(() => ChannelUri.getTag('tag:abc')).toThrow(AsciiNumberFormatException);
             expect(() => ChannelUri.getTag('tag:9007199254740992')).toThrow(RangeError);
         });
     });
@@ -312,6 +314,54 @@ describe('ChannelUri extra', () => {
             expect(uri.get('term-offset')).toBe('0');
         });
     });
+
+    describe('toString order, diff, hashCode and prefix', () => {
+        // Java prints params.entrySet(), whose Agrona iterator walks the slots backwards
+        it.each([
+            [
+                'aeron:udp?endpoint=localhost:4652|interface=eth0|ttl=8|mtu=1440',
+                'aeron:udp?mtu=1440|interface=eth0|endpoint=localhost:4652|ttl=8',
+            ],
+            ['aeron:udp?x=1|x=2|y=3', 'aeron:udp?y=3|x=2'],
+            [
+                'aeron-spy:aeron:ipc?term-length=65536|alias=x|tags=7',
+                'aeron-spy:aeron:ipc?term-length=65536|tags=7|alias=x',
+            ],
+        ])('toStringUsesTheJavaEntrySetOrder %s', (input, expected) => {
+            expect(ChannelUri.parse(input).toString()).toBe(expected);
+        });
+
+        it('forEachParameterGoesForwardsWhileToStringGoesBackwards', () => {
+            const keys: string[] = [];
+            ChannelUri.parse('aeron:udp?endpoint=localhost:4652|interface=eth0|ttl=8|mtu=1440').forEachParameter((k) =>
+                keys.push(k),
+            );
+
+            expect(keys).toEqual(['ttl', 'endpoint', 'interface', 'mtu']);
+        });
+
+        it('diffDescribesTheDifferingParameters', () => {
+            const a = ChannelUri.parse('aeron:udp?a=1|b=2');
+
+            expect(a.diff(ChannelUri.parse('aeron:udp?a=1|b=3'))).toEqual(new Map([['b', '2 != 3']]));
+            expect(a.diff(ChannelUri.parse('aeron:udp?a=1'))).toEqual(new Map([['b', '2 != null']]));
+            expect(a.diff(ChannelUri.parse('aeron:udp?a=1|b=2'))).toEqual(new Map());
+            expect(a.diff(ChannelUri.parse('aeron:ipc?a=1|b=2'))).toEqual(new Map([['media', 'udp != ipc']]));
+        });
+
+        it('hashCodeIsPinnedToTheJavaValue', () => {
+            expect(
+                ChannelUri.parse('aeron:udp?endpoint=localhost:4652|interface=eth0|ttl=8|mtu=1440|tags=1,2').hashCode(),
+            ).toBe(-1296061310);
+        });
+
+        it('prefixAcceptsNull', () => {
+            const uri = ChannelUri.parse('aeron-spy:aeron:udp?endpoint=localhost:1').prefix(null);
+
+            expect(uri.prefix()).toBeNull();
+            expect(uri.toString()).toBe('aeron:udp?endpoint=localhost:1');
+        });
+    });
 });
 
 describe('ChannelUriStringBuilder extra', () => {
@@ -335,7 +385,7 @@ describe('ChannelUriStringBuilder extra', () => {
             .termId(12)
             .termOffset(96)
             .sessionId(-77)
-            .groupTag(5)
+            .groupTag(5n)
             .linger(TimeUnit.SECONDS.toNanos(5))
             .sparse(true)
             .eos(false)
@@ -411,6 +461,105 @@ describe('ChannelUriStringBuilder extra', () => {
         expect(builder.untetheredLingerTimeoutNs()).toBe(2000000);
     });
 
+    it('clearResetsEveryGetterExceptWhatJavaKeeps', () => {
+        const builder = fullBuilder().isSessionIdTagged(true).clear();
+
+        expect(builder.isSessionIdTagged()).toBe(false);
+        expect(builder.prefix()).toBeNull();
+        expect(builder.media()).toBeNull();
+        expect(builder.endpoint()).toBeNull();
+        expect(builder.networkInterface()).toBeNull();
+        expect(builder.controlEndpoint()).toBeNull();
+        expect(builder.controlMode()).toBeNull();
+        expect(builder.tags()).toBeNull();
+        expect(builder.alias()).toBeNull();
+        expect(builder.congestionControl()).toBeNull();
+        expect(builder.flowControl()).toBeNull();
+        expect(builder.reliable()).toBeNull();
+        expect(builder.ttl()).toBeNull();
+        expect(builder.mtu()).toBeNull();
+        expect(builder.termLength()).toBeNull();
+        expect(builder.initialTermId()).toBeNull();
+        expect(builder.termId()).toBeNull();
+        expect(builder.termOffset()).toBeNull();
+        expect(builder.sessionId()).toBeNull();
+        expect(builder.groupTag()).toBeNull();
+        expect(builder.linger()).toBeNull();
+        expect(builder.sparse()).toBeNull();
+        expect(builder.eos()).toBeNull();
+        expect(builder.tether()).toBeNull();
+        expect(builder.group()).toBeNull();
+        expect(builder.rejoin()).toBeNull();
+        expect(builder.socketSndbufLength()).toBeNull();
+        expect(builder.socketRcvbufLength()).toBeNull();
+        expect(builder.receiverWindowLength()).toBeNull();
+        expect(builder.mediaReceiveTimestampOffset()).toBeNull();
+        expect(builder.channelReceiveTimestampOffset()).toBeNull();
+        expect(builder.channelSendTimestampOffset()).toBeNull();
+        expect(builder.responseEndpoint()).toBeNull();
+        expect(builder.responseCorrelationId()).toBeNull();
+        expect(builder.maxResend()).toBeNull();
+        expect(builder.streamId()).toBeNull();
+        expect(builder.publicationWindowLength()).toBeNull();
+        // Java's clear() leaves these three groups alone
+        expect(builder.spiesSimulateConnection()).toBe(true);
+        expect(builder.nakDelay()).toBe(60000);
+        expect(builder.untetheredWindowLimitTimeoutNs()).toBe(1000000);
+        expect(builder.untetheredLingerTimeoutNs()).toBe(2000000);
+        expect(builder.untetheredRestingTimeoutNs()).toBe(3000000000);
+    });
+
+    it('theGroupTagIsA64BitOpaqueValue', () => {
+        const max = ChannelUri.parse('aeron:udp?endpoint=localhost:1|gtag=9223372036854775807');
+        const builder = new ChannelUriStringBuilder().media('udp').endpoint('localhost:1').groupTag(max);
+
+        expect(builder.groupTag()).toBe(9223372036854775807n);
+        expect(builder.build()).toBe('aeron:udp?endpoint=localhost:1|gtag=9223372036854775807');
+        expect(new ChannelUriStringBuilder().groupTag(-9223372036854775808n).groupTag()).toBe(-9223372036854775808n);
+        expect(new ChannelUriStringBuilder().taggedFlowControl(9223372036854775807n, 2, null).flowControl()).toBe(
+            'tagged,g:9223372036854775807/2',
+        );
+    });
+
+    it('longSettersRejectWhatANumberCannotHold', () => {
+        const unsafe = 2 ** 53;
+        const setters: Array<[string, (b: ChannelUriStringBuilder, v: number) => unknown]> = [
+            ['linger', (b, v) => b.linger(v)],
+            ['nakDelay', (b, v) => b.nakDelay(v)],
+            ['untetheredWindowLimitTimeoutNs', (b, v) => b.untetheredWindowLimitTimeoutNs(v)],
+            ['untetheredLingerTimeoutNs', (b, v) => b.untetheredLingerTimeoutNs(v)],
+            ['untetheredRestingTimeoutNs', (b, v) => b.untetheredRestingTimeoutNs(v)],
+            ['taggedSessionId', (b, v) => b.taggedSessionId(v)],
+            ['tags(channelTag, null)', (b, v) => b.tags(v, null)],
+            ['tags(1, pubSubTag)', (b, v) => b.tags(1, v)],
+            ['responseCorrelationId', (b, v) => b.responseCorrelationId(v)],
+        ];
+
+        for (const [name, setter] of setters) {
+            for (const bad of [unsafe, -unsafe, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+                expect(() => setter(new ChannelUriStringBuilder(), bad), name + ' ' + bad).toThrow(RangeError);
+            }
+            expect(() => setter(new ChannelUriStringBuilder(), 2 ** 53 - 1), name).not.toThrow(RangeError);
+        }
+    });
+
+    it('aTaggedSessionIdAbove2Pow32IsKeptAndTruncatedByTheIntGetter', () => {
+        const builder = new ChannelUriStringBuilder().taggedSessionId(4294967297);
+
+        expect(builder.sessionId()).toBe(1);
+        expect(builder.media('ipc').build()).toBe('aeron:ipc?session-id=tag:4294967297');
+    });
+
+    it('mediaNullThrowsNullPointerException', () => {
+        expect(() => new ChannelUriStringBuilder().media(null as never)).toThrow(NullPointerException);
+    });
+
+    it('responseCorrelationIdNullClearsIt', () => {
+        expect(
+            new ChannelUriStringBuilder().responseCorrelationId(5).responseCorrelationId(null).responseCorrelationId(),
+        ).toBeNull();
+    });
+
     it('taggedSessionIds', () => {
         const builder = new ChannelUriStringBuilder().media('ipc').sessionId('tag:123');
 
@@ -448,9 +597,9 @@ describe('ChannelUriStringBuilder extra', () => {
     it('flowControlHelpers', () => {
         const fc = (b: ChannelUriStringBuilder): string | null => b.flowControl();
         expect(fc(new ChannelUriStringBuilder().taggedFlowControl(null, null, null))).toBe('tagged');
-        expect(fc(new ChannelUriStringBuilder().taggedFlowControl(7, null, null))).toBe('tagged,g:7');
+        expect(fc(new ChannelUriStringBuilder().taggedFlowControl(7n, null, null))).toBe('tagged,g:7');
         expect(fc(new ChannelUriStringBuilder().taggedFlowControl(null, 3, null))).toBe('tagged,g:/3');
-        expect(fc(new ChannelUriStringBuilder().taggedFlowControl(7, 3, '5s'))).toBe('tagged,g:7/3,t:5s');
+        expect(fc(new ChannelUriStringBuilder().taggedFlowControl(7n, 3, '5s'))).toBe('tagged,g:7/3,t:5s');
         expect(fc(new ChannelUriStringBuilder().taggedFlowControl(null, null, '5s'))).toBe('tagged,t:5s');
         expect(fc(new ChannelUriStringBuilder().minFlowControl(null, null))).toBe('min');
         expect(fc(new ChannelUriStringBuilder().minFlowControl(2, null))).toBe('min,g:/2');
@@ -599,8 +748,8 @@ describe('ChannelUriStringBuilder extra', () => {
             expect(message(() => b().groupTag(uri('gtag=9223372036854775808')))).toBe(
                 "'gtag' must be a valid long value",
             );
-            expect(() => b().groupTag(uri('gtag=9007199254740992'))).toThrow(RangeError);
-            expect(b().groupTag(uri('gtag=-9007199254740991')).groupTag()).toBe(-9007199254740991);
+            expect(b().groupTag(uri('gtag=-9007199254740991')).groupTag()).toBe(-9007199254740991n);
+            expect(() => b().groupTag(uri('gtag=9007199254740992')).groupTag()).not.toThrow();
             expect(message(() => b().maxResend(uri('max-resend=x')))).toBe('max-resend must be a number');
             expect(message(() => b().streamId(uri('stream-id=x')))).toBe('stream-id must be a number');
             expect(message(() => b().mtu(uri('mtu=2g')))).toBe('mtu 2147483648 > 2147483647');

@@ -279,6 +279,9 @@ export class TimeUnit {
     public static readonly MICROSECONDS: TimeUnit = new TimeUnit(1_000);
     public static readonly MILLISECONDS: TimeUnit = new TimeUnit(1_000_000);
     public static readonly SECONDS: TimeUnit = new TimeUnit(1_000_000_000);
+    public static readonly MINUTES: TimeUnit = new TimeUnit(60_000_000_000);
+    public static readonly HOURS: TimeUnit = new TimeUnit(3_600_000_000_000);
+    public static readonly DAYS: TimeUnit = new TimeUnit(86_400_000_000_000);
 
     private readonly scale: number;
 

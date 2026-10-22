@@ -103,7 +103,7 @@ export class ChannelUri {
 
     private static readonly AERON_PREFIX: string = ChannelUri.AERON_SCHEME + ':';
 
-    private _prefix: string;
+    private _prefix: string | null;
     private _media: string;
     private readonly params: Object2ObjectHashMap<string, string>;
     private readonly tags: string[];
@@ -128,9 +128,9 @@ export class ChannelUri {
      * @param prefix to replace the existing prefix, none to get it.
      * @return the prefix for the channel, or this for a fluent API.
      */
-    public prefix(): string;
-    public prefix(prefix: string): this;
-    public prefix(prefix?: string): string | this {
+    public prefix(): string | null;
+    public prefix(prefix: string | null): this;
+    public prefix(prefix?: string | null): string | null | this {
         if (undefined === prefix) {
             return this._prefix;
         }
@@ -312,9 +312,12 @@ export class ChannelUri {
         if (!this.params.isEmpty()) {
             sb += '?';
 
-            this.params.forEach((key, value) => {
-                sb += key + '=' + value + '|';
-            });
+            // entrySet() iterates the slots backwards, as Java's Agrona EntryIterator does (forEach goes forwards)
+            const iterator = this.params.entrySet().iterator();
+            while (iterator.hasNext()) {
+                const entry = iterator.next();
+                sb += entry.getKey() + '=' + entry.getValue() + '|';
+            }
 
             sb = sb.substring(0, sb.length - 1);
         }

@@ -16,7 +16,7 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of io/aeron/ChannelUriStringBuilder.java @ 1.53.3
-import { IllegalArgumentException, Integer, Long, NumberFormatException, longToNumber } from '../agrona/jdk.js';
+import { IllegalArgumentException, Integer, Long, NullPointerException, NumberFormatException } from '../agrona/jdk.js';
 import { SystemUtil } from '../agrona/SystemUtil.js';
 import { ChannelUri } from './ChannelUri.js';
 import {
@@ -155,7 +155,7 @@ export class ChannelUriStringBuilder {
     private _streamId: number | null = null;
     private _publicationWindowLength: number | null = null;
     private _sessionId: number | null = null;
-    private _groupTag: number | null = null;
+    private _groupTag: bigint | null = null;
     private _linger: number | null = null;
     private _nakDelay: number | null = null;
     private _untetheredWindowLimitTimeoutNs: number | null = null;
@@ -357,6 +357,10 @@ export class ChannelUriStringBuilder {
 
         if (media instanceof ChannelUri) {
             return this.media(media.media());
+        }
+
+        if (null === media) {
+            throw new NullPointerException();
         }
 
         switch (media) {
@@ -789,6 +793,10 @@ export class ChannelUriStringBuilder {
      * @return this for a fluent API.
      */
     public taggedSessionId(sessionId: number | null): this {
+        if (null !== sessionId) {
+            Long.checkSafe(sessionId);
+        }
+
         this.isSessionIdTagged(true);
         this._sessionId = sessionId;
         return this;
@@ -958,6 +966,12 @@ export class ChannelUriStringBuilder {
 
         if (typeof tags === 'number' || undefined !== pubSubTag) {
             const channelTag = (tags ?? null) as number | null;
+            if (null !== channelTag) {
+                Long.checkSafe(channelTag);
+            }
+            if (null !== (pubSubTag ?? null)) {
+                Long.checkSafe(pubSubTag!);
+            }
             if (null === channelTag && null !== (pubSubTag ?? null)) {
                 throw new IllegalArgumentException('null == channelTag && null != pubSubTag');
             }
@@ -1065,7 +1079,7 @@ export class ChannelUriStringBuilder {
      * @param timeout      the receiver timeout, or null.
      * @return this for a fluent API.
      */
-    public taggedFlowControl(groupTag: number | null, minGroupSize: number | null, timeout: string | null): this {
+    public taggedFlowControl(groupTag: bigint | null, minGroupSize: number | null, timeout: string | null): this {
         let flowControlValue = 'tagged';
 
         if (null !== groupTag || null !== minGroupSize) {
@@ -1114,10 +1128,10 @@ export class ChannelUriStringBuilder {
      * @param groupTag the receiver tag.
      * @return this for a fluent API.
      */
-    public groupTag(): number | null;
-    public groupTag(groupTag: number | null): this;
+    public groupTag(): bigint | null;
+    public groupTag(groupTag: bigint | null): this;
     public groupTag(channelUri: ChannelUri): this;
-    public groupTag(groupTag?: number | null | ChannelUri): number | null | this {
+    public groupTag(groupTag?: bigint | null | ChannelUri): bigint | null | this {
         if (undefined === groupTag) {
             return this._groupTag;
         }
@@ -1138,8 +1152,8 @@ export class ChannelUriStringBuilder {
                     throw ex;
                 }
 
-                // a long held in a number (spec D5): a RangeError outside +/-(2^53 - 1)
-                return this.groupTag(longToNumber(value));
+                // an opaque 64-bit wire value, held as a bigint (spec 5.2)
+                return this.groupTag(value);
             }
         }
 
@@ -1504,6 +1518,7 @@ export class ChannelUriStringBuilder {
         }
 
         if (typeof responseCorrelationId === 'number') {
+            Long.checkSafe(responseCorrelationId);
             this._responseCorrelationId = String(responseCorrelationId);
             return this;
         }
@@ -1897,7 +1912,7 @@ export class ChannelUriStringBuilder {
     private static appendParameter(
         sb: string,
         paramName: string,
-        paramValue: string | number | boolean | null,
+        paramValue: string | number | bigint | boolean | null,
     ): string {
         if (null !== paramValue) {
             return sb + paramName + '=' + String(paramValue) + '|';
@@ -1923,6 +1938,10 @@ export class ChannelUriStringBuilder {
     }
 
     private static requireNonNegative(value: number | null, name: string): number | null {
+        if (null !== value) {
+            Long.checkSafe(value);
+        }
+
         if (null !== value && value < 0) {
             throw new IllegalArgumentException('`' + name + '` value cannot be negative: ' + value);
         }

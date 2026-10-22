@@ -17,7 +17,7 @@
  */
 // Port of io/aeron/ChannelUriStringBuilderTest.java @ 1.53.3
 import { describe, expect, it } from 'vitest';
-import { IllegalArgumentException, TimeUnit } from '../../src/agrona/jdk.js';
+import { IllegalArgumentException, Long, TimeUnit } from '../../src/agrona/jdk.js';
 import { SystemUtil } from '../../src/agrona/SystemUtil.js';
 import { ChannelUri } from '../../src/client/ChannelUri.js';
 import { ChannelUriStringBuilder } from '../../src/client/ChannelUriStringBuilder.js';
@@ -114,6 +114,8 @@ describe('ChannelUriStringBuilder', () => {
 
         expect(builder.linger()).toBe(lingerNs);
         expect(builder.build()).toBe('aeron:ipc?linger=987654321123456ns');
+        // Java's own literal, 987654321123456789L, cannot be held in a number: the setter refuses it
+        expect(() => new ChannelUriStringBuilder().linger(Number('987654321123456789'))).toThrow(RangeError);
     });
 
     it('shouldGenerateChannelWithoutLingerTimeoutIfNullIsPassed', () => {
@@ -135,17 +137,15 @@ describe('ChannelUriStringBuilder', () => {
         const builder = new ChannelUriStringBuilder();
         builder.linger(ChannelUri.parse('aeron:ipc?linger=7200s'));
 
-        expect(builder.linger()).toBe(
-            TimeUnit.SECONDS.toNanos(2 * 3600) /* HOURS.toNanos(2): the stand-in TimeUnit has no HOURS */,
-        );
+        expect(builder.linger()).toBe(TimeUnit.HOURS.toNanos(2));
     });
 
     it('shouldCopyLingerTimeoutFromChannelUriNanoseconds', () => {
-        // Java: 19191919191919191, which is above 2^53 - 1 (spec D5); see "Adapted tests" in docs/mapping.md
+        // Java: assertEquals(19191919191919191L, ...); above 2^53 - 1, parseDuration saturates at Long.MAX_VALUE (spec D5)
         const builder = new ChannelUriStringBuilder();
-        builder.linger(ChannelUri.parse('aeron:udp?linger=1919191919191919'));
+        builder.linger(ChannelUri.parse('aeron:udp?linger=19191919191919191'));
 
-        expect(builder.linger()).toBe(1919191919191919);
+        expect(builder.linger()).toBe(Long.MAX_VALUE);
     });
 
     it('shouldCopyLingerTimeoutFromChannelUriNoValue', () => {
