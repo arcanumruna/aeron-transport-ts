@@ -37,35 +37,33 @@ cross-worker stress tests; the message path allocates nothing in the port's own 
    A worker driver (Aeron's `SHARED` mode, the whole driver in one worker) is therefore a later phase (§9,
    phase 4), offered next to `INVOKER` and chosen per deployment by benchmark. `DEDICATED` and `SHARED_NETWORK`
    are out of scope (D3).
-4. **64-bit values in shared memory (D16).** Measured: an `Atomics` operation on a `BigInt64Array` allocates a
-   `bigint` per call (a load caused 316 scavenges per 20 million calls, a compare-and-set 1,891), and a
-   `Float64Array` has no atomics. So no per-message path uses a 64-bit atomic:
-   - **Ring and broadcast positions** (head, tail, head cache, tail intent, latest) are 32-bit wrapping `int`s
-     in the low half of their Java `long` slot, updated with `Atomics` on an `Int32Array`. Agrona only subtracts
-     and masks these positions, so they are exact while capacity ≤ 2^30 (Agrona's own `int` capacity limit).
-     Every Java `long` comparison of two positions is written as a difference: `a > b` becomes `((a - b) | 0) > 0`.
-     The `long` getters (`producerPosition`, `consumerPosition`, ...) return the wrapped value, a recorded
-     difference.
-   - Single-writer 64-bit values use a two-slot sequence lock: the value's Java slot and the 8 bytes after it are two
-     slots, and a sequence `int` in the padding names the published one. The writer writes the slot that is not
-     published, then increments the sequence; a reader reads the sequence, the slot it names and the sequence again,
-     and retries only if a write completed meanwhile. A writer stopped mid-write never blocks a reader. No
-     allocation, never torn.
-   - **64-bit counter values** (positions, publisher limits, stream and system counters) on a shared counters buffer
-     use the same lock in the counter record's padding (slots at +0 and +8, sequence at +16). `UnsafeBufferPosition`,
-     `AtomicCounter` and `CountersReader` read and write them through it (task T2b). Every counter has one writer in
-     `INVOKER` and `SHARED` modes, so `AtomicCounter`'s add forms on a shared buffer read, add and publish.
-   - **Multi-writer 64-bit counters on the control plane** (`nextCorrelationId`, one per command) use
-     `Atomics.add` on a `BigInt64Array`. They allocate one `bigint` per command, which is control plane and
-     recorded.
+4. **64-bit values in shared memory (D16).** The layout is Aeron's: a Java `long` is the 8 little-endian bytes at
+   Java's offset, and ring positions, broadcast positions and counter values are full 64-bit values in their Java
+   slots. Measured: an `Atomics` operation on a `BigInt64Array` allocates a `bigint` per call (a load caused 316
+   scavenges per 20 million calls, a compare-and-set 1,891), so the port does not use it. Every `long` volatile,
+   acquire, opaque, ordered, release, compare-and-set, compare-and-exchange, get-and-set and get-and-add method of
+   `UnsafeBuffer` on a `SharedArrayBuffer` is a true 64-bit atomic on that word through a striped lock table outside
+   the data (`LongStripes`, 1024 stripes, one `int` per cache line, shared with every worker through
+   `worker_threads` environment data). A writer takes the stripe, stores the HIGH half and then the LOW half, and
+   releases it; a reader retries while the stripe is odd or has changed. No allocation, never torn, any number of
+   writers.
+   - **Ring and broadcast positions** (head, tail, head cache, tail intent, latest) are straight Java 64-bit
+     positions (D16 striped 64-bit atomics): the `long` accessors are used as Agrona uses them.
+   - **64-bit counter values** (positions, publisher limits, stream and system counters) are straight Java 64-bit
+     values at +0 of the counter record (D16 striped 64-bit atomics): `UnsafeBufferPosition`, `AtomicCounter` and
+     `CountersReader` are Java's code unchanged (task T2b).
+   - **Multi-writer 64-bit counters on the control plane** (`nextCorrelationId`) use the `long` `getAndAddLong`.
+   - **Raw tails** use the port-only halves methods (`getLongVolatileHalves`, `putLongVolatileHalves`,
+     `compareAndSetLongHalves`, `getAndAddLongHalves`): the full 64-bit range as an `int` pair, no `bigint` (D12).
    - **Plain ArrayBuffers** (single-thread data, for example a log buffer before phase 4) keep the plain accesses
      of phase 1: `UnsafeBuffer` picks the `Atomics` path only when it wraps a `SharedArrayBuffer`, chosen once at
      `wrap`.
 5. **Settled phase 1 open items.**
    - D12: `ConcurrentPublication`'s per-message `getAndAddLong` on the raw tail becomes
-     `LogBufferDescriptor.getAndAddRawTailOffset(metaData, partitionIndex, alignedLength)`, an add on the `int`
-     halves that carries from the low half into the high half exactly as the 64-bit add does, returning the old
-     term offset and leaving the old term id in a preallocated holder. No `bigint`. (Cross-thread use is phase 4.)
+     `LogBufferDescriptor.getAndAddRawTailOffset(metaData, partitionIndex, alignedLength)`, one atomic 64-bit add
+     (`getAndAddLongHalves`, D16, made atomic by T2b) that carries from the low half into the high half exactly as the
+     64-bit add does, returning the old term offset and leaving the old term id in a preallocated holder. No
+     `bigint`.
    - `Long.MAX_VALUE` as a sentinel (`endOfStreamPosition` and the others) is `Long.MAX_VALUE` of `jdk.ts`,
      2^53 − 1. A position never reaches it (the cap below), so every comparison with the sentinel is unchanged.
    - D13: `LossDetector.pack(rebuildOffset, lossFound)` is `rebuildOffset * 2 + (lossFound ? 1 : 0)` (Java:
@@ -152,38 +150,50 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
   .allocateDirectAligned` gains the addition `allocateShared(length, alignment)`.
 - When the backing store is shared (decided at `wrap`), the `byte`, `short` and `int` `*Volatile`, `*Acquire`, `*Ordered`,
   `*Release`, `*Opaque`, `compareAndSet*`, `getAndAdd*`, `getAndSet*` use `Atomics` on `Int32Array` /
-  `Int16Array` views (Agrona's alignment checks apply). The `long` forms on a shared buffer use `BigInt64Array`
-  `Atomics` (exact; they allocate, so no per-message caller may use them; decision 4). Plain buffers keep phase
-  1's code.
-- Additions for decision 4: `putLongReleaseSeq(index, value, seqIndex)` and `getLongVolatileSeq(index,
-  seqIndex)` (two-slot sequence lock).
+  `Int16Array` views (Agrona's alignment checks apply). The `long` forms on a shared buffer are 64-bit atomics on
+  Java's word through `LongStripes` (T2b, decision 4). Plain buffers keep phase 1's code.
 - Tests: the phase 1 buffer suites (`MutableDirectBufferTests`, `UnsafeBufferTest`, `AtomicBufferTest`) run a
   second time over a `SharedArrayBuffer` (a factory parameter, no copy of the tests). Cross-worker tests in
   `test/extra/agrona/concurrent/SharedAtomicsExtraTest.test.ts`: 4 workers × 100k `compareAndSetInt` increments
-  end exact; 4 workers × 100k `getAndAddInt` end exact; a sequence-lock writer stepping across every 2^32
-  boundary in [0, 2^40) while 3 readers check every value they read was written (never torn); the sequence lock
-  allocates nothing.
+  end exact; 4 workers × 100k `getAndAddInt` end exact; a `putLongRelease` writer stepping across every 2^32
+  boundary in [0, 2^40) while 3 readers check every value they read was written (never torn).
 
-#### T2b — 64-bit counters on the two-slot sequence lock
-- Depends on T2. Implements the counters bullet of decision 4 in `UnsafeBufferPosition`, `AtomicCounter`,
-  `UnsafeBufferStatusIndicator` and `CountersReader` (shared buffers only; plain buffers keep phase 1's accesses).
-- Tests: the counters and position tests doubled over both backings; a cross-worker torn-read test on a position;
-  `expectNoAllocation` on `setRelease` + `getVolatile`, on `increment` and on the status indicator's `getVolatile`
-  over a shared counters buffer.
+#### T2b — True 64-bit atomics on shared buffers, Aeron's layout (D16)
+- Depends on T2. Replaces the rejected two-slot lock. New port-only `src/agrona/concurrent/LongStripes.ts` (1024
+  stripes, one `int` per 64-byte line, created by the main thread at module load and handed to workers through
+  `worker_threads` environment data; wrapping a `SharedArrayBuffer` in a worker with no table throws
+  `IllegalStateException`). `UnsafeBuffer`'s shared `long` methods use it: writer lock by compare-and-set from even to
+  odd, the two halves stored with `Atomics.store` (the D16 rule: HIGH half first, LOW half last), release with stripe
+  plus two; reader loads stripe, halves, stripe and retries while odd or changed. The `BigInt64Array` view, `toLong`
+  and the `*Seq` methods are deleted. Port-only `getLongVolatileHalves`, `putLongVolatileHalves`,
+  `compareAndSetLongHalves`, `getAndAddLongHalves` (on `AtomicBuffer` too) cover the full 64-bit range for the raw
+  tails.
+- `LogBufferDescriptor.getAndAddRawTailOffset`, `rawTailVolatile` and `casRawTail` use the halves methods, so every
+  raw tail operation is one atomic 64-bit operation (closes issue #10).
+- Counters (`AtomicCounter`, `UnsafeBufferPosition`, `UnsafeBufferStatusIndicator`, `CountersReader`,
+  `CountersManager`) are straight Java and 64-bit atomic on a shared buffer for free.
+- Tests (`test/extra/agrona/concurrent/`, `test/extra/client/logbuffer/`): `LongStripesExtraTest` (stripe range and
+  spread, same table in a worker, wrap without a table throws); `SharedLongAtomicsExtraTest` (Java layout of every
+  `long` atomic, carry, stripe released on every exit, halves methods over both backings, no allocation);
+  `SharedLongAtomicsWorkersExtraTest` (readers never see a torn long; 4 workers × 200k `getAndAddLong` exact across
+  2^32; 4 × 100k CAS increments exact; two words on one stripe; the low half is written last so an `int` reader sees
+  the high half; `TermRebuilder` frames never read as padding); `RawTailAtomicityExtraTest` (carry into the term id,
+  the (termId, offset) pair is never torn while another thread rotates, no allocation);
+  `SharedCountersExtraTest` (value at Java's offset, torn-read test with 3 readers across 2^32, reuse, the
+  `AtomicCounter` / position / `forEach` gaps over both backings). `SharedAtomicsExtraTest` loses its `*Seq` tests.
 
 #### T3 — Agrona ring buffers: `OneToOneRingBuffer`, `ManyToOneRingBuffer` (D16)
 - Sources: `concurrent/{MessageHandler, ControlledMessageHandler}`, `concurrent/ringbuffer/{RingBuffer,
   RingBufferDescriptor, RecordDescriptor, OneToOneRingBuffer, ManyToOneRingBuffer}`.
-- Every head / tail / head-cache access goes through the `int` atomics of T2 on the low half of the Java slot
-  (decision 4); the consumer heartbeat uses the sequence lock; `nextCorrelationId` uses the `long` `getAndAdd`.
+- Every head / tail / head-cache access is straight Java 64-bit positions (D16 striped 64-bit atomics, decision 4);
+  the consumer heartbeat is `getLongVolatile` / `putLongRelease`; `nextCorrelationId` uses the `long` `getAndAdd`.
   `tryClaim` / `commit` / `abort` write the record in place in the shared buffer (zero copy), as Java does.
-- Tests: `OneToOneRingBufferTest` (37), `ManyToOneRingBufferTest` (44). Their Mockito stubs of
-  `getLongVolatile(HEAD_COUNTER_INDEX)` and the like become the `int` accessors, with the same values (all fit in
-  an `int`); each such change is listed in `docs/mapping.md`.
+- Tests: `OneToOneRingBufferTest` (37), `ManyToOneRingBufferTest` (44). Java's `long` accessors are
+  used as they are (straight Java 64-bit positions); no test change is needed for them.
 - Extra cross-worker tests (`test/extra/agrona/concurrent/ringbuffer/`):
   - many-to-one: 4 producer workers × 250k messages of seeded random lengths (0 to `maxMsgLength`), one consumer;
     every message arrives once, in per-producer order, with its bytes intact; repeated with the positions
-    started 64 KiB below 2^32 so they wrap during the run; repeated with `tryClaim` / `commit` and `abort`;
+    started 64 KiB below 2^32 so they cross it during the run; repeated with `tryClaim` / `commit` and `abort`;
   - one-to-one: the same with one producer;
   - `unblock` with a producer worker terminated between claim and commit: the consumer gets past it;
   - the consumer heartbeat read from another worker is never torn;
@@ -194,9 +204,8 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
 #### T4 — Agrona broadcast and buffers
 - Sources: `concurrent/broadcast/{BroadcastBufferDescriptor, RecordDescriptor, BroadcastTransmitter,
   BroadcastReceiver, CopyBroadcastReceiver}`, `ExpandableArrayBuffer`.
-- Broadcast counters (tail intent, tail, latest) are wrapping `int`s (decision 4); `validate` is
-  `((cursor + capacity - tailIntent) | 0) > 0`. A receiver lapped by 2^31 bytes or more would mistake it for no
-  lap; recorded (the broadcast buffer carries control replies only).
+- Broadcast counters (tail intent, tail, latest) are straight Java 64-bit positions (D16 striped 64-bit atomics,
+  decision 4); `validate` is Java's.
 - Tests: `BroadcastTransmitterTest` (8), `BroadcastReceiverTest` (9), `ExpandableArrayBufferTest` (12).
   Extra: one transmitter, 3 receiver workers, lapping on purpose; every receiver either reads a record intact or
   reports a lap, never a torn record.
@@ -359,7 +368,7 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
 
 | Area | Operations | Entities / values | Orderings / timings |
 |---|---|---|---|
-| Ring buffers (T3) | `write`, `tryClaim` + `commit` / `abort`, `read`, `controlledRead`, `unblock`, `nextCorrelationId`, heartbeat | message length 0, 1, `maxMsgLength`, `maxMsgLength` + 1; record that needs padding at the buffer end; capacity 64 B (min) to 2^30 | 1 and 4 producer workers; positions wrapping 2^32 mid-run; producer dies between claim and commit; consumer slower than producers (full buffer) |
+| Ring buffers (T3) | `write`, `tryClaim` + `commit` / `abort`, `read`, `controlledRead`, `unblock`, `nextCorrelationId`, heartbeat | message length 0, 1, `maxMsgLength`, `maxMsgLength` + 1; record that needs padding at the buffer end; capacity 64 B (min) to 2^30 | 1 and 4 producer workers; positions crossing 2^32 mid-run; producer dies between claim and commit; consumer slower than producers (full buffer) |
 | Broadcast (T4) | `transmit`, `receiveNext`, copy receive | record exactly at the end; lengths 0 to max | 3 receivers; a receiver lapped once and many times |
 | Commands (T17–T19) | add / remove publication (shared, exclusive), add / remove subscription, client close, client timeout | same channel and stream twice; invalid URI; unknown registration id | command while the conductor is mid-cycle; remove before the add reply; client times out with resources live |
 | Data path (T15, T16, T20) | `offer`, `tryClaim`, sender scan, `onDataPacket` → rebuild, `poll` | 0-length, 1 B, MTU − 32, fragmented, max message; padding at term end | term rotation during a retransmit; `init-term-id` near `INT32_MAX`; position near the cap |
@@ -369,13 +378,14 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
 
 ## Review focus
 
-- **Shared memory:** every cross-agent field goes through the T2 atomics; no position comparison is a plain
-  `long` compare after D16; no `bigint` on a per-message path. x86 hides most missing release / acquire
-  orderings, so a stress test cannot prove them: the reviewer checks every shared access in T3 and T4 against the
-  Java call (`putIntRelease` stays `putIntRelease`, and so on), and a test lists the ring and broadcast sources'
+- **Shared memory:** every cross-agent field goes through the T2 / T2b atomics (D16 striped 64-bit atomics); every
+  position is a straight Java 64-bit value; no `bigint` on a per-message path. x86 hides most missing release /
+  acquire orderings, so a stress test cannot prove them: the reviewer checks every shared access in T3 and T4 against
+  the Java call (`putIntRelease` stays `putIntRelease`, and so on), and a test lists the ring and broadcast sources'
   buffer calls and fails on any plain access to a header, length or position field. Mutation checks that a
-  stress test does catch: drop the tail compare-and-set (two producers claim the same slot) and skip the
-  wrap of a position (the 2^32 run fails).
+  stress test does catch: drop the tail compare-and-set (two producers claim the same slot) and start the
+  positions 64 KiB below 2^32 (the crossing run fails if a half is lost). The striped writes store the HIGH half
+  first and the LOW half last; a new reader of only the low `int` of a long relies on that.
 - **Line-by-line fidelity:** member order, branches, constants and timeouts match the Java files; every skip and
   rename is in `docs/mapping.md` with a reason.
 - **Protocol on the wire:** frames and timings checked against the C driver (T23), not by reading the code.

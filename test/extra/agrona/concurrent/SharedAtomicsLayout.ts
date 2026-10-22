@@ -5,8 +5,7 @@
 export const BARRIER = 0;
 export const COUNTER = 8;
 export const SHORT_SLOTS = 16; // 4 shorts, one per worker
-export const SEQ = 64; // the sequence int of the sequence lock
-export const VALUE = 68; // the two 8 byte slots of the sequence lock, 68..84: a multiple of 4 and not of 8, to use the int halves
+export const VALUE = 72; // the 8 byte long the writer writes with putLongRelease and the readers read with getLongVolatile
 export const PROGRESS = 88; // the number of values the writer has written
 export const DONE = 92;
 export const CAPACITY = 128;

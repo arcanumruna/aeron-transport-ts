@@ -10,14 +10,13 @@ import {
     PASS_LENGTH,
     PASSES,
     PROGRESS,
-    SEQ,
     SHORT_SLOTS,
     VALUE,
     valueAt,
 } from './SharedAtomicsLayout.js';
 
 interface Data {
-    kind: 'cas-int' | 'add-int' | 'short' | 'seq-writer' | 'seq-reader' | 'seq-read-stalled';
+    kind: 'cas-int' | 'add-int' | 'short' | 'long-writer' | 'long-reader';
     buffer: SharedArrayBuffer;
     workers: number;
     id: number;
@@ -88,12 +87,12 @@ function shortSlots(): number {
     return last;
 }
 
-function seqWriter(): number {
+function longWriter(): number {
     barrier();
     let n = 0;
     for (let pass = 0; pass < PASSES; pass++) {
         for (let i = 0; i < PASS_LENGTH; i++) {
-            buffer.putLongReleaseSeq(VALUE, valueAt(i), SEQ);
+            buffer.putLongRelease(VALUE, valueAt(i));
             buffer.putIntOrdered(PROGRESS, ++n);
         }
     }
@@ -107,7 +106,7 @@ interface ReaderResult {
     firstTorn: string;
 }
 
-function seqReader(): ReaderResult {
+function longReader(): ReaderResult {
     barrier();
     let reads = 0;
     let torn = 0;
@@ -115,7 +114,7 @@ function seqReader(): ReaderResult {
     for (let spins = 0; spins < MAX_SPINS; spins++) {
         const done = 0 !== buffer.getIntVolatile(DONE);
         const before = buffer.getIntVolatile(PROGRESS);
-        const value = buffer.getLongVolatileSeq(VALUE, SEQ);
+        const value = buffer.getLongVolatile(VALUE);
         const after = buffer.getIntVolatile(PROGRESS);
         reads++;
 
@@ -139,15 +138,6 @@ function seqReader(): ReaderResult {
     return { reads, torn, firstTorn };
 }
 
-/** Reads while the writer is stopped mid-write: the results must all be the published value, with no blocking. */
-function seqReadStalled(): number[] {
-    const values: number[] = new Array<number>(data.iterations);
-    for (let i = 0; i < data.iterations; i++) {
-        values[i] = buffer.getLongVolatileSeq(VALUE, SEQ);
-    }
-    return values;
-}
-
 const result = (() => {
     switch (data.kind) {
         case 'cas-int':
@@ -156,12 +146,10 @@ const result = (() => {
             return addInt();
         case 'short':
             return shortSlots();
-        case 'seq-writer':
-            return seqWriter();
-        case 'seq-reader':
-            return seqReader();
-        case 'seq-read-stalled':
-            return seqReadStalled();
+        case 'long-writer':
+            return longWriter();
+        case 'long-reader':
+            return longReader();
     }
 })();
 
