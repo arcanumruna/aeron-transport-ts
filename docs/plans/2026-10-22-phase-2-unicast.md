@@ -223,13 +223,26 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
   every command flyweight encode → decode round trip with strings at length 0, 1 and the maximum, and `long`
   fields at the D5 bounds.
 
-#### T7 — Driver status counters and configuration
+#### T7a — Driver status counters, duty-cycle trackers, `AeronCounters`
+- T7 was split in two. T7a holds the status classes, `DutyCycleTracker`, `ThreadingMode`, `DriverManagedResource`,
+  `SessionKey`, `AeronCounters` and `DutyCycleStallTrackerTest` (4).
 - Sources: `driver/status/*` (including `ClientHeartbeatTimestamp` and `DutyCycleStallTracker`: the conductor,
   sender and receiver call their duty-cycle trackers every cycle, so §3's cut of `DutyCycleTracker` is dropped),
-  `DutyCycleTracker`, `ThreadingMode`, `Configuration`, `MediaDriver.Context` (everything except directories, files, mark file and
-  the out-of-scope features; `INVOKER` only, D3), `PublicationParams`, `SubscriptionParams`,
-  `DriverManagedResource`, `SessionKey`.
-- Tests: `ConfigurationTest` (2), `DutyCycleStallTrackerTest` (4), `MediaDriverContextTest` (36; the directory, file and mark-file tests are
+  `DutyCycleTracker`, `ThreadingMode`, `DriverManagedResource`, `SessionKey`, and the whole of
+  `aeron-client/.../AeronCounters.java` (it supersedes the two-constant file of T6). `MediaDriverVersion`, which the
+  Java build generates, is a fixed file (see `docs/mapping.md`).
+- Tests: `DutyCycleStallTrackerTest` (4), `AeronCountersTest` (16, one `@Disabled`). `SystemCountersTest` (2) is in
+  `aeron-system-tests` and needs a running driver and client: it is ported with the system tests.
+- Extra (`test/extra/driver/status/`): every counter factory against Java's type id, key bytes and label (with the
+  channel cut at its boundary), `SystemCounters` for all 46 descriptors, the trackers on a driven clock, `SessionKey`
+  `equals` / `hashCode`, `StatusUtil`, the `AeronCounters` constants against Java's literals, and `expectNoAllocation`
+  on `measureAndUpdate`, `increment` and `setRelease`.
+
+#### T7b — `Configuration`, `MediaDriver.Context`, `PublicationParams`, `SubscriptionParams`
+- Sources: `Configuration`, `MediaDriver.Context` (everything except directories, files, mark file and
+  the out-of-scope features; `INVOKER` only, D3), `PublicationParams`, `SubscriptionParams`. Where a T7a class
+  uses a `Configuration` constant as a literal, T7b switches it to the real constant.
+- Tests: `ConfigurationTest` (2), `MediaDriverContextTest` (36; the directory, file and mark-file tests are
   `it.skip`), `PublicationParamsTest` (37; response-channel rows are `it.skip`, §3).
 
 #### T8 — Addresses, interfaces and name resolution
