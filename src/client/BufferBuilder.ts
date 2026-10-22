@@ -255,8 +255,9 @@ export class BufferBuilder {
     private resize(newCapacity: number): void {
         if (this.isDirect) {
             const byteBuffer = BufferBuilder.newDirectBuffer(newCapacity);
-            this._buffer.getBytes(0, new Uint8Array(byteBuffer), 0, this._limit);
-            this._buffer.wrap(byteBuffer);
+            const view = new Uint8Array(byteBuffer);
+            this._buffer.getBytes(0, view, 0, this._limit);
+            this._buffer.wrap(view);
         } else {
             // Arrays.copyOf(buffer.byteArray(), newCapacity)
             const original = this._buffer.byteArray();

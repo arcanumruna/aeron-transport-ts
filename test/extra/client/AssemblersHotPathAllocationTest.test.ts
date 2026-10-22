@@ -3,7 +3,7 @@
 // for a fragmented one (BEGIN, MIDDLE, END copied into the builder, the complete header filled in and the builder reset).
 // Each loop is one assembler, so that the calls fit the inlining budget of the optimizing compiler, and the values stay
 // below 2^30 so that no int is boxed.
-import { describe, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import type { DirectBuffer } from '../../../src/agrona/DirectBuffer.js';
 import { ControlledFragmentAssembler } from '../../../src/client/ControlledFragmentAssembler.js';
@@ -24,16 +24,26 @@ const PAYLOAD = 1376; // an MTU of 1408 less the header
 const FRAME_LENGTH = HEADER_LENGTH + PAYLOAD;
 const sum = new Int32Array(1);
 
-/** A handler that only reads what it is given. */
+/** A handler that only reads what it is given; `onAssembled` runs for each delivery of 3 * PAYLOAD bytes. */
 class SumHandler {
+    public constructor(private readonly onAssembled: () => void = () => {}) {}
+
     public onFragment(buffer: DirectBuffer, offset: number, length: number, header: Header): void {
         sum[0] = (sum[0]! + length + offset + header.sessionId()) | 0;
+        if (3 * PAYLOAD === length) {
+            this.onAssembled();
+        }
     }
 }
 
 class SumControlledHandler {
+    public constructor(private readonly onAssembled: () => void = () => {}) {}
+
     public onFragment(buffer: DirectBuffer, offset: number, length: number, header: Header): Action {
         sum[0] = (sum[0]! + length + offset + header.sessionId()) | 0;
+        if (3 * PAYLOAD === length) {
+            this.onAssembled();
+        }
         return Action.CONTINUE;
     }
 }
@@ -51,11 +61,17 @@ function fixture(): { flyweight: DataHeaderFlyweight; header: Header; src: Unsaf
     return { flyweight, header, src: new UnsafeBuffer(new Uint8Array(4 * 1408)) };
 }
 
-const assemblers: [string, () => Assembler][] = [
-    ['FragmentAssembler', () => new FragmentAssembler(new SumHandler())],
-    ['ControlledFragmentAssembler', () => new ControlledFragmentAssembler(new SumControlledHandler())],
-    ['ImageFragmentAssembler', () => new ImageFragmentAssembler(new SumHandler())],
-    ['ImageControlledFragmentAssembler', () => new ImageControlledFragmentAssembler(new SumControlledHandler())],
+type Make = (onAssembled?: () => void) => Assembler;
+
+const sessionAssemblers: [string, Make][] = [
+    ['FragmentAssembler', (f) => new FragmentAssembler(new SumHandler(f))],
+    ['ControlledFragmentAssembler', (f) => new ControlledFragmentAssembler(new SumControlledHandler(f))],
+];
+
+const assemblers: [string, Make][] = [
+    ...sessionAssemblers,
+    ['ImageFragmentAssembler', (f) => new ImageFragmentAssembler(new SumHandler(f))],
+    ['ImageControlledFragmentAssembler', (f) => new ImageControlledFragmentAssembler(new SumControlledHandler(f))],
 ];
 
 describe('AssemblersHotPathAllocationTest', () => {
@@ -73,8 +89,12 @@ describe('AssemblersHotPathAllocationTest', () => {
     });
 
     it.each(assemblers)('%s fragmentedMessageAllocatesNothingOnceTheBuilderHasGrown', async (_name, make) => {
-        const assembler = make();
+        let assembled = 0;
+        const assembler = make(() => {
+            assembled++;
+        });
         const { flyweight, header, src } = fixture();
+        let fed = 0;
 
         // BEGIN, MIDDLE, END of 3 * PAYLOAD bytes; the first pass grows the builder, the warm up of the check runs more
         const feed = (n: number): void => {
@@ -86,10 +106,52 @@ describe('AssemblersHotPathAllocationTest', () => {
                 assembler.onFragment(src, HEADER_LENGTH, PAYLOAD, header);
                 flyweight.termOffset(2 * FRAME_LENGTH).flags(END_FRAG_FLAG);
                 assembler.onFragment(src, HEADER_LENGTH, PAYLOAD, header);
+                fed++;
             }
         };
         feed(4);
 
         await expectNoAllocation(feed, ITERATIONS / 4);
+
+        // not vacuous: every message that was fed was assembled, in full
+        expect(assembled).toBe(fed);
+    });
+
+    it.each(sessionAssemblers)('%s interleavedSessionsAllocateNothingOnceTheBuildersHaveGrown', async (_name, make) => {
+        let assembled = 0;
+        const assembler = make(() => {
+            assembled++;
+        });
+        const sessions = [11, 22, 33];
+        const { flyweight, header, src } = fixture();
+        let fed = 0;
+
+        // the three sessions are interleaved fragment by fragment, so the map is read with three different keys
+        const feed = (n: number): void => {
+            for (let i = 0; i < n; i++) {
+                flyweight.frameLength(FRAME_LENGTH);
+                flyweight.termOffset(0).flags(BEGIN_FRAG_FLAG);
+                for (const sessionId of sessions) {
+                    flyweight.sessionId(sessionId);
+                    assembler.onFragment(src, HEADER_LENGTH, PAYLOAD, header);
+                }
+                flyweight.termOffset(FRAME_LENGTH).flags(0);
+                for (const sessionId of sessions) {
+                    flyweight.sessionId(sessionId);
+                    assembler.onFragment(src, HEADER_LENGTH, PAYLOAD, header);
+                }
+                flyweight.termOffset(2 * FRAME_LENGTH).flags(END_FRAG_FLAG);
+                for (const sessionId of sessions) {
+                    flyweight.sessionId(sessionId);
+                    assembler.onFragment(src, HEADER_LENGTH, PAYLOAD, header);
+                }
+                fed += sessions.length;
+            }
+        };
+        feed(4);
+
+        await expectNoAllocation(feed, ITERATIONS / 12);
+
+        expect(assembled).toBe(fed);
     });
 });

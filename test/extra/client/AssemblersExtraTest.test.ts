@@ -93,7 +93,7 @@ interface Kind {
     readonly name: string;
     readonly sessions: boolean;
     readonly controlled: boolean;
-    make(delegate: (call: Call) => Action | void, initialLength?: number, isDirect?: boolean): AssemblerUnderTest;
+    construct(handler: unknown, initialLength?: number, isDirect?: boolean): AssemblerUnderTest;
 }
 
 interface AssemblerUnderTest {
@@ -133,36 +133,47 @@ function record(delegate: (call: Call) => Action | void): {
     };
 }
 
-const kinds: Kind[] = [
+/** What the matrix runs: a kind with `make`, which wraps the delegate in a recording handler. */
+type MatrixKind = Kind & {
+    make(delegate: (call: Call) => Action | void, initialLength?: number, isDirect?: boolean): AssemblerUnderTest;
+};
+
+const baseKinds: Kind[] = [
     {
         name: 'FragmentAssembler',
         sessions: true,
         controlled: false,
-        make: (delegate, initialLength = 0, isDirect = false) =>
-            new FragmentAssembler(record(delegate), initialLength, isDirect),
+        construct: (handler, initialLength = 0, isDirect = false) =>
+            new FragmentAssembler(handler as never, initialLength, isDirect),
     },
     {
         name: 'ControlledFragmentAssembler',
         sessions: true,
         controlled: true,
-        make: (delegate, initialLength = 0, isDirect = false) =>
-            new ControlledFragmentAssembler(record(delegate), initialLength, isDirect),
+        construct: (handler, initialLength = 0, isDirect = false) =>
+            new ControlledFragmentAssembler(handler as never, initialLength, isDirect),
     },
     {
         name: 'ImageFragmentAssembler',
         sessions: false,
         controlled: false,
-        make: (delegate, initialLength = 0, isDirect = false) =>
-            new ImageFragmentAssembler(record(delegate), initialLength, isDirect),
+        construct: (handler, initialLength = 0, isDirect = false) =>
+            new ImageFragmentAssembler(handler as never, initialLength, isDirect),
     },
     {
         name: 'ImageControlledFragmentAssembler',
         sessions: false,
         controlled: true,
-        make: (delegate, initialLength = 0, isDirect = false) =>
-            new ImageControlledFragmentAssembler(record(delegate), initialLength, isDirect),
+        construct: (handler, initialLength = 0, isDirect = false) =>
+            new ImageControlledFragmentAssembler(handler as never, initialLength, isDirect),
     },
 ];
+
+const kinds: MatrixKind[] = baseKinds.map((k) => ({
+    ...k,
+    make: (delegate: (call: Call) => Action | void, initialLength = 0, isDirect = false) =>
+        k.construct(record(delegate), initialLength, isDirect),
+}));
 
 describe.each(kinds)('$name matrix', (kind) => {
     function setUp(initialLength = 0, isDirect = false) {
@@ -198,12 +209,25 @@ describe.each(kinds)('$name matrix', (kind) => {
         }
     });
 
-    it('returnsContinueForAnUnfragmentedMessageWhenTheDelegateDoes', () => {
-        const { assembler, stream } = setUp();
-        stream.flyweight.flags(UNFRAGMENTED).frameLength(HEADER_LENGTH + 4);
-        const result = assembler.onFragment(new UnsafeBuffer(new Uint8Array(64)), 0, 4, stream.header);
-        expect(result).toBe(kind.controlled ? Action.CONTINUE : undefined);
-    });
+    if (kind.controlled) {
+        it.each([Action.ABORT, Action.BREAK, Action.COMMIT, Action.CONTINUE])(
+            'returnsTheActionOfTheDelegateForAnUnfragmentedMessage %s',
+            (action) => {
+                const assembler = kind.make(() => action);
+                const stream = new Stream(777, assembler);
+                stream.flyweight.flags(UNFRAGMENTED).frameLength(HEADER_LENGTH + 4);
+                const result = assembler.onFragment(new UnsafeBuffer(new Uint8Array(64)), 0, 4, stream.header);
+                expect(result).toBe(action);
+            },
+        );
+    } else {
+        it('returnsNothingForAnUnfragmentedMessage', () => {
+            const { assembler, stream } = setUp();
+            stream.flyweight.flags(UNFRAGMENTED).frameLength(HEADER_LENGTH + 4);
+            const result = assembler.onFragment(new UnsafeBuffer(new Uint8Array(64)), 0, 4, stream.header);
+            expect(result).toBeUndefined();
+        });
+    }
 
     it.each([0, 1, 2, 3, 5, 9])('assemblesBeginAndEndWithMiddleFragments %d', (middles) => {
         const { calls, stream } = setUp();
@@ -324,6 +348,26 @@ describe.each(kinds)('$name matrix', (kind) => {
         expect(calls).toHaveLength(0);
     });
 
+    it('resetsOnATermOffsetMismatchSoTheRightEndFragmentAfterItIsIgnored', () => {
+        const { calls, stream } = setUp();
+        stream.send(BEGIN_FRAG_FLAG, payload(1, 32)); // @0, the next term offset is 64
+        stream.termOffset = 128; // a MIDDLE that is not the expected one
+        stream.send(MIDDLE, payload(2, 32));
+        stream.termOffset = 64; // the END that the first BEGIN was waiting for
+        stream.send(END_FRAG_FLAG, payload(3, 32));
+        expect(calls).toHaveLength(0);
+    });
+
+    it('resetsAfterTheEndFragmentSoTheEndFragmentAgainIsNotPartOfAMessage', () => {
+        const { calls, stream } = setUp();
+        stream.send(BEGIN_FRAG_FLAG, payload(1, 32)); // @0
+        stream.send(END_FRAG_FLAG, payload(2, 32)); // @64
+        expect(calls).toHaveLength(1);
+        stream.termOffset = 64;
+        stream.send(END_FRAG_FLAG, payload(2, 32));
+        expect(calls).toHaveLength(1);
+    });
+
     it('assemblesAMessageLargerThanTheInitialCapacity', () => {
         const { calls, assembler, stream } = setUp(8);
         const parts = [payload(1, 100), payload(2, 5000), payload(3, 9000)];
@@ -429,6 +473,23 @@ describe.each(kinds)('$name matrix', (kind) => {
         expect(calls[0]!.bytes).toEqual([...payload(2, 5), ...payload(3, 5)]);
     });
 
+    if (kind.controlled) {
+        it('anAbortOfAnEmptyEndFragmentThatFillsTheCapacityThrowsAsJavaDoes', () => {
+            // BufferBuilder.limit(limit) rejects limit == capacity; Java has the same quirk in the ABORT path
+            const calls: Call[] = [];
+            const assembler = kind.make((call) => {
+                calls.push(call);
+                return Action.ABORT;
+            }, 64);
+            const stream = new Stream(777, assembler);
+            stream.send(BEGIN_FRAG_FLAG, payload(1, 64)); // limit == capacity == 64
+            const error = assertThrowsExactly(IllegalArgumentException, () => stream.send(END_FRAG_FLAG, []));
+            expect(error.message).toBe('limit outside range: capacity=64 limit=64');
+            expect(calls).toHaveLength(1);
+            expect(calls[0]!.length).toBe(64);
+        });
+    }
+
     it('reusesTheBuilderForBackToBackMessages', () => {
         const { calls, stream } = setUp();
         for (let m = 0; m < 20; m++) {
@@ -442,8 +503,8 @@ describe.each(kinds)('$name matrix', (kind) => {
     });
 
     it('exposesItsDelegate', () => {
-        const { assembler } = setUp();
-        expect(assembler.delegate()).toBeDefined();
+        const handler = record(() => {});
+        expect(kind.construct(handler).delegate()).toBe(handler);
     });
 
     if (kind.sessions) {
@@ -527,6 +588,17 @@ describe.each(kinds)('$name matrix', (kind) => {
             }
         });
     } else {
+        it.each([false, true])('theBuilderOfTheImageAssemblerIsDirectOrHeap %s', (isDirect) => {
+            const assembler = kind.make(() => {}, 0, isDirect);
+            const builder = assembler.bufferBuilder!();
+            builder.append(new UnsafeBuffer(new Uint8Array(5000).fill(0x55)), 0, 5000);
+            builder.limit(10);
+            builder.compact();
+            // a heap resize is Arrays.copyOf (the bytes past the limit stay), a direct one copies `limit` bytes
+            expect(builder.capacity()).toBe(INIT_MIN_CAPACITY);
+            expect(builder.buffer().getByte(100)).toBe(isDirect ? 0 : 0x55);
+        });
+
         it('twoImagesKeepTheirOwnBuilders', () => {
             const callsA: Call[] = [];
             const callsB: Call[] = [];
@@ -594,10 +666,6 @@ describe.each(kinds)('$name matrix', (kind) => {
                     expect(assembler.bufferBuilder!().limit()).toBe(0);
                     expect(assembler.bufferBuilder!().nextTermOffset()).toBe(Aeron.NULL_VALUE);
                 }
-                // the END fragment again is not part of a message
-                stream.termOffset -= BitUtil.align(HEADER_LENGTH + 50, FRAME_ALIGNMENT);
-                stream.send(END_FRAG_FLAG, payload(3, 50));
-                expect(calls).toHaveLength(1);
             });
 
             it('ABORT keeps the message, without the END fragment, so the END fragment can be delivered again', () => {
@@ -697,6 +765,16 @@ describe.each(kinds)('$name matrix', (kind) => {
 });
 
 describe('BufferBuilder matrix', () => {
+    it.each([false, true])('compactCopiesTheBytesPastTheLimitOnlyInAHeapBuilder isDirect=%s', (isDirect) => {
+        const builder = new BufferBuilder(0, isDirect);
+        builder.append(new UnsafeBuffer(new Uint8Array(5000).fill(0x55)), 0, 5000);
+        builder.limit(10);
+        builder.compact();
+        expect(builder.capacity()).toBe(INIT_MIN_CAPACITY);
+        expect(builder.buffer().getByte(100)).toBe(isDirect ? 0 : 0x55);
+        expect(builder.buffer().getByte(5)).toBe(0x55);
+    });
+
     it('resetClearsTheLimitTheNextTermOffsetAndTheCompleteHeaderButKeepsTheCapacity', () => {
         const builder = new BufferBuilder();
         const flyweight = new DataHeaderFlyweight();

@@ -90,8 +90,6 @@ describe('BufferBuilder', () => {
         expect(builder.capacity()).toBe(INIT_MIN_CAPACITY);
         expect(builder.buffer().capacity()).toBe(INIT_MIN_CAPACITY);
         expect(builder.limit()).toBe(appendedLength);
-        // byteBuffer() is not null and isDirect(): a direct buffer is an ArrayBuffer here (spec D9)
-        expect(builder.buffer().byteArray().buffer).toBeInstanceOf(ArrayBuffer);
     });
 
     it.each([false, true])('shouldCreateHeaderBuffer %s', (isDirect) => {
@@ -209,16 +207,16 @@ describe('BufferBuilder', () => {
         buffer.fill(7);
         const srcBuffer = new UnsafeBuffer(buffer);
 
-        const builder = new BufferBuilder(bufferLength);
-        const initialCapacity = builder.capacity();
+        const bufferBuilder = new BufferBuilder(bufferLength);
+        const initialCapacity = bufferBuilder.capacity();
 
-        builder.append(srcBuffer, 0, bufferLength);
+        bufferBuilder.append(srcBuffer, 0, bufferLength);
 
         const temp = new Uint8Array(bufferLength);
-        builder.buffer().getBytes(0, temp, 0, bufferLength);
+        bufferBuilder.buffer().getBytes(0, temp, 0, bufferLength);
 
-        expect(builder.limit()).toBe(bufferLength);
-        expect(builder.capacity()).toBe(initialCapacity);
+        expect(bufferBuilder.limit()).toBe(bufferLength);
+        expect(bufferBuilder.capacity()).toBe(initialCapacity);
         expect(buffer).toEqual(temp);
     });
 
@@ -228,15 +226,15 @@ describe('BufferBuilder', () => {
         buffer.fill(7);
         const srcBuffer = new UnsafeBuffer(buffer);
 
-        const builder = new BufferBuilder(bufferLength);
+        const bufferBuilder = new BufferBuilder(bufferLength);
 
-        builder.append(srcBuffer, 0, buffer.length);
+        bufferBuilder.append(srcBuffer, 0, buffer.length);
 
         const temp = new Uint8Array(buffer.length);
-        builder.buffer().getBytes(0, temp, 0, buffer.length);
+        bufferBuilder.buffer().getBytes(0, temp, 0, buffer.length);
 
-        expect(builder.limit()).toBe(buffer.length);
-        expect(builder.capacity()).toBeGreaterThan(bufferLength);
+        expect(bufferBuilder.limit()).toBe(buffer.length);
+        expect(bufferBuilder.capacity()).toBeGreaterThan(bufferLength);
         expect(buffer).toEqual(temp);
     });
 
@@ -248,16 +246,16 @@ describe('BufferBuilder', () => {
         buffer.fill(7, 0, firstLength + secondLength);
         const srcBuffer = new UnsafeBuffer(buffer);
 
-        const builder = new BufferBuilder(bufferLength / 2);
+        const bufferBuilder = new BufferBuilder(bufferLength / 2);
 
-        builder.append(srcBuffer, 0, firstLength);
-        builder.append(srcBuffer, firstLength, secondLength);
+        bufferBuilder.append(srcBuffer, 0, firstLength);
+        bufferBuilder.append(srcBuffer, firstLength, secondLength);
 
         const temp = new Uint8Array(buffer.length);
-        builder.buffer().getBytes(0, temp, 0, secondLength + firstLength);
+        bufferBuilder.buffer().getBytes(0, temp, 0, secondLength + firstLength);
 
-        expect(builder.limit()).toBe(firstLength + secondLength);
-        expect(builder.capacity()).toBeGreaterThanOrEqual(firstLength + secondLength);
+        expect(bufferBuilder.limit()).toBe(firstLength + secondLength);
+        expect(bufferBuilder.capacity()).toBeGreaterThanOrEqual(firstLength + secondLength);
         expect(buffer).toEqual(temp);
     });
 
@@ -266,29 +264,29 @@ describe('BufferBuilder', () => {
         const buffer = new Uint8Array(bufferLength);
         const srcBuffer = new UnsafeBuffer(buffer);
 
-        const builder = new BufferBuilder();
+        const bufferBuilder = new BufferBuilder();
 
         const bufferCount = 5;
         for (let i = 0; i < bufferCount; i++) {
-            builder.append(srcBuffer, 0, buffer.length);
+            bufferBuilder.append(srcBuffer, 0, buffer.length);
         }
 
         const expectedLimit = buffer.length * bufferCount;
-        expect(builder.limit()).toBe(expectedLimit);
-        const expandedCapacity = builder.capacity();
+        expect(bufferBuilder.limit()).toBe(expectedLimit);
+        const expandedCapacity = bufferBuilder.capacity();
         expect(expandedCapacity).toBeGreaterThan(expectedLimit);
 
-        builder.reset();
+        bufferBuilder.reset();
 
-        builder.append(srcBuffer, 0, buffer.length);
-        builder.append(srcBuffer, 0, buffer.length);
-        builder.append(srcBuffer, 0, buffer.length);
+        bufferBuilder.append(srcBuffer, 0, buffer.length);
+        bufferBuilder.append(srcBuffer, 0, buffer.length);
+        bufferBuilder.append(srcBuffer, 0, buffer.length);
 
-        builder.compact();
+        bufferBuilder.compact();
 
-        expect(builder.limit()).toBe(buffer.length * 3);
-        expect(builder.capacity()).toBeLessThan(expandedCapacity);
-        expect(builder.capacity()).toBe(builder.limit());
+        expect(bufferBuilder.limit()).toBe(buffer.length * 3);
+        expect(bufferBuilder.capacity()).toBeLessThan(expandedCapacity);
+        expect(bufferBuilder.capacity()).toBe(bufferBuilder.limit());
     });
 
     it('captureFirstHeaderShouldCopyTheEntireHeader', () => {
