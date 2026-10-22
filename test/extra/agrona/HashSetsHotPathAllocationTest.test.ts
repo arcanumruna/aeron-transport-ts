@@ -51,14 +51,17 @@ describe('HashSetsHotPathAllocationTest', () => {
             set.add(i);
         }
 
+        // The consumer is created once, as a hot path holds its callbacks: a closure created per pass allocates
+        // unless V8 happens to inline forEachInt, which made this test flaky on a loaded host.
+        const consumer = (v: number): void => {
+            sum[0] = sum[0]! + v;
+        };
         await expectNoAllocation((n) => {
             for (let i = 0; i < n; i += 4) {
                 for (const it = set.iterator(); it.hasNext();) {
                     sum[0] = sum[0]! + it.nextValue();
                 }
-                set.forEachInt((v) => {
-                    sum[0] = sum[0]! + v;
-                });
+                set.forEachInt(consumer);
             }
         });
     });
