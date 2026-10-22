@@ -224,6 +224,15 @@ export const Long = {
         return value;
     },
 
+    /** A `long` held in a `bigint`: the value, or a `RangeError` if it is outside [-2^63, 2^63 - 1]; it never wraps. */
+    checkInt64(value: bigint): bigint {
+        if (value < -(2n ** 63n) || value > 2n ** 63n - 1n) {
+            throw new RangeError('long value is outside [-2^63, 2^63 - 1]: ' + value);
+        }
+
+        return value;
+    },
+
     /** `Long.compare(long, long)` for two `number`s holding safe integers. */
     compare(x: number, y: number): number {
         return x < y ? -1 : x === y ? 0 : 1;

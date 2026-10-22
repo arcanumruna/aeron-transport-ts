@@ -51,8 +51,13 @@ export class ControlProtocolException extends AeronException {
      */
     public constructor(code: ErrorCode, msg: string, rootCause: Error);
     public constructor(code: ErrorCode, msgOrCause: string | Error, rootCause?: Error) {
-        const category = ControlProtocolException.errorToCategory(code);
-        super(...(ControlProtocolException.superArgs(msgOrCause, rootCause, category) as [string, Error, Category]));
+        if (undefined !== rootCause) {
+            super(msgOrCause as string, rootCause, ControlProtocolException.errorToCategory(code));
+        } else if (typeof msgOrCause === 'string') {
+            super(msgOrCause, ControlProtocolException.errorToCategory(code));
+        } else {
+            super(msgOrCause, ControlProtocolException.errorToCategory(code));
+        }
         this.code = code;
     }
 
@@ -73,13 +78,5 @@ export class ControlProtocolException extends AeronException {
      */
     public static errorToCategory(errorCode: ErrorCode): Category {
         return ErrorCode.RESOURCE_TEMPORARILY_UNAVAILABLE === errorCode ? Category.WARN : Category.ERROR;
-    }
-
-    private static superArgs(msgOrCause: string | Error, rootCause: Error | undefined, category: Category): unknown[] {
-        if (undefined === rootCause) {
-            return [msgOrCause, category];
-        }
-
-        return [msgOrCause, rootCause, category];
     }
 }

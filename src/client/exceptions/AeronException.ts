@@ -67,6 +67,8 @@ export class Category {
     }
 }
 
+type CategoryType = Category;
+
 /**
  * Base Aeron exception for catching all Aeron specific errors.
  * <p>
@@ -198,4 +200,10 @@ export class AeronException extends RuntimeException {
     public static isFatal(t: Error): boolean {
         return t instanceof AeronException && Category.FATAL === t._category;
     }
+}
+
+// Declaration merging: `AeronException.Category` is a type as well as a value, as the nested Java enum is.
+// eslint-disable-next-line @typescript-eslint/no-namespace
+export namespace AeronException {
+    export type Category = CategoryType;
 }

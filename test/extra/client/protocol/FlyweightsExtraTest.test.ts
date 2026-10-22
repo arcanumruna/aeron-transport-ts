@@ -217,14 +217,14 @@ describe('DataHeaderFlyweight extra', () => {
         expect(DataHeaderFlyweight.reservedValue(term, 32)).toBe(value);
     });
 
-    it('reservedValueWrapsToSixtyFourBitsLikeAJavaLong', () => {
+    it('reservedValueOutsideSixtyFourBitsThrowsRangeErrorAndWritesNothing', () => {
         const flyweight = new DataHeaderFlyweight(new Uint8Array(32));
+        flyweight.reservedValue(7n);
 
-        flyweight.reservedValue(2n ** 63n);
-        expect(flyweight.reservedValue()).toBe(-(2n ** 63n));
-
-        flyweight.reservedValue(2n ** 64n + 5n);
-        expect(flyweight.reservedValue()).toBe(5n);
+        for (const value of [2n ** 63n, -(2n ** 63n) - 1n, 2n ** 64n + 5n, -(2n ** 64n)]) {
+            assertThrows(RangeError, () => flyweight.reservedValue(value));
+            expect(flyweight.reservedValue()).toBe(7n);
+        }
     });
 
     it('flagsAllSetAndNone', () => {
@@ -371,6 +371,12 @@ describe('NakFlyweight extra', () => {
         flyweight.termOffset(termLength).length(0);
         expect(flyweight.isValid(termLength)).toBe(false);
 
+        // a term offset must be a multiple of the frame alignment (32), not only of 16
+        for (const misaligned of [16, 48, 1, 31, 33]) {
+            flyweight.termOffset(misaligned).length(0);
+            expect(flyweight.isValid(termLength), 'termOffset ' + misaligned).toBe(false);
+        }
+
         // offset + length does not wrap an int: INT32_MAX + 32 is above the term length
         flyweight.termOffset(32).length(INT32_MAX);
         expect(flyweight.isValid(termLength)).toBe(false);
@@ -475,6 +481,25 @@ describe('StatusMessageFlyweight extra', () => {
         expect(flyweight.groupTag()).toBe(77n);
     });
 
+    it('bigintWritesOutsideSixtyFourBitsThrowRangeErrorAndWriteNothing', () => {
+        const flyweight = new StatusMessageFlyweight(new Uint8Array(48));
+        flyweight.receiverId(5n).groupTag(6n);
+        const before = bytesOf(flyweight, 48);
+
+        for (const value of [2n ** 63n, -(2n ** 63n) - 1n, 2n ** 64n + 5n]) {
+            assertThrows(RangeError, () => flyweight.receiverId(value));
+            assertThrows(RangeError, () => flyweight.putLongUnaligned(20, value));
+            assertThrows(RangeError, () => flyweight.groupTag(value));
+            expect(bytesOf(flyweight, 48)).toEqual(before);
+        }
+
+        // the frame length is untouched by a rejected group tag
+        const bare = new StatusMessageFlyweight(new Uint8Array(48));
+        bare.frameLength(36);
+        assertThrows(RangeError, () => bare.groupTag(2n ** 63n));
+        expect(bare.frameLength()).toBe(36);
+    });
+
     it('receiverIdOutsideTheWindowThrows', () => {
         const flyweight = new StatusMessageFlyweight(new Uint8Array(35));
 
@@ -497,6 +522,12 @@ describe('StatusMessageFlyweight extra', () => {
 
         flyweight.consumptionTermOffset(termLength).receiverWindowLength(0);
         expect(flyweight.isValid(termLength)).toBe(false);
+
+        // a term offset must be a multiple of the frame alignment (32), not only of 16
+        for (const misaligned of [16, 48, 1, 31, 33]) {
+            flyweight.consumptionTermOffset(misaligned).receiverWindowLength(0);
+            expect(flyweight.isValid(termLength), 'consumptionTermOffset ' + misaligned).toBe(false);
+        }
 
         flyweight.consumptionTermOffset(INT32_MIN).receiverWindowLength(0);
         expect(flyweight.isValid(termLength)).toBe(false);

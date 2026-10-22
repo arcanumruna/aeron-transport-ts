@@ -496,3 +496,11 @@ export class CommonContext {
      */
     public static readonly EVENT_LOG_RENDER_DATA_PROP_NAME: string = 'aeron.event.log.render.data';
 }
+
+type InferableBooleanType = InferableBoolean;
+
+// Declaration merging: `CommonContext.InferableBoolean` is a type as well as a value, as the nested Java enum is.
+// eslint-disable-next-line @typescript-eslint/no-namespace
+export namespace CommonContext {
+    export type InferableBoolean = InferableBooleanType;
+}
