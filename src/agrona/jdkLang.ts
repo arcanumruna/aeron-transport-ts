@@ -1,7 +1,7 @@
 // JDK stand-ins added with the agents and counters (phase 1, T5): `Thread` and its interrupt flag, the exceptions and
 // error that the agent code catches by type, `AutoCloseable`, `Objects.requireNonNull` and `Charset`.
 // Not part of Agrona: there is no Java file behind this one. It sits beside `jdk.ts` (spec D10, docs/mapping.md).
-import { Exception, NullPointerException } from './jdk.js';
+import { Exception, NullPointerException, systemProperties } from './jdk.js';
 
 /**
  * `java.lang.AutoCloseable`. A try-with-resources block becomes try / finally with an explicit `close()`.
@@ -42,6 +42,33 @@ export function requireNonNull<T>(obj: T | null | undefined, message?: string): 
 
     return obj;
 }
+
+/**
+ * Stand-in for the system properties of `java.lang.System`: `getProperty`, `setProperty` and `clearProperty` over one
+ * module-level `Map<string, string>` that starts empty. `process.env` is never read (docs/mapping.md, "Notes"). The
+ * map is the `systemProperties` of `jdk.ts`, which `Integer.getInteger`, `Long.getLong` and `Boolean.getBoolean`
+ * read.
+ */
+export const System = {
+    /** `System.getProperty(key, def)`: the value of the property, or `def` (`null` if not given) if it is not set. */
+    getProperty<T extends string | null = null>(key: string, def: T = null as T): string | T {
+        return systemProperties.get(key) ?? def;
+    },
+
+    /** `System.setProperty(key, value)`: the previous value of the property, or `null` if it was not set. */
+    setProperty(key: string, value: string): string | null {
+        const previous = systemProperties.get(key) ?? null;
+        systemProperties.set(key, value);
+        return previous;
+    },
+
+    /** `System.clearProperty(key)`: the previous value of the property, or `null` if it was not set. */
+    clearProperty(key: string): string | null {
+        const previous = systemProperties.get(key) ?? null;
+        systemProperties.delete(key);
+        return previous;
+    },
+} as const;
 
 /**
  * Stand-in for `java.lang.Thread` on a single JS thread (spec D3, D11). There is one JS thread, so a "thread" is a

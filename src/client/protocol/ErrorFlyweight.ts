@@ -190,6 +190,60 @@ export class ErrorFlyweight extends HeaderFlyweight {
     }
 
     /**
+     * The upper 32 bits of the receiver id, without a `bigint`: the high half of the 8 byte little endian field.
+     * <p>
+     * Not in Java (spec D14).
+     *
+     * @return the upper half of the receiver id, an `int`.
+     */
+    public receiverIdHigh(): number;
+    /**
+     * Set the upper 32 bits of the receiver id, without a `bigint`.
+     * <p>
+     * Not in Java (spec D14).
+     *
+     * @param high the upper half of the receiver id, an `int`.
+     * @return this for a fluent API.
+     */
+    public receiverIdHigh(high: number): ErrorFlyweight;
+    public receiverIdHigh(high?: number): number | ErrorFlyweight {
+        if (undefined === high) {
+            return this.getInt(ErrorFlyweight.RECEIVER_ID_FIELD_OFFSET + SIZE_OF_INT, LITTLE_ENDIAN);
+        }
+
+        this.putInt(ErrorFlyweight.RECEIVER_ID_FIELD_OFFSET + SIZE_OF_INT, high, LITTLE_ENDIAN);
+
+        return this;
+    }
+
+    /**
+     * The lower 32 bits of the receiver id, without a `bigint`: the low half of the 8 byte little endian field.
+     * <p>
+     * Not in Java (spec D14).
+     *
+     * @return the lower half of the receiver id, an `int`.
+     */
+    public receiverIdLow(): number;
+    /**
+     * Set the lower 32 bits of the receiver id, without a `bigint`.
+     * <p>
+     * Not in Java (spec D14).
+     *
+     * @param low the lower half of the receiver id, an `int`.
+     * @return this for a fluent API.
+     */
+    public receiverIdLow(low: number): ErrorFlyweight;
+    public receiverIdLow(low?: number): number | ErrorFlyweight {
+        if (undefined === low) {
+            return this.getInt(ErrorFlyweight.RECEIVER_ID_FIELD_OFFSET, LITTLE_ENDIAN);
+        }
+
+        this.putInt(ErrorFlyweight.RECEIVER_ID_FIELD_OFFSET, low, LITTLE_ENDIAN);
+
+        return this;
+    }
+
+    /**
      * The group tag of the receiver that sent the error, valid when {@link hasGroupTag}. A `bigint` (spec 5.2).
      *
      * @return group tag.

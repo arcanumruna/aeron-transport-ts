@@ -33,8 +33,13 @@ const PADDING_SIZE = 64;
 const POW2 = new Float64Array(64).map((_, i) => 2 ** i);
 
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
+const TWO_POW_31 = 2147483648;
+const TWO_POW_53 = 9007199254740992;
 
 const PARTITION_COUNT = 3;
+
+/** Scratch for the halves of a raw tail (spec D12, D16): the owner of a thread uses the module on that thread only. */
+const RAW_TAIL_HALVES = new Int32Array(2);
 const PAGE_MIN_SIZE = 4 * 1024;
 
 // The offsets are what the static initialiser of Java computes. A `static readonly` of a TypeScript class cannot be
@@ -114,6 +119,29 @@ export class LogBufferDescriptor {
      * Section index for which buffer contains the log metadata.
      */
     public static readonly LOG_META_DATA_SECTION_INDEX = PARTITION_COUNT;
+
+    /**
+     * The largest position: `Long.MAX_VALUE`, 2^53 - 1 (spec D5). A position never reaches it, because
+     * {@link maxPossiblePosition} caps positions below it, so a comparison with it as a sentinel is unchanged.
+     * <p>
+     * Not in Java (spec D13, phase 2 decision 5).
+     */
+    public static readonly MAX_POSITION = Long.MAX_VALUE;
+
+    /**
+     * The position cap of a term length: Java's `termBufferLength * (1L << 31)` (computed inline in `Publication`, the
+     * limit above which `indexByTermCount` goes negative) for terms of 2 MiB or less. From 4 MiB up it is
+     * `2^53 - termLength`, the last term boundary that leaves a whole term below 2^53, so every position, including
+     * the cap plus a maximum message plus a header, stays below {@link MAX_POSITION}.
+     * <p>
+     * Not in Java (spec D13, phase 2 decision 5).
+     *
+     * @param termLength of the log buffer.
+     * @return the largest position a publication or image of the term length can have.
+     */
+    public static maxPossiblePosition(termLength: number): number {
+        return Math.min(termLength * TWO_POW_31, TWO_POW_53 - termLength);
+    }
 
     /**
      * Minimum buffer length for a log term.
@@ -1041,6 +1069,36 @@ export class LogBufferDescriptor {
     }
 
     /**
+     * Add to the term offset of the raw tail of a slot, carrying into the term id as the 64-bit add does, and return the
+     * old term offset: Java's `logMetaDataBuffer.getAndAddLong(tailCounterOffset, alignedLength)` followed by
+     * `termOffset(rawTail)` and `termId(rawTail)`, without a `bigint`.
+     * <p>
+     * Not in Java (spec D12, phase 2 decision 5, made atomic by T2b). It is one atomic 64-bit add on the slot
+     * ({@link UnsafeBuffer.getAndAddLongHalves}, spec D16), exact across threads, whatever else writes the slot
+     * (`rotateLog`'s `casRawTail`, `initialiseTailWithTermId`).
+     * <p>
+     * The returned low half is unsigned and can exceed 2^31; callers apply `Math.min(oldLow, termLength)` before any
+     * `| 0`.
+     *
+     * @param metaDataBuffer    containing the tail counters.
+     * @param tailCounterOffset of the tail counter in the buffer.
+     * @param delta             a non-negative `int`, the aligned length of the frame.
+     * @param termIdHolder      receives the old term id at index 0.
+     * @return the old term offset, as `rawTail & 0xFFFF_FFFFL` is (an unsigned 32 bit value).
+     */
+    public static getAndAddRawTailOffset(
+        metaDataBuffer: UnsafeBuffer,
+        tailCounterOffset: number,
+        delta: number,
+        termIdHolder: Int32Array,
+    ): number {
+        metaDataBuffer.getAndAddLongHalves(tailCounterOffset, delta, RAW_TAIL_HALVES);
+        termIdHolder[0] = RAW_TAIL_HALVES[1]!;
+
+        return RAW_TAIL_HALVES[0]! >>> 0;
+    }
+
+    /**
      * Pack a termId and termOffset into a raw tail value.
      *
      * @param termId     to be packed.
@@ -1110,26 +1168,31 @@ export class LogBufferDescriptor {
     ): bigint | void {
         if (undefined === partitionIndex) {
             const index = LogBufferDescriptor.indexByTermCount(LogBufferDescriptor.activeTermCount(metadataBuffer));
-            return metadataBuffer.getLongBigInt(LogBufferDescriptor.TERM_TAIL_COUNTERS_OFFSET + SIZE_OF_LONG * index);
+            return LogBufferDescriptor.getRawTailHalves(
+                metadataBuffer,
+                LogBufferDescriptor.TERM_TAIL_COUNTERS_OFFSET + SIZE_OF_LONG * index,
+            );
         }
 
         if (undefined === rawTail) {
-            return metadataBuffer.getLongBigInt(
+            return LogBufferDescriptor.getRawTailHalves(
+                metadataBuffer,
                 LogBufferDescriptor.TERM_TAIL_COUNTERS_OFFSET + SIZE_OF_LONG * partitionIndex,
             );
         }
 
-        metadataBuffer.putLongBigInt(
+        Long.checkInt64(rawTail);
+        metadataBuffer.putLongVolatileHalves(
             LogBufferDescriptor.TERM_TAIL_COUNTERS_OFFSET + SIZE_OF_LONG * partitionIndex,
-            Long.checkInt64(rawTail),
+            Number(BigInt.asIntN(32, rawTail)),
+            Number(BigInt.asIntN(32, rawTail >> 32n)),
         );
     }
 
     /**
      * Compare and set the raw value of the tail for the given partition.
      * <p>
-     * There is no `bigint` compare-and-set in the buffers: the single thread makes the read, compare and write one
-     * step.
+     * One atomic 64-bit compare-and-set on the slot ({@link UnsafeBuffer.compareAndSetLongHalves}, spec D16).
      *
      * @param metadataBuffer  containing the tail counters.
      * @param partitionIndex  for the tail counter.
@@ -1146,12 +1209,19 @@ export class LogBufferDescriptor {
         // checked before the compare, so a bad value writes nothing (spec D5)
         Long.checkInt64(updateRawTail);
         const index = LogBufferDescriptor.TERM_TAIL_COUNTERS_OFFSET + SIZE_OF_LONG * partitionIndex;
-        if (metadataBuffer.getLongBigInt(index) === expectedRawTail) {
-            metadataBuffer.putLongBigInt(index, updateRawTail);
-            return true;
-        }
+        Long.checkInt64(expectedRawTail);
+        return metadataBuffer.compareAndSetLongHalves(
+            index,
+            Number(BigInt.asIntN(32, expectedRawTail)),
+            Number(BigInt.asIntN(32, expectedRawTail >> 32n)),
+            Number(BigInt.asIntN(32, updateRawTail)),
+            Number(BigInt.asIntN(32, updateRawTail >> 32n)),
+        );
+    }
 
-        return false;
+    private static getRawTailHalves(metadataBuffer: UnsafeBuffer, index: number): bigint {
+        metadataBuffer.getLongVolatileHalves(index, RAW_TAIL_HALVES);
+        return BigInt.asIntN(64, (BigInt(RAW_TAIL_HALVES[1]!) << 32n) | BigInt(RAW_TAIL_HALVES[0]! >>> 0));
     }
 
     /**

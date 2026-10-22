@@ -92,6 +92,12 @@ export class StringIndexOutOfBoundsException extends IndexOutOfBoundsException {
 export class NegativeArraySizeException extends RuntimeException {}
 
 /**
+ * `java.lang.ClassNotFoundException`: a checked exception in Java, thrown by `Class.forName`. The message is the class
+ * name.
+ */
+export class ClassNotFoundException extends Exception {}
+
+/**
  * A Java `long` result or stored value outside +/-(2^53 - 1), which a `number` cannot hold (spec D5). `value` is the
  * exact 64-bit value that Java would have returned.
  */
@@ -103,6 +109,64 @@ export class LongOverflowError extends RangeError {
         this.name = 'LongOverflowError';
         this.value = value;
     }
+}
+
+/**
+ * The system properties of `System` (see `jdkLang.ts`): the one module-level store behind `System.getProperty`,
+ * `setProperty` and `clearProperty` and behind {@link Integer.getInteger}, {@link Long.getLong} and
+ * {@link Boolean.getBoolean}. It lives here, and not beside `System`, so that those readers need no import of
+ * `jdkLang.ts` (which imports this file). It starts empty and never reads `process.env` (docs/mapping.md, "Notes").
+ */
+export const systemProperties: Map<string, string> = new Map<string, string>();
+
+/**
+ * `Integer.decode` and `Long.decode`: an optional sign, then `0x` / `0X` / `#` (hex), a leading `0` (octal) or decimal
+ * digits. A value outside [min, max] is a `NumberFormatException`, as in Java.
+ */
+function decode(nm: string, min: bigint, max: bigint): bigint {
+    if (0 === nm.length) {
+        throw new NumberFormatException('Zero length string');
+    }
+
+    let radix = 10;
+    let index = 0;
+    let negative = false;
+    const firstChar = nm.charAt(0);
+    if ('-' === firstChar) {
+        negative = true;
+        index++;
+    } else if ('+' === firstChar) {
+        index++;
+    }
+
+    if (nm.startsWith('0x', index) || nm.startsWith('0X', index)) {
+        index += 2;
+        radix = 16;
+    } else if (nm.startsWith('#', index)) {
+        index++;
+        radix = 16;
+    } else if (nm.startsWith('0', index) && nm.length > 1 + index) {
+        index++;
+        radix = 8;
+    }
+
+    if (nm.startsWith('-', index) || nm.startsWith('+', index)) {
+        throw new NumberFormatException('Sign character in wrong position');
+    }
+
+    const digits = nm.substring(index);
+    const pattern = 16 === radix ? /^[0-9a-fA-F]+$/ : 8 === radix ? /^[0-7]+$/ : /^[0-9]+$/;
+    if (!pattern.test(digits)) {
+        throw new NumberFormatException('For input string: "' + (negative ? '-' : '') + digits + '"');
+    }
+
+    const magnitude = BigInt((16 === radix ? '0x' : 8 === radix ? '0o' : '') + digits);
+    const value = negative ? -magnitude : magnitude;
+    if (value < min || value > max) {
+        throw new NumberFormatException('For input string: "' + (negative ? '-' : '') + digits + '"');
+    }
+
+    return value;
 }
 
 const DECIMAL_DIGITS: Uint8Array = (() => {
@@ -162,6 +226,36 @@ export const Integer = {
     compare(x: number, y: number): number {
         return x < y ? -1 : x === y ? 0 : 1;
     },
+
+    /**
+     * `Integer.getInteger(String, Integer)`: the system property `name` decoded as an `int` (`Integer.decode`), or
+     * `def` if there is no such property or it is not a number.
+     */
+    getInteger<T extends number | null = null>(name: string, def: T = null as T): number | T {
+        const value = systemProperties.get(name);
+        if (undefined !== value) {
+            try {
+                return Number(decode(value, BigInt(-2147483648), BigInt(2147483647)));
+            } catch (ex) {
+                if (!(ex instanceof NumberFormatException)) {
+                    throw ex;
+                }
+            }
+        }
+
+        return def;
+    },
+} as const;
+
+/**
+ * Stand-in for `java.lang.Boolean`.
+ */
+export const Boolean = {
+    /** `Boolean.getBoolean(String)`: whether the system property `name` exists and equals "true", ignoring case. */
+    getBoolean(name: string): boolean {
+        const value = systemProperties.get(name);
+        return undefined !== value && 'true' === value.toLowerCase();
+    },
 } as const;
 
 const TWO_POW_32 = 4294967296;
@@ -195,6 +289,28 @@ export const Long = {
     MIN_VALUE: Number.MIN_SAFE_INTEGER,
     MAX_VALUE: Number.MAX_SAFE_INTEGER,
     SIZE: 64,
+
+    /**
+     * `Long.parseLong(String)` (and `Long.valueOf(String)`): an optional sign and decimal ASCII digits. A value outside
+     * Java's `long` is a `NumberFormatException`; one inside it but outside +/-(2^53 - 1) is a {@link LongOverflowError}
+     * carrying the exact value (spec D5).
+     */
+    parseLong(s: string | null): number {
+        if (null === s) {
+            throw new NumberFormatException('Cannot parse null string: null');
+        }
+
+        if (!/^[+-]?[0-9]+$/.test(s)) {
+            throw new NumberFormatException('For input string: "' + s + '"');
+        }
+
+        const value = BigInt(s);
+        if (value < -(2n ** 63n) || value > 2n ** 63n - 1n) {
+            throw new NumberFormatException('For input string: "' + s + '"');
+        }
+
+        return longToNumber(value) + 0;
+    },
 
     /** `Long.numberOfLeadingZeros(long)` for a `number` holding a safe integer, or a `bigint` holding a long. */
     numberOfLeadingZeros(i: number | bigint): number {
@@ -238,6 +354,26 @@ export const Long = {
         return x < y ? -1 : x === y ? 0 : 1;
     },
 
+    /**
+     * `Long.getLong(String, Long)`: the system property `name` decoded as a `long` (`Long.decode`), or `def` if there
+     * is no such property or it is not a number. A value inside Java's `long` but outside +/-(2^53 - 1) is a
+     * {@link LongOverflowError} (spec D5).
+     */
+    getLong<T extends number | null = null>(name: string, def: T = null as T): number | T {
+        const value = systemProperties.get(name);
+        if (undefined !== value) {
+            try {
+                return longToNumber(decode(value, -(2n ** 63n), 2n ** 63n - 1n));
+            } catch (ex) {
+                if (!(ex instanceof NumberFormatException)) {
+                    throw ex;
+                }
+            }
+        }
+
+        return def;
+    },
+
     /** The 64-bit `a & b` for two `number`s holding safe integers. */
     and(a: number, b: number): number {
         const hi = (Math.floor(a / TWO_POW_32) & Math.floor(b / TWO_POW_32)) | 0;
@@ -257,6 +393,20 @@ export function longToNumber(value: bigint): number {
     }
 
     return Number(value);
+}
+
+/**
+ * `Math.multiplyExact(long, long)` for two `number`s holding safe integers. The product is computed with `bigint`: a
+ * result outside Java's `long` is an `ArithmeticException("long overflow")`, as in Java; one inside it but outside
+ * +/-(2^53 - 1) is a {@link LongOverflowError} carrying the exact product (spec D5).
+ */
+export function multiplyExact(a: number, b: number): number {
+    const product = BigInt(a) * BigInt(b);
+    if (product < -(2n ** 63n) || product > 2n ** 63n - 1n) {
+        throw new ArithmeticException('long overflow');
+    }
+
+    return longToNumber(product);
 }
 
 /**
@@ -287,6 +437,20 @@ export class TimeUnit {
 
     private constructor(scale: number) {
         this.scale = scale;
+    }
+
+    /** `toMillis(duration)`: truncated towards zero, saturating at {@link Long.MAX_VALUE} and {@link Long.MIN_VALUE}. */
+    public toMillis(duration: number): number {
+        const nanos = this.toNanos(duration);
+        return Math.trunc(nanos / 1_000_000);
+    }
+
+    /**
+     * `convert(sourceDuration, sourceUnit)`: `sourceDuration` of `sourceUnit` in this unit, truncated towards zero.
+     */
+    public convert(sourceDuration: number, sourceUnit: TimeUnit): number {
+        const nanos = sourceUnit.toNanos(sourceDuration);
+        return Math.trunc(nanos / this.scale);
     }
 
     public toNanos(duration: number | bigint): number {
@@ -330,6 +494,11 @@ export class ThreadLocalRandom {
         }
 
         return origin + Math.floor(Math.random() * (bound! - origin));
+    }
+
+    /** `Random.nextBoolean()`. */
+    public nextBoolean(): boolean {
+        return Math.random() < 0.5;
     }
 
     /** `Random.nextBytes(byte[])`. */
@@ -406,4 +575,28 @@ export function dataViewSetLong(view: DataView, offset: number, value: number, l
         view.setInt32(offset, hi, false);
         view.setUint32(offset + 4, lo, false);
     }
+}
+
+/** True where `VarHandle.releaseFence()` is the empty function: x64, a total-store-order architecture. */
+export const RELEASE_FENCE_IS_NO_OP: boolean = 'x64' === process.arch;
+
+/** The word of the fence of the other architectures; private to the module, so private to the worker thread. */
+const FENCE = new Int32Array(new SharedArrayBuffer(4));
+
+/**
+ * Stand-in for `java.lang.invoke.VarHandle`, which has the fences only (spec D21). `releaseFence()` is chosen once, at
+ * module load:
+ * - x64 (total store order): a later store cannot pass an earlier store, and V8 does not move a plain typed-array
+ *   access across an `Atomics` operation in its IR, so the fence is the empty function;
+ * - any other architecture (ARM64): `Atomics.add(FENCE, 0, 0)`, a sequentially consistent read-modify-write
+ *   (`ldaddal` on ARM64), which orders the stores before it ahead of the stores after it. The module instance is per
+ *   worker, so the word is never contended.
+ */
+export class VarHandle {
+    /** `VarHandle.releaseFence()`: no earlier load or store is reordered with a later store. */
+    public static readonly releaseFence: () => void = RELEASE_FENCE_IS_NO_OP
+        ? (): void => {}
+        : (): void => {
+              Atomics.add(FENCE, 0, 0);
+          };
 }

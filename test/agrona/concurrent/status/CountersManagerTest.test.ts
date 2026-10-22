@@ -46,7 +46,7 @@ const {
 
 const { US_ASCII } = StandardCharsets;
 
-function allocateDirect(capacity: number): ArrayBuffer {
+function allocateDirect(capacity: number): ArrayBufferLike {
     return ByteBuffer.allocateDirect(capacity).arrayBuffer();
 }
 

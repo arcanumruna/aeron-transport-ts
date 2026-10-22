@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-    { ignores: ['dist/', '.refs/', 'node_modules/', 'test/scripts/fixtures/'] },
+    { ignores: ['dist/', '.claude/', '.refs/', 'node_modules/', 'test/scripts/fixtures/'] },
     js.configs.recommended,
     ...tseslint.configs.recommended,
     {
@@ -15,5 +15,9 @@ export default tseslint.config(
     {
         files: ['scripts/**/*.mjs'],
         languageOptions: { globals: { process: 'readonly', console: 'readonly' } },
+    },
+    {
+        files: ['test/support/**/*.mjs'],
+        languageOptions: { globals: { URL: 'readonly' } },
     },
 );
