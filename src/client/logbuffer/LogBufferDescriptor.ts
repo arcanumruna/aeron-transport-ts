@@ -33,6 +33,9 @@ const PADDING_SIZE = 64;
 const POW2 = new Float64Array(64).map((_, i) => 2 ** i);
 
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
+const TWO_POW_31 = 2147483648;
+const TWO_POW_53 = 9007199254740992;
+const TWO_POW_32 = 4294967296;
 
 const PARTITION_COUNT = 3;
 const PAGE_MIN_SIZE = 4 * 1024;
@@ -114,6 +117,29 @@ export class LogBufferDescriptor {
      * Section index for which buffer contains the log metadata.
      */
     public static readonly LOG_META_DATA_SECTION_INDEX = PARTITION_COUNT;
+
+    /**
+     * The largest position: `Long.MAX_VALUE`, 2^53 - 1 (spec D5). A position never reaches it, because
+     * {@link maxPossiblePosition} caps positions below it, so a comparison with it as a sentinel is unchanged.
+     * <p>
+     * Not in Java (spec D13, phase 2 decision 5).
+     */
+    public static readonly MAX_POSITION = Long.MAX_VALUE;
+
+    /**
+     * The position cap of a term length: Java's `termBufferLength * (1L << 31)` (computed inline in `Publication`, the
+     * limit above which `indexByTermCount` goes negative) for terms of 2 MiB or less. From 4 MiB up it is
+     * `2^53 - termLength`, the last term boundary that leaves a whole term below 2^53, so every position, including
+     * the cap plus a maximum message plus a header, stays below {@link MAX_POSITION}.
+     * <p>
+     * Not in Java (spec D13, phase 2 decision 5).
+     *
+     * @param termLength of the log buffer.
+     * @return the largest position a publication or image of the term length can have.
+     */
+    public static maxPossiblePosition(termLength: number): number {
+        return Math.min(termLength * TWO_POW_31, TWO_POW_53 - termLength);
+    }
 
     /**
      * Minimum buffer length for a log term.
@@ -1038,6 +1064,44 @@ export class LogBufferDescriptor {
             ) >>> 0;
 
         return Math.min(tail, termLength) | 0;
+    }
+
+    /**
+     * Add to the term offset of the raw tail of a slot, carrying into the term id as the 64-bit add does, and return the
+     * old term offset: Java's `logMetaDataBuffer.getAndAddLong(tailCounterOffset, alignedLength)` followed by
+     * `termOffset(rawTail)` and `termId(rawTail)`, without a `bigint`.
+     * <p>
+     * Not in Java (spec D12, phase 2 decision 5). The slot holds the term offset in the low half and the term id in the
+     * high half, and the halves are updated by two atomic `int` operations. This is exact on one thread. Two
+     * producers on one slot get distinct offsets (the low add is atomic), but the term id is read separately, so a
+     * concurrent whole-slot write (`rotateLog`'s `casRawTail`, `initialiseTailWithTermId`) between the read and the
+     * add yields a (termId, offset) pair that never existed. Phase 4 must replace this before any cross-thread
+     * publication.
+     * <p>
+     * The returned low half is unsigned and can exceed 2^31; callers apply `Math.min(oldLow, termLength)` before any
+     * `| 0`.
+     *
+     * @param metaDataBuffer    containing the tail counters.
+     * @param tailCounterOffset of the tail counter in the buffer.
+     * @param delta             a non-negative `int`, the aligned length of the frame.
+     * @param termIdHolder      receives the old term id at index 0.
+     * @return the old term offset, as `rawTail & 0xFFFF_FFFFL` is (an unsigned 32 bit value).
+     */
+    public static getAndAddRawTailOffset(
+        metaDataBuffer: UnsafeBuffer,
+        tailCounterOffset: number,
+        delta: number,
+        termIdHolder: Int32Array,
+    ): number {
+        const oldHigh = metaDataBuffer.getIntVolatile(tailCounterOffset + SIZE_OF_INT);
+        const oldLow = metaDataBuffer.getAndAddInt(tailCounterOffset, delta) >>> 0;
+        if (oldLow + delta >= TWO_POW_32) {
+            metaDataBuffer.getAndAddInt(tailCounterOffset + SIZE_OF_INT, 1);
+        }
+
+        termIdHolder[0] = oldHigh;
+
+        return oldLow;
     }
 
     /**
