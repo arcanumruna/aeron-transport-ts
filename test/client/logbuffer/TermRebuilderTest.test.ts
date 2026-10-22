@@ -69,7 +69,8 @@ describe('TermRebuilder', () => {
 
         TermRebuilder.insert(termBuffer, termOffset, packet, length);
 
-        // putLong(termOffset + 24 / 16 / 8, packet.getLong(...)) are the pairs of int halves, high half first (spec D5)
+        // putLong(termOffset + 24 / 16 / 8, packet.getLong(...)) are the pairs of int halves. The high half first is an
+        // implementation choice (the rebuilder's), not a rule of spec D5, which only makes a `long` word two `int`s.
         expect(putBytes.mock.calls).toEqual([
             [termOffset + HEADER_LENGTH, packet, srcOffset + HEADER_LENGTH, length - HEADER_LENGTH],
         ]);

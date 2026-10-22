@@ -402,7 +402,12 @@ describe('LogBufferDescriptor extra: raw tail', () => {
     it('packTail takes Java int arguments: a number beyond 32 bits is cut to an int (Regression)', () => {
         expect(LogBufferDescriptor.packTail(1, 2 ** 32)).toBe(LogBufferDescriptor.packTail(1, 0));
         expect(LogBufferDescriptor.packTail(2 ** 32 + 5, 7)).toBe(LogBufferDescriptor.packTail(5, 7));
-        expect(LogBufferDescriptor.packTail(INT32_MAX + 1, 0)).toBe(LogBufferDescriptor.packTail(INT32_MIN, 0));
+        expect(LogBufferDescriptor.packTail(INT32_MAX + 1, 0)).toBe(LogBufferDescriptor.packTail(INT32_MIN, 0)); // the term offset is cut to an int before it is OR-ed in, so it cannot reach the term id half (the rows above
+        // pass with or without the cut, as 2^32 ORs into the term id half to the same value)
+        expect(LogBufferDescriptor.packTail(0, 2 ** 32)).toBe(0n);
+        expect(LogBufferDescriptor.packTail(0, 2 ** 32 + 7)).toBe(7n);
+        // and a fraction is truncated, never a BigInt RangeError
+        expect(() => LogBufferDescriptor.packTail(1.5, 2.5)).not.toThrow();
     });
 
     it('packTail with a negative term offset sign-extends as Java does', () => {

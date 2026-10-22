@@ -1,8 +1,9 @@
 // Not in Aeron: the per-message paths of the term readers allocate nothing (spec 5.3, plan "Review focus"):
 // `TermReader.read` (with a position and the packed form), `TermScanner.scanForAvailability`,
 // `TermBlockScanner.scan`, `TermRebuilder.insert`, `TermGapScanner.scanForGap` and `TermGapFiller.tryFillGap`.
-// The packed outcomes (spec D13) are numbers above 2^31, which V8 boxes in a heap number when a call is not inlined,
-// so the loops that return one are allowed that one heap number per iteration; the others none.
+// The packed outcomes (spec D13) of these loops are small integers (a typical read has few fragments, a scan of an
+// ordinary frame no padding), so no heap number is made either; a value above 2^31 would be boxed when a call is not
+// inlined, and is not exercised here.
 import { describe, it } from 'vitest';
 import { UnsafeBuffer } from '../../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { Position } from '../../../../src/agrona/concurrent/status/Position.js';
@@ -121,35 +122,27 @@ describe('TermReadersHotPathAllocationTest', () => {
         }, ITERATIONS);
     });
 
-    it('TermReader.read in the packed form and its accessors allocate at most the packed number', async () => {
+    it('TermReader.read in the packed form and its accessors allocate nothing', async () => {
         const term = filledTerm();
         const header = new Header(0, LogBufferDescriptor.positionBitsToShift(TERM_LENGTH));
 
-        await expectNoAllocation(
-            (n) => {
-                for (let i = 0; i < n; i++) {
-                    const outcome = TermReader.read(term, 0, handler, 10, header, errorHandler);
-                    sum[0] = (sum[0]! + TermReader.fragmentsRead(outcome) + TermReader.offset(outcome)) | 0;
-                }
-            },
-            ITERATIONS,
-            1,
-        );
+        await expectNoAllocation((n) => {
+            for (let i = 0; i < n; i++) {
+                const outcome = TermReader.read(term, 0, handler, 10, header, errorHandler);
+                sum[0] = (sum[0]! + TermReader.fragmentsRead(outcome) + TermReader.offset(outcome)) | 0;
+            }
+        }, ITERATIONS);
     });
 
-    it('TermScanner.scanForAvailability and its accessors allocate at most the packed number', async () => {
+    it('TermScanner.scanForAvailability and its accessors allocate nothing', async () => {
         const term = filledTerm();
 
-        await expectNoAllocation(
-            (n) => {
-                for (let i = 0; i < n; i++) {
-                    const outcome = TermScanner.scanForAvailability(term, 0, 1408 + (i & 1) * 4096);
-                    sum[0] = (sum[0]! + TermScanner.available(outcome) + TermScanner.padding(outcome)) | 0;
-                }
-            },
-            ITERATIONS,
-            1,
-        );
+        await expectNoAllocation((n) => {
+            for (let i = 0; i < n; i++) {
+                const outcome = TermScanner.scanForAvailability(term, 0, 1408 + (i & 1) * 4096);
+                sum[0] = (sum[0]! + TermScanner.available(outcome) + TermScanner.padding(outcome)) | 0;
+            }
+        }, ITERATIONS);
     });
 
     it('TermBlockScanner.scan allocates nothing', async () => {

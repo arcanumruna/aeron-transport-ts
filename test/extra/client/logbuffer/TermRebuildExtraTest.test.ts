@@ -474,6 +474,18 @@ describe('Term rebuild extra: gaps at every offset', () => {
         }
     });
 
+    it('a negative length inside a gap ends the gap: only a length of 0 is a missing frame, as in Java (0 != length)', () => {
+        for (const negativeAt of [64, 96, 128, 224]) {
+            const termBuffer = newTerm();
+            termBuffer.putInt(negativeAt, -MTU);
+            // the gap begins at 0 (nothing was received) and the high-water mark is 256
+            expect(scanGaps(termBuffer, 256)).toEqual({
+                stop: 0,
+                gaps: [{ termId: TERM_ID, offset: 0, length: negativeAt }],
+            });
+        }
+    });
+
     it('the high-water mark inside a frame, and a gap right at the high-water mark, report nothing', () => {
         const termBuffer = newTerm();
         termBuffer.putInt(0, 96);
@@ -600,6 +612,45 @@ describe('Term rebuild extra: the fragments limit and the term end', () => {
         expect(count).toBe(1);
         expect(errors).toEqual([failure]);
         expect(position.setReleaseSpy.mock.calls).toEqual([[endOf(a)]]);
+    });
+
+    it('an error handler that rethrows still releases the position up to the frame that threw (the finally)', () => {
+        const termBuffer = newTerm();
+        const a = frame(0, 1);
+        const b = frame(64, 1);
+        TermRebuilder.insert(termBuffer, a.offset, packetFor(a), a.packetLength);
+        TermRebuilder.insert(termBuffer, b.offset, packetFor(b), b.packetLength);
+        const header = new Header(INITIAL_TERM_ID, LogBufferDescriptor.positionBitsToShift(TERM_LENGTH));
+        const position = new MockPosition();
+        const failure = new Error('handler failed');
+        const rethrown = new Error('error handler failed');
+        let fragments = 0;
+
+        expect(() =>
+            TermReader.read(
+                termBuffer,
+                0,
+                {
+                    onFragment: () => {
+                        ++fragments;
+                        throw failure;
+                    },
+                },
+                INT32_MAX,
+                header,
+                {
+                    onError: (e) => {
+                        expect(e).toBe(failure);
+                        throw rethrown;
+                    },
+                },
+                1000,
+                position,
+            ),
+        ).toThrow(rethrown);
+
+        expect(fragments).toBe(1);
+        expect(position.setReleaseSpy.mock.calls).toEqual([[1000 + endOf(a)]]);
     });
 });
 

@@ -27,10 +27,10 @@ const { FRAME_LENGTH_FIELD_OFFSET, VERSION_FIELD_OFFSET } = HeaderFlyweight;
 /**
  * Utility for applying a header to a message in a term buffer.
  * <p>
- * Java's version is thread safe, to be used across multiple producers. It stores word 1 (the frame length in the
+ * Java's version is thread safe, to be used across multiple producers. It stores word 0 (the frame length in the
  * lower half and version, flags and type in the upper half) with `putLongRelease`, then `storeStoreFence`, then the
  * other two 8-byte words with plain stores. Here there is one thread: the frame length, the field a consumer reads
- * first, is stored last of the two halves of word 1 with a release store, and it completes word 1 before the other
+ * first, is stored last of the two halves of word 0 with a release store, and it completes word 0 before the other
  * fields are written.
  * <p>
  * Java holds three `long` values, each an `int` of the default header shifted into the upper half of a `long` (or
@@ -80,15 +80,15 @@ export class HeaderWriter {
      * @param termId     of the current term buffer.
      */
     public write(termBuffer: UnsafeBuffer, offset: number, length: number, termId: number): void {
-        // word 1: version, flags and type (upper half), then the frame length (lower half) as the release store
+        // word 0: version, flags and type (upper half), then the frame length (lower half) as the release store
         termBuffer.putInt(offset + VERSION_FIELD_OFFSET, this.versionFlagsType);
         termBuffer.putIntRelease(offset + FRAME_LENGTH_FIELD_OFFSET, -length);
 
-        // word 2: session id (upper half), then term offset (lower half)
+        // word 1: session id (upper half), then term offset (lower half)
         termBuffer.putInt(offset + SESSION_ID_FIELD_OFFSET, this.sessionId);
         termBuffer.putInt(offset + TERM_OFFSET_FIELD_OFFSET, offset);
 
-        // word 3: term id (upper half), then stream id (lower half)
+        // word 2: term id (upper half), then stream id (lower half)
         termBuffer.putInt(offset + TERM_ID_FIELD_OFFSET, termId);
         termBuffer.putInt(offset + STREAM_ID_FIELD_OFFSET, this.streamId);
     }

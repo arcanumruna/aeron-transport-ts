@@ -203,6 +203,62 @@ describe('Unblock extra: LogBufferUnblocker', () => {
     });
 });
 
+describe('Unblock extra: LogBufferUnblocker with a large term count', () => {
+    // 64 KiB terms: count 32768 puts the position at 2^31, 40000 above it, 65536 at 2^32 and 2^31 - 2 at about 2^47,
+    // where the position is not an int and the term count is Java's `(int)(position >> bits)`
+    const counts = [32768, 40000, 65536, INT32_MAX - 1];
+    const rows: Array<[number, number]> = [];
+    for (const initial of [1, INT32_MAX]) {
+        for (const count of counts) {
+            rows.push([initial, count]);
+        }
+    }
+
+    it.each(rows)('initial term id %i, term count %i: patches an uncommitted frame', (initial, count) => {
+        const log = new Log(initial, count);
+        const term = log.terms[log.activeIndex()] as UnsafeBuffer;
+        const blockedOffset = 4096;
+        const blockedPosition = log.position(blockedOffset);
+        expect(blockedPosition).toBeGreaterThanOrEqual(2 ** 31);
+
+        term.putInt(blockedOffset, -MESSAGE);
+        log.setTail(blockedOffset + MESSAGE);
+
+        expect(LogBufferUnblocker.unblock(log.terms, log.meta, blockedPosition, TERM_LENGTH)).toBe(true);
+        expectPadding(term, blockedOffset, MESSAGE, log.activeTermId());
+        expect(activeTermCount(log.meta)).toBe(count);
+    });
+
+    it.each(rows)('initial term id %i, term count %i: rotates at the term boundary once', (initial, count) => {
+        const log = new Log(initial, count);
+        log.setTail(TERM_LENGTH);
+        const blockedPosition = log.position(0) + TERM_LENGTH;
+        expect(blockedPosition).toBeGreaterThanOrEqual(2 ** 31);
+
+        expect(LogBufferUnblocker.unblock(log.terms, log.meta, blockedPosition, TERM_LENGTH)).toBe(true);
+        expect(activeTermCount(log.meta)).toBe(count + 1);
+        expect(termId(rawTailVolatile(log.meta))).toBe((initial + count + 1) | 0);
+
+        expect(LogBufferUnblocker.unblock(log.terms, log.meta, blockedPosition, TERM_LENGTH)).toBe(false);
+        expect(activeTermCount(log.meta)).toBe(count + 1);
+    });
+});
+
+describe('Unblock extra: LogBufferUnblocker one term behind', () => {
+    it('the active count is the blocked count - 1 but the blocked offset is not 0: no rotation', () => {
+        // position = computePosition(8, 64, 16, 7) is term count 1, offset 64, with the active count at 0
+        const log = new Log(7, 0);
+        const blockedPosition = computePosition(8, 64, BITS, 7);
+        expect(blockedPosition).toBe(TERM_LENGTH + 64);
+        const tailBefore = rawTailVolatile(log.meta, 1);
+
+        expect(LogBufferUnblocker.unblock(log.terms, log.meta, blockedPosition, TERM_LENGTH)).toBe(false);
+        expect(activeTermCount(log.meta)).toBe(0);
+        expect(rawTailVolatile(log.meta, 1)).toBe(tailBefore);
+        expect(rawTailVolatile(log.meta, 0)).toBe(packTail(7, 0));
+    });
+});
+
 describe('Unblock extra: TermUnblocker', () => {
     const TERM_ID = INT32_MIN;
 

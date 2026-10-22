@@ -26,24 +26,25 @@ const { FRAME_ALIGNMENT, frameType, frameTermOffset, frameTermId, frameLengthOrd
 const { applyDefaultHeader } = LogBufferDescriptor;
 const { HDR_TYPE_PAD } = HeaderFlyweight;
 
+// Java's nested `enum TermUnblocker.Status`, with its ordinals.
 /**
- * Status of the unblock operation. Java's nested `enum TermUnblocker.Status`, with its ordinals.
+ * Status result of an {@link #unblock(UnsafeBuffer, UnsafeBuffer, int, int, int)} operation.
  */
 export class Status {
     private static nextOrdinal = 0;
 
     /**
-     * Unblock action was not taken
+     * No action has been taken during operation.
      */
     public static readonly NO_ACTION: Status = new Status('NO_ACTION');
 
     /**
-     * Message was unblocked
+     * The term has been unblocked so that the log can progress.
      */
     public static readonly UNBLOCKED: Status = new Status('UNBLOCKED');
 
     /**
-     * Message was unblocked to the end of the term
+     * The term has been unblocked from the offset until the end of the term.
      */
     public static readonly UNBLOCKED_TO_END: Status = new Status('UNBLOCKED_TO_END');
 
@@ -73,8 +74,7 @@ export class Status {
 }
 
 /**
- * Takes a log buffer and looks for an incomplete message, i.e. a gap of zeros in the term buffer, and patches it
- * with a padding frame.
+ * Unblocks a term buffer if a publisher has died leaving the log with a partial log entry.
  */
 export class TermUnblocker {
     /** Java's nested `TermUnblocker.Status`. */
@@ -84,12 +84,24 @@ export class TermUnblocker {
 
     /**
      * Attempt to unblock the current term at the current offset.
+     * <ol>
+     * <li>Current position length is &gt; 0, then return</li>
+     * <li>Current position length is 0, scan forward by frame alignment until, one of the following:
+     * <ol>
+     * <li>reach a non-0 length, unblock up to indicated position (check original frame length for non-0)</li>
+     * <li>reach end of term and tail position &gt;= end of term, unblock up to end of term (check original
+     * frame length for non-0)
+     * </li>
+     * <li>reach tail position &lt; end of term, do NOT unblock</li>
+     * </ol>
+     * </li>
+     * </ol>
      *
-     * @param logMetaDataBuffer contains the default frame header for the padding frame.
+     * @param logMetaDataBuffer containing the default headers
      * @param termBuffer        to unblock
-     * @param blockedOffset     to attempt to unblock
-     * @param tailOffset        to which the scan for a frame can go
-     * @param termId            of the current term buffer.
+     * @param blockedOffset     to unblock at
+     * @param tailOffset        to unblock up to
+     * @param termId            for the current term.
      * @return whether unblocking was done, not done, or applied to end of term
      */
     public static unblock(
