@@ -209,6 +209,53 @@ describe('Integer', () => {
     });
 });
 
+describe('Long.parseLong', () => {
+    it('parseLongAcceptsADecimalWithAnOptionalSign', () => {
+        expect(Long.parseLong('0')).toBe(0);
+        expect(Long.parseLong('+5')).toBe(5);
+        expect(Long.parseLong('-5')).toBe(-5);
+        expect(Object.is(Long.parseLong('-0'), 0)).toBe(true);
+        expect(Long.parseLong('0007')).toBe(7);
+        expect(Long.parseLong('9007199254740991')).toBe(Long.MAX_VALUE);
+        expect(Long.parseLong('-9007199254740991')).toBe(Long.MIN_VALUE);
+    });
+
+    // Mutation: the check against 2^63 - 1 and -2^63 is removed.
+    it('parseLongRefusesWhatJavaRefuses', () => {
+        for (const value of [
+            '',
+            '+',
+            '-',
+            '9223372036854775808',
+            '-9223372036854775809',
+            '99999999999999999999',
+            ' 1',
+            '1 ',
+            '1.0',
+            '0x1',
+            'a',
+            '1_0',
+        ]) {
+            const error = assertThrows(NumberFormatException, () => Long.parseLong(value));
+            expect(error.message).toBe('For input string: "' + value + '"');
+        }
+
+        expect(assertThrows(NumberFormatException, () => Long.parseLong(null)).message).toBe(
+            'Cannot parse null string: null',
+        );
+    });
+
+    // Mutation: `longToNumber(value)` is replaced by `Number(value)`.
+    it('parseLongOutsideTheSafeRangeCarriesTheExactValue', () => {
+        const high = assertThrows(LongOverflowError, () => Long.parseLong('9007199254740993'));
+        expect(high.value).toBe(9007199254740993n);
+        const max = assertThrows(LongOverflowError, () => Long.parseLong('9223372036854775807'));
+        expect(max.value).toBe(9223372036854775807n);
+        const min = assertThrows(LongOverflowError, () => Long.parseLong('-9223372036854775808'));
+        expect(min.value).toBe(-9223372036854775808n);
+    });
+});
+
 describe('Strings', () => {
     it('isEmpty', () => {
         expect(Strings.isEmpty(null)).toBe(true);
