@@ -16,8 +16,7 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of io/aeron/logbuffer/LogBufferUnblockerTest.java @ 1.53.3
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { BitUtil } from '../../../src/agrona/BitUtil.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { LogBufferDescriptor } from '../../../src/client/logbuffer/LogBufferDescriptor.js';
 import { LogBufferUnblocker } from '../../../src/client/logbuffer/LogBufferUnblocker.js';
@@ -51,7 +50,7 @@ describe('LogBufferUnblocker', () => {
     let termBuffers: UnsafeBuffer[];
     let positionBitsToShift: number;
     let compareAndSetInt: ReturnType<typeof vi.spyOn>;
-    let putLongBigInt: ReturnType<typeof vi.spyOn>;
+    let casRawTail: ReturnType<typeof vi.spyOn>;
 
     beforeEach(() => {
         positionBitsToShift = LogBufferDescriptor.positionBitsToShift(TERM_LENGTH);
@@ -71,7 +70,11 @@ describe('LogBufferUnblocker', () => {
         }
 
         compareAndSetInt = vi.spyOn(logMetaDataBuffer, 'compareAndSetInt');
-        putLongBigInt = vi.spyOn(logMetaDataBuffer, 'putLongBigInt');
+        casRawTail = vi.spyOn(LogBufferDescriptor, 'casRawTail');
+    });
+
+    afterEach(() => {
+        casRawTail.mockRestore();
     });
 
     it('shouldNotUnblockWhenPositionHasCompleteMessage', () => {
@@ -125,7 +128,6 @@ describe('LogBufferUnblocker', () => {
     it('shouldUnblockWhenPositionHasCommittedMessageAndTailAtEndOfTermButNotRotated', () => {
         const blockedPosition = TERM_LENGTH;
 
-        const termTailCounterTwoOffset = TERM_TAIL_COUNTER_OFFSET + BitUtil.SIZE_OF_LONG;
         logMetaDataBuffer.getAndAddLong(TERM_TAIL_COUNTER_OFFSET, TERM_LENGTH);
 
         expect(LogBufferUnblocker.unblock(termBuffers, logMetaDataBuffer, blockedPosition, TERM_LENGTH)).toBe(true);
@@ -135,12 +137,14 @@ describe('LogBufferUnblocker', () => {
         expect(activeTermId).toBe(TERM_ID_1 + 1);
         expect(computePosition(activeTermId, 0, positionBitsToShift, TERM_ID_1)).toBe(blockedPosition);
 
-        // compareAndSetLong(termTailCounterTwoOffset, pack(TERM_ID_1 - 2, 0), pack(TERM_ID_1 + 1, 0)): a raw tail
-        // is compared and stored as a `bigint` (spec D12), so the compare is the old value of the slot and the store
-        // of the new one is the call
-        expect(putLongBigInt.mock.calls).toEqual([[termTailCounterTwoOffset, packTail(TERM_ID_1 + 1, 0)]]);
+        // compareAndSetLong(termTailCounterTwoOffset, pack(TERM_ID_1 - 2, 0), pack(TERM_ID_1 + 1, 0)): the raw tail of
+        // partition 1 is a `bigint` (spec D12), compared and stored by casRawTail
+        expect(casRawTail.mock.calls).toEqual([
+            [logMetaDataBuffer, 1, packTail(TERM_ID_1 - 2, 0), packTail(TERM_ID_1 + 1, 0)],
+        ]);
+        expect(rawTailVolatile(logMetaDataBuffer, 1)).toBe(packTail(TERM_ID_1 + 1, 0));
         expect(compareAndSetInt.mock.calls).toEqual([[LOG_ACTIVE_TERM_COUNT_OFFSET, 0, 1]]);
-        expectInOrder([putLongBigInt, 0], [compareAndSetInt, 0]);
+        expectInOrder([casRawTail, 0], [compareAndSetInt, 0]);
     });
 
     it('shouldUnblockWhenPositionHasNonCommittedMessageAndTailPastEndOfTerm', () => {

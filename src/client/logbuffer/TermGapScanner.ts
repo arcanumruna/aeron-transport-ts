@@ -25,32 +25,34 @@ const { FRAME_ALIGNMENT, frameLengthVolatile } = FrameDescriptor;
 const { HEADER_LENGTH } = DataHeaderFlyweight;
 const { align } = BitUtil;
 
+// Java's nested `TermGapScanner.GapHandler`.
 /**
- * Handler for a gap in a stream. Java's nested `TermGapScanner.GapHandler`.
+ * Handler for notifying of gaps in the log.
  */
 export interface GapHandler {
     /**
-     * Gap detected in the stream.
+     * Gap detected in log buffer that is being rebuilt.
      *
-     * @param termId through which the gap was detected.
-     * @param offset at which the gap starts.
-     * @param length in bytes of the gap.
+     * @param termId active term being scanned.
+     * @param offset at which the gap begins.
+     * @param length of the gap in bytes.
      */
     onGap(termId: number, offset: number, length: number): void;
 }
 
 /**
- * Scan for gaps in the rebuilt term.
+ * Scans for gaps in the sequence of bytes in a replicated term buffer between the completed rebuild and the
+ * high-water-mark. This can be used for detecting loss and generating a NAK message to the source.
+ * <p>
+ * <b>Note:</b> This class is threadsafe to be used across multiple threads.
  */
 export class TermGapScanner {
     private constructor() {}
 
     /**
-     * Scan for gaps from the limit up to a high-water mark.
-     * <p>
-     * Returns the offset at which the scan stopped, i.e. the start of the gap if there is one.
+     * Scan for gaps from the scanOffset up to a limit offset. Each gap will be reported to the {@link GapHandler}.
      *
-     * @param termBuffer  to scan for gaps.
+     * @param termBuffer  to be scanned for a gap.
      * @param termId      of the current term buffer.
      * @param termOffset  at which to start scanning.
      * @param limitOffset at which to stop scanning.

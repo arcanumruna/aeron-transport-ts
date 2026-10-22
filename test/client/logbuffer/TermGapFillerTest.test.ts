@@ -84,7 +84,7 @@ describe('TermGapFiller', () => {
             .sessionId(SESSION_ID)
             .termId(TERM_ID)
             .streamId(STREAM_ID)
-            .flags(UNFRAGMENTED & 0xff)
+            .flags(UNFRAGMENTED)
             .frameLength(gapOffset);
         dataFlyweight.setMemory(0, gapOffset - DataHeaderFlyweight.HEADER_LENGTH, 'x'.charCodeAt(0));
 
@@ -108,7 +108,7 @@ describe('TermGapFiller', () => {
             .termId(TERM_ID)
             .termOffset(0)
             .streamId(STREAM_ID)
-            .flags(UNFRAGMENTED & 0xff)
+            .flags(UNFRAGMENTED)
             .frameLength(gapOffset)
             .setMemory(0, gapOffset - DataHeaderFlyweight.HEADER_LENGTH, 'x'.charCodeAt(0));
 
@@ -119,7 +119,7 @@ describe('TermGapFiller', () => {
             .termId(TERM_ID)
             .termOffset(secondExistingFrameOffset)
             .streamId(STREAM_ID)
-            .flags(UNFRAGMENTED & 0xff)
+            .flags(UNFRAGMENTED)
             .frameLength(64);
 
         expect(TermGapFiller.tryFillGap(metaDataBuffer, termBuffer, TERM_ID, gapOffset, gapLength)).toBe(true);
@@ -141,7 +141,7 @@ describe('TermGapFiller', () => {
             .sessionId(SESSION_ID)
             .termId(TERM_ID)
             .streamId(STREAM_ID)
-            .flags(UNFRAGMENTED & 0xff)
+            .flags(UNFRAGMENTED)
             .frameLength(termBuffer.capacity() - gapOffset);
         dataFlyweight.setMemory(0, gapOffset - DataHeaderFlyweight.HEADER_LENGTH, 'x'.charCodeAt(0));
 

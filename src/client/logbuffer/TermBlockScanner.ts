@@ -24,14 +24,20 @@ const { FRAME_ALIGNMENT, frameLengthVolatile, isPaddingFrame } = FrameDescriptor
 const { align } = BitUtil;
 
 /**
- * Scan a term buffer for a block of messages including padding. The block must include complete messages.
+ * Scan a term buffer for a block of message fragments including padding. The block must include complete fragments.
  */
 export class TermBlockScanner {
     private constructor() {}
 
     /**
-     * Scan a term buffer for a block of message fragments including padding. The block must include complete
-     * messages. A padding frame is returned as a block of its own, or ends a block that precedes it.
+     * Scan a term buffer for a block of message fragments from an offset up to a limitOffset.
+     * <p>
+     * A scan will terminate if a padding frame is encountered. If first frame in a scan is padding then a block
+     * for the padding is notified. If the padding comes after the first frame in a scan then the scan terminates
+     * at the offset the padding frame begins. Padding frames are delivered singularly in a block.
+     * <p>
+     * Padding frames may be for a greater range than the limit offset but only the header needs to be valid so
+     * relevant length of the frame is {@link io.aeron.protocol.DataHeaderFlyweight#HEADER_LENGTH}.
      *
      * @param termBuffer  to scan for message fragments.
      * @param termOffset  at which the scan should begin.

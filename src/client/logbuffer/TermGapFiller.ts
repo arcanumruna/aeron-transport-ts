@@ -26,21 +26,21 @@ const { applyDefaultHeader } = LogBufferDescriptor;
 const { HDR_TYPE_PAD } = HeaderFlyweight;
 
 /**
- * Fill a gap in a term with a padding frame.
+ * Fills a gap in a term with a padding record.
  */
 export class TermGapFiller {
     private constructor() {}
 
     /**
-     * Try to gap fill the rebuilt term buffer.
+     * Try to gap fill the current term at a given offset if the gap contains no data.
      * <p>
-     * If the gap is not all zeros then it is not filled.
+     * Note: the gap offset plus gap length must end on a {@link FrameDescriptor#FRAME_ALIGNMENT} boundary.
      *
      * @param logMetaDataBuffer containing the default headers
      * @param termBuffer        to gap fill
      * @param termId            for the current term.
      * @param gapOffset         to fill from
-     * @param gapLength         to fill
+     * @param gapLength         to length of the gap.
      * @return true if the gap has been filled with a padding record or false if data found.
      */
     public static tryFillGap(

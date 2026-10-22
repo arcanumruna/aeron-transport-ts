@@ -31,20 +31,21 @@ const AVAILABLE_BIAS = 2 ** 21;
 const MAX_PADDING = 2 ** 30;
 
 /**
- * Scan a term buffer for availability of new messages.
+ * Scans a term buffer for an availability range of message fragments.
+ * <p>
+ * This can be used to concurrently read a term buffer which is being appended to.
  */
 export class TermScanner {
     private constructor() {}
 
     /**
-     * Scan the term buffer for availability of new messages from a given offset up to a maxLength of bytes.
-     * <p>
-     * The result is a packed outcome: use {@link #available} and {@link #padding} to read it.
+     * Scan the term buffer for availability of new message fragments from a given offset up to a maxLength of bytes.
      *
-     * @param termBuffer to be scanned for messages.
-     * @param offset     in the buffer at which the scan should begin.
+     * @param termBuffer to be scanned for new message fragments.
+     * @param offset     at which the scan should begin.
      * @param maxLength  in bytes of how much should be scanned.
-     * @return resulting status of the scan which packs the available bytes and padding into a number.
+     * @return resulting status of the scan which packs the available bytes and padding into a long. The available bytes
+     * can be negative which indicates that there was data to send.
      */
     public static scanForAvailability(termBuffer: UnsafeBuffer, offset: number, maxLength: number): number {
         const limit = Math.min(maxLength, termBuffer.capacity() - offset);
@@ -77,13 +78,11 @@ export class TermScanner {
     }
 
     /**
-     * Pack the values for padding and available into a number so they can be returned on the stack. As in Java, a
-     * negative `available` sign extends over the padding half, so `padding` then reads as -1. `available` must be in
-     * [-2^21, 2^21) and `padding` in [-2^30, 2^30], else `RangeError` (spec D13).
+     * Pack the values for available and padding into a long for returning on the stack.
      *
      * @param padding   value to be packed.
      * @param available value to be packed.
-     * @return a number with both values packed.
+     * @return a long with both ints packed into it.
      */
     public static pack(padding: number, available: number): number {
         if (
@@ -101,9 +100,9 @@ export class TermScanner {
     }
 
     /**
-     * The number of bytes available from the packed outcome.
+     * The number of bytes that are available to be read after a scan.
      *
-     * @param result into which the available value has been packed.
+     * @param result into which the padding value has been packed.
      * @return the count of bytes that are available to be read.
      */
     public static available(result: number): number {
@@ -111,10 +110,10 @@ export class TermScanner {
     }
 
     /**
-     * The count of bytes that should be added to the length to account for padding frames from the packed outcome.
+     * The count of bytes that should be added for padding to the position on top of what is available.
      *
      * @param result into which the padding value has been packed.
-     * @return the count of bytes that should be added to the length to account for padding frames.
+     * @return the count of bytes that should be added for padding to the position on top of what is available.
      */
     public static padding(result: number): number {
         return Math.floor(result / AVAILABLE_RANGE);

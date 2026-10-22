@@ -20,23 +20,22 @@ import type { UnsafeBuffer } from '../../agrona/concurrent/UnsafeBuffer.js';
 import { LogBufferDescriptor } from './LogBufferDescriptor.js';
 import { Status, TermUnblocker } from './TermUnblocker.js';
 
-const { activeTermCount, indexByTermCount, rawTailVolatile, rotateLog, termId, termOffset } = LogBufferDescriptor;
+const { indexByTermCount, rawTailVolatile, rotateLog, termOffset } = LogBufferDescriptor;
 
 /**
- * Takes a log buffer and checks whether the position at the head of the log is blocked by a message that was never
- * completed, and if so patches it with a padding frame, rotating the log when the term end is reached.
+ * Provides the functionality to unblock a log at a given position.
  */
 export class LogBufferUnblocker {
     private constructor() {}
 
     /**
-     * Attempt to unblock a log buffer at the given position.
+     * Attempt to unblock a log buffer at given position.
      *
-     * @param termBuffers       for the log
-     * @param logMetaDataBuffer for the log
-     * @param blockedPosition   to be unblocked
-     * @param termLength        of each term
-     * @return whether unblocking was done
+     * @param termBuffers       for current blockedOffset.
+     * @param logMetaDataBuffer for log buffer.
+     * @param blockedPosition   to attempt to unblock.
+     * @param termLength        of the buffer for each term in the log.
+     * @return whether attempt was made to unblock.
      */
     public static unblock(
         termBuffers: UnsafeBuffer[],
@@ -48,26 +47,34 @@ export class LogBufferUnblocker {
         // Java's `(int)(long >> n)` and `(int)long`: the position is a `number` (spec D5), so it is divided, not shifted
         const blockedTermCount = Math.floor(blockedPosition / 2 ** positionBitsToShift) | 0;
         const blockedOffset = (blockedPosition | 0) & (termLength - 1);
-        const currentTermCount = activeTermCount(logMetaDataBuffer);
+        const activeTermCount = LogBufferDescriptor.activeTermCount(logMetaDataBuffer);
 
-        if (currentTermCount === ((blockedTermCount - 1) | 0) && blockedOffset === 0) {
-            const currentTermId = termId(rawTailVolatile(logMetaDataBuffer, indexByTermCount(currentTermCount)));
-            rotateLog(logMetaDataBuffer, currentTermCount, currentTermId);
+        if (activeTermCount === ((blockedTermCount - 1) | 0) && blockedOffset === 0) {
+            const currentTermId = LogBufferDescriptor.termId(
+                rawTailVolatile(logMetaDataBuffer, indexByTermCount(activeTermCount)),
+            );
+            rotateLog(logMetaDataBuffer, activeTermCount, currentTermId);
             return true;
         }
 
         const blockedIndex = indexByTermCount(blockedTermCount);
         const rawTail = rawTailVolatile(logMetaDataBuffer, blockedIndex);
-        const blockedTermId = termId(rawTail);
+        const termId = LogBufferDescriptor.termId(rawTail);
         const tailOffset = termOffset(rawTail, termLength);
         const termBuffer = termBuffers[blockedIndex] as UnsafeBuffer;
 
-        const status = TermUnblocker.unblock(logMetaDataBuffer, termBuffer, blockedOffset, tailOffset, blockedTermId);
-        if (Status.UNBLOCKED_TO_END === status) {
-            rotateLog(logMetaDataBuffer, blockedTermCount, blockedTermId);
-            return true;
+        switch (TermUnblocker.unblock(logMetaDataBuffer, termBuffer, blockedOffset, tailOffset, termId)) {
+            case Status.NO_ACTION:
+                break;
+
+            case Status.UNBLOCKED_TO_END:
+                rotateLog(logMetaDataBuffer, blockedTermCount, termId);
+                return true;
+
+            case Status.UNBLOCKED:
+                return true;
         }
 
-        return Status.UNBLOCKED === status;
+        return false;
     }
 }
