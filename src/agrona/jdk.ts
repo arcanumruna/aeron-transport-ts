@@ -429,3 +429,27 @@ export function dataViewSetLong(view: DataView, offset: number, value: number, l
         view.setUint32(offset + 4, lo, false);
     }
 }
+
+/** True where `VarHandle.releaseFence()` is the empty function: x64, a total-store-order architecture. */
+export const RELEASE_FENCE_IS_NO_OP: boolean = 'x64' === process.arch;
+
+/** The word of the fence of the other architectures; private to the module, so private to the worker thread. */
+const FENCE = new Int32Array(new SharedArrayBuffer(4));
+
+/**
+ * Stand-in for `java.lang.invoke.VarHandle`, which has the fences only (spec D21). `releaseFence()` is chosen once, at
+ * module load:
+ * - x64 (total store order): a later store cannot pass an earlier store, and V8 does not move a plain typed-array
+ *   access across an `Atomics` operation in its IR, so the fence is the empty function;
+ * - any other architecture (ARM64): `Atomics.add(FENCE, 0, 0)`, a sequentially consistent read-modify-write
+ *   (`ldaddal` on ARM64), which orders the stores before it ahead of the stores after it. The module instance is per
+ *   worker, so the word is never contended.
+ */
+export class VarHandle {
+    /** `VarHandle.releaseFence()`: no earlier load or store is reordered with a later store. */
+    public static readonly releaseFence: () => void = RELEASE_FENCE_IS_NO_OP
+        ? (): void => {}
+        : (): void => {
+              Atomics.add(FENCE, 0, 0);
+          };
+}
