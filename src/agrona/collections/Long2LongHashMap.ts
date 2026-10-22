@@ -37,6 +37,9 @@ import type { LongLongConsumer } from './LongLongConsumer.js';
 import type { LongLongFunction } from './LongLongFunction.js';
 import type { LongLongPredicate } from './LongLongPredicate.js';
 
+/** Marks an omitted optional argument, so that `remove` and `replace` need no `...rest` array per call. */
+const NO_ARG = Symbol('NO_ARG');
+
 /**
  * A open addressing with linear probing hash map specialised for primitive key and value pairs.
  * <p>
@@ -105,7 +108,7 @@ export class Long2LongHashMap {
             CollectionUtil.validateLoadFactor(loadFactor);
 
             this.loadFactorValue = loadFactor;
-            this.missingValueValue = Long.checkSafe(missingValue!);
+            this.missingValueValue = Long.checkSafe(missingValue!) + 0; // + 0: -0 is stored as 0
             this._shouldAvoidAllocation = shouldAvoidAllocation;
 
             this.setCapacity(BitUtil.findNextPositivePowerOfTwo(Math.max(Long2LongHashMap.MIN_CAPACITY, capacity)));
@@ -209,8 +212,8 @@ export class Long2LongHashMap {
      * @throws IllegalArgumentException if value is missingValue
      */
     public put(key: number, value: number): number {
-        Long.checkSafe(key);
-        Long.checkSafe(value);
+        key = Long.checkSafe(key) + 0; // + 0: -0 is stored as 0
+        value = Long.checkSafe(value) + 0;
         const missingValue = this.missingValueValue;
         if (missingValue === value) {
             throw new IllegalArgumentException('cannot accept missingValue');
@@ -250,8 +253,8 @@ export class Long2LongHashMap {
      * @throws IllegalArgumentException if value is missingValue
      */
     public putIfAbsent(key: number, value: number): number {
-        Long.checkSafe(key);
-        Long.checkSafe(value);
+        key = Long.checkSafe(key) + 0; // + 0: -0 is stored as 0
+        value = Long.checkSafe(value) + 0;
         const missingValue = this.missingValueValue;
         if (missingValue === value) {
             throw new IllegalArgumentException('cannot accept missingValue');
@@ -349,13 +352,6 @@ export class Long2LongHashMap {
     }
 
     /**
-     * {@inheritDoc}
-     */
-    public forEach(action: LongLongConsumer): void {
-        this.forEachLong(action);
-    }
-
-    /**
      * Long primitive specialised containsKey: the `containsKey(Object)` and `containsKey(long)` of Java.
      *
      * @param key the key to check.
@@ -421,8 +417,8 @@ export class Long2LongHashMap {
      * @returns the value if found otherwise the missing value.
      */
     public computeIfAbsent(key: number, mappingFunction: (key: number) => number): number {
-        Long.checkSafe(key);
         requireNonNull(mappingFunction);
+        key = Long.checkSafe(key) + 0; // + 0: -0 is stored as 0
         const missingValue = this.missingValueValue;
         const entries = this._entries;
         const mask = entries.length - 1;
@@ -437,7 +433,7 @@ export class Long2LongHashMap {
             index = Long2LongHashMap.next(index, mask);
         }
 
-        if (missingValue === value && missingValue !== (value = Long.checkSafe(mappingFunction(key)))) {
+        if (missingValue === value && missingValue !== (value = Long.checkSafe(mappingFunction(key)) + 0)) {
             entries[index] = key;
             entries[index + 1] = value;
             ++this._size;
@@ -471,7 +467,7 @@ export class Long2LongHashMap {
         }
 
         if (missingValue !== value) {
-            value = Long.checkSafe(remappingFunction(key, value));
+            value = Long.checkSafe(remappingFunction(key, value)) + 0;
             entries[index + 1] = value;
             if (missingValue === value) {
                 this._size--;
@@ -490,8 +486,8 @@ export class Long2LongHashMap {
      * @returns the updated value if found otherwise the missing value.
      */
     public compute(key: number, remappingFunction: (key: number, value: number) => number): number {
-        Long.checkSafe(key);
         requireNonNull(remappingFunction);
+        key = Long.checkSafe(key) + 0; // + 0: -0 is stored as 0
         const missingValue = this.missingValueValue;
         const entries = this._entries;
         const mask = entries.length - 1;
@@ -506,7 +502,7 @@ export class Long2LongHashMap {
             index = Long2LongHashMap.next(index, mask);
         }
 
-        const newValue = Long.checkSafe(remappingFunction(key, oldValue));
+        const newValue = Long.checkSafe(remappingFunction(key, oldValue)) + 0;
         if (missingValue !== newValue) {
             entries[index + 1] = newValue;
             if (oldValue === missingValue) {
@@ -524,6 +520,13 @@ export class Long2LongHashMap {
     }
 
     // ---------------- Boxed Versions Below ----------------
+
+    /**
+     * {@inheritDoc}
+     */
+    public forEach(action: LongLongConsumer): void {
+        this.forEachLong(action);
+    }
 
     /**
      * Put all of the entries of another map into this one: the `putAll(Map)` and `putAll(Long2LongHashMap)` of Java.
@@ -599,8 +602,8 @@ export class Long2LongHashMap {
      */
     public remove(key: number): number;
     public remove(key: number, value: number): boolean;
-    public remove(key: number, ...rest: [value?: number]): number | boolean {
-        return 0 === rest.length ? this.removeKey(key) : this.removeKeyValue(key, rest[0]!);
+    public remove(key: number, value: number | typeof NO_ARG = NO_ARG): number | boolean {
+        return NO_ARG === value ? this.removeKey(key) : this.removeKeyValue(key, value);
     }
 
     private removeKey(key: number): number {
@@ -659,9 +662,9 @@ export class Long2LongHashMap {
      * @returns the new value, or the missing value if the mapping was removed.
      */
     public merge(key: number, value: number, remappingFunction: LongLongFunction): number {
-        Long.checkSafe(key);
-        Long.checkSafe(value);
         requireNonNull(remappingFunction);
+        key = Long.checkSafe(key) + 0; // + 0: -0 is stored as 0
+        value = Long.checkSafe(value) + 0;
         const missingValue = this.missingValueValue;
         if (missingValue === value) {
             throw new IllegalArgumentException('cannot accept missingValue');
@@ -680,7 +683,7 @@ export class Long2LongHashMap {
             index = Long2LongHashMap.next(index, mask);
         }
 
-        const newValue = missingValue === oldValue ? value : Long.checkSafe(remappingFunction(oldValue, value));
+        const newValue = missingValue === oldValue ? value : Long.checkSafe(remappingFunction(oldValue, value)) + 0;
         if (missingValue !== newValue) {
             entries[index + 1] = newValue;
             if (missingValue === oldValue) {
@@ -810,12 +813,12 @@ export class Long2LongHashMap {
      * @returns true if the value was replaced.
      */
     public replace(key: number, oldValue: number, newValue: number): boolean;
-    public replace(key: number, ...rest: [number] | [number, number]): number | boolean {
-        return 1 === rest.length ? this.replaceValue(key, rest[0]) : this.replaceOldNew(key, rest[0], rest[1]!);
+    public replace(key: number, valueOrOld: number, newValue: number | typeof NO_ARG = NO_ARG): number | boolean {
+        return NO_ARG === newValue ? this.replaceValue(key, valueOrOld) : this.replaceOldNew(key, valueOrOld, newValue);
     }
 
     private replaceValue(key: number, value: number): number {
-        Long.checkSafe(value);
+        value = Long.checkSafe(value) + 0; // + 0: -0 is stored as 0
         const missingValue = this.missingValueValue;
         if (missingValue === value) {
             throw new IllegalArgumentException('cannot accept missingValue');
@@ -839,7 +842,7 @@ export class Long2LongHashMap {
     }
 
     private replaceOldNew(key: number, oldValue: number, newValue: number): boolean {
-        Long.checkSafe(newValue);
+        newValue = Long.checkSafe(newValue) + 0; // + 0: -0 is stored as 0
         const missingValue = this.missingValueValue;
         if (missingValue === newValue) {
             throw new IllegalArgumentException('cannot accept missingValue');
@@ -880,7 +883,7 @@ export class Long2LongHashMap {
         for (let valueIndex = 1, remaining = this._size; remaining > 0 && valueIndex < length; valueIndex += 2) {
             const existingValue = entries[valueIndex]!;
             if (missingValue !== existingValue) {
-                const newValue = Long.checkSafe(function_(entries[valueIndex - 1]!, existingValue));
+                const newValue = Long.checkSafe(function_(entries[valueIndex - 1]!, existingValue)) + 0;
                 if (missingValue === newValue) {
                     throw new IllegalArgumentException('cannot replace with a missingValue');
                 }
@@ -1116,7 +1119,7 @@ export class Long2LongHashMapEntryIterator
      * @returns the previous value.
      */
     public setValue(value: number): number {
-        Long.checkSafe(value);
+        value = Long.checkSafe(value) + 0; // + 0: -0 is stored as 0
         if (!this.isPositionValid) {
             throw new IllegalStateException();
         }
@@ -1283,7 +1286,7 @@ export class Long2LongHashMapKeySet extends AbstractSet<number> {
     /**
      * {@inheritDoc}
      */
-    public clear(): void {
+    public override clear(): void {
         this.map.clear();
     }
 
@@ -1425,7 +1428,7 @@ export class Long2LongHashMapEntrySet extends AbstractSet<Entry<number, number>>
     /**
      * {@inheritDoc}
      */
-    public clear(): void {
+    public override clear(): void {
         this.map.clear();
     }
 

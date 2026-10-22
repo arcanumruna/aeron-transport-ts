@@ -13,12 +13,16 @@ import type { Entry } from '../../../src/agrona/jdkUtil.js';
 import { assertIs, assertThrowsExactly } from '../../support/Assertions.js';
 import { CharSequenceKey, type CharSequence } from './CharSequenceKey.js';
 
-describe('Int2ObjectHashMapTest', () => {
+/**
+ * The tests of Java's `Int2ObjectHashMapTest`, which `Int2ObjectHashMapNotAvoidingAllocationTest` inherits.
+ *
+ * @param newMap the overridable `newMap(loadFactor, initialCapacity)` of the Java class.
+ * @returns the accessor of the `map` field that the subclass tests use.
+ */
+export function int2ObjectHashMapTest(
+    newMap: (loadFactor: number, initialCapacity: number) => Int2ObjectHashMap<string>,
+): () => Int2ObjectHashMap<string> {
     let map: Int2ObjectHashMap<string>;
-
-    function newMap(loadFactor: number, initialCapacity: number): Int2ObjectHashMap<string> {
-        return new Int2ObjectHashMap<string>(initialCapacity, loadFactor);
-    }
 
     beforeEach(() => {
         map = newMap(Hashing.DEFAULT_LOAD_FACTOR, Int2ObjectHashMap.MIN_CAPACITY);
@@ -63,7 +67,7 @@ describe('Int2ObjectHashMapTest', () => {
         expect(map.size()).toBe(17);
 
         expect(map.get(16)).toBe('16');
-        expect(loadFactor).toBeCloseTo(map.loadFactor(), 10);
+        expect(map.loadFactor()).toBe(loadFactor);
     });
 
     it('shouldHandleCollisionAndThenLinearProbe', () => {
@@ -80,7 +84,7 @@ describe('Int2ObjectHashMapTest', () => {
 
         expect(map.get(key)).toBe(value);
         expect(map.get(collisionKey)).toBe(collisionValue);
-        expect(loadFactor).toBeCloseTo(map.loadFactor(), 10);
+        expect(map.loadFactor()).toBe(loadFactor);
     });
 
     it('shouldClearCollection', () => {
@@ -856,4 +860,10 @@ describe('Int2ObjectHashMapTest', () => {
 
         expect(map.size()).toBe(0);
     });
+
+    return () => map;
+}
+
+describe('Int2ObjectHashMapTest', () => {
+    int2ObjectHashMapTest((loadFactor, initialCapacity) => new Int2ObjectHashMap<string>(initialCapacity, loadFactor));
 });

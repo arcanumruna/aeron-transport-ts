@@ -230,6 +230,32 @@ export abstract class AbstractCollection<T> implements Iterable<T> {
     }
 
     /**
+     * `AbstractCollection.remove(Object)`: removes one element equal to `o` through the iterator.
+     */
+    public remove(o: unknown): boolean {
+        const it = this.iterator();
+        while (it.hasNext()) {
+            if (objectsEquals(o, it.next())) {
+                it.remove();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * `AbstractCollection.clear()`: removes every element through the iterator.
+     */
+    public clear(): void {
+        const it = this.iterator();
+        while (it.hasNext()) {
+            it.next();
+            it.remove();
+        }
+    }
+
+    /**
      * `Collection.removeIf(Predicate)`.
      */
     public removeIf(filter: (e: T) => boolean): boolean {

@@ -40,6 +40,9 @@ import type { LongObjConsumer } from './LongObjConsumer.js';
 import type { LongObjectToObjectFunction } from './LongObjectToObjectFunction.js';
 import type { LongObjPredicate } from './LongObjPredicate.js';
 
+/** Marks an omitted optional argument, so that `remove` and `replace` need no `...rest` array per call. */
+const NO_ARG = Symbol('NO_ARG');
+
 /**
  * A open addressing with linear probing hash map specialised for primitive key and object value pairs. If a value is
  * null then the map cannot be sure whether it is not there or just a null value, so the null value is not supported
@@ -305,9 +308,8 @@ export class Long2ObjectHashMap<V> {
      * {@inheritDoc}
      */
     public computeIfAbsent(key: number, mappingFunction: (key: number) => V | null): V | null {
-        Long.checkSafe(key);
-
         requireNonNull(mappingFunction);
+        key = Long.checkSafe(key) + 0; // + 0: -0 is stored as 0
 
         const keys = this._keys;
         const values = this._values;
@@ -324,7 +326,7 @@ export class Long2ObjectHashMap<V> {
         }
 
         let value = this.unmapNullValue(mappedValue);
-        if (null === value && null !== (value = mappingFunction(key))) {
+        if (null === value && null !== (value = mappingFunction(key) ?? null)) {
             values[index] = value;
             if (null === mappedValue) {
                 keys[index] = key;
@@ -359,7 +361,7 @@ export class Long2ObjectHashMap<V> {
 
         let value = this.unmapNullValue(mappedValue);
         if (null !== value) {
-            value = remappingFunction(key, value);
+            value = remappingFunction(key, value) ?? null;
             values[index] = value;
 
             if (null === value) {
@@ -375,9 +377,8 @@ export class Long2ObjectHashMap<V> {
      * {@inheritDoc}
      */
     public compute(key: number, remappingFunction: LongObjectToObjectFunction<V | null, V | null>): V | null {
-        Long.checkSafe(key);
-
         requireNonNull(remappingFunction);
+        key = Long.checkSafe(key) + 0; // + 0: -0 is stored as 0
 
         const keys = this._keys;
         const values = this._values;
@@ -393,7 +394,7 @@ export class Long2ObjectHashMap<V> {
             index = (index + 1) & mask;
         }
 
-        const newValue = remappingFunction(key, this.unmapNullValue(mappedvalue));
+        const newValue = remappingFunction(key, this.unmapNullValue(mappedvalue)) ?? null;
         if (null !== newValue) {
             values[index] = newValue;
             if (null === mappedvalue) {
@@ -415,9 +416,9 @@ export class Long2ObjectHashMap<V> {
      * {@inheritDoc}
      */
     public merge(key: number, value: V | null, remappingFunction: (oldValue: V, newValue: V) => V | null): V | null {
-        Long.checkSafe(key);
         const nonNullValue = requireNonNull(value);
         requireNonNull(remappingFunction);
+        key = Long.checkSafe(key) + 0; // + 0: -0 is stored as 0
 
         const keys = this._keys;
         const values = this._values;
@@ -434,7 +435,7 @@ export class Long2ObjectHashMap<V> {
         }
 
         const oldValue = this.unmapNullValue(mappedvalue);
-        const newValue = null === oldValue ? nonNullValue : remappingFunction(oldValue, nonNullValue);
+        const newValue = null === oldValue ? nonNullValue : (remappingFunction(oldValue, nonNullValue) ?? null);
         if (null !== newValue) {
             values[index] = newValue;
             if (null === mappedvalue) {
@@ -461,10 +462,9 @@ export class Long2ObjectHashMap<V> {
      * @throws NullPointerException if value is null
      */
     public put(key: number, value: V | null): V | null {
-        Long.checkSafe(key);
-
         const val = this.mapNullValue(value);
         requireNonNull(val, 'value cannot be null');
+        key = Long.checkSafe(key) + 0; // + 0: -0 is stored as 0
 
         const keys = this._keys;
         const values = this._values;
@@ -509,8 +509,8 @@ export class Long2ObjectHashMap<V> {
      * @returns true if the value was removed.
      */
     public remove(key: number, value: V | null): boolean;
-    public remove(key: number, ...rest: [value?: V | null]): V | null | boolean {
-        return 0 === rest.length ? this.removeKey(key) : this.removeKeyValue(key, rest[0] as V | null);
+    public remove(key: number, value: V | null | typeof NO_ARG = NO_ARG): V | null | boolean {
+        return NO_ARG === value ? this.removeKey(key) : this.removeKeyValue(key, value);
     }
 
     private removeKey(key: number): V | null {
@@ -614,10 +614,9 @@ export class Long2ObjectHashMap<V> {
      * @throws NullPointerException if value is null
      */
     public putIfAbsent(key: number, value: V | null): V | null {
-        Long.checkSafe(key);
-
         const val = this.mapNullValue(value);
         requireNonNull(val, 'value cannot be null');
+        key = Long.checkSafe(key) + 0; // + 0: -0 is stored as 0
 
         const keys = this._keys;
         const values = this._values;
@@ -810,8 +809,8 @@ export class Long2ObjectHashMap<V> {
      * @throws NullPointerException if newValue is null
      */
     public replace(key: number, oldValue: V | null, newValue: V | null): boolean;
-    public replace(key: number, ...rest: [V | null] | [V | null, V | null]): V | null | boolean {
-        return 1 === rest.length ? this.replaceValue(key, rest[0]) : this.replaceOldNew(key, rest[0], rest[1]!);
+    public replace(key: number, valueOrOld: V | null, newValue: V | null | typeof NO_ARG = NO_ARG): V | null | boolean {
+        return NO_ARG === newValue ? this.replaceValue(key, valueOrOld) : this.replaceOldNew(key, valueOrOld, newValue);
     }
 
     private replaceValue(key: number, value: V | null): V | null {
@@ -886,7 +885,7 @@ export class Long2ObjectHashMap<V> {
         for (let index = 0; remaining > 0 && index < length; index++) {
             const oldValue = values[index];
             if (null !== oldValue) {
-                const newVal = this.mapNullValue(function_(keys[index]!, this.unmapNullValue(oldValue) as V));
+                const newVal = this.mapNullValue(function_(keys[index]!, this.unmapNullValue(oldValue) as V) ?? null);
                 requireNonNull(newVal, 'value cannot be null');
 
                 values[index] = newVal;
@@ -1008,14 +1007,14 @@ export class Long2ObjectHashMapKeySet<V> extends AbstractSet<number> {
      * @param key to be removed.
      * @returns true if the key was present.
      */
-    public remove(key: number): boolean {
+    public override remove(key: number): boolean {
         return null !== this.map.remove(key);
     }
 
     /**
      * {@inheritDoc}
      */
-    public clear(): void {
+    public override clear(): void {
         this.map.clear();
     }
 
@@ -1080,7 +1079,7 @@ export class Long2ObjectHashMapValueCollection<V> extends AbstractCollection<V |
         return this.map.containsValue(o);
     }
 
-    public clear(): void {
+    public override clear(): void {
         this.map.clear();
     }
 
@@ -1138,7 +1137,7 @@ export class Long2ObjectHashMapEntrySet<V> extends AbstractSet<Entry<number, V |
     /**
      * {@inheritDoc}
      */
-    public clear(): void {
+    public override clear(): void {
         this.map.clear();
     }
 
