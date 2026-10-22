@@ -10,6 +10,7 @@ import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { AtomicCounter } from '../../../src/agrona/concurrent/status/AtomicCounter.js';
 import { CachedEpochClock } from '../../../src/agrona/concurrent/CachedEpochClock.js';
 import { Exception, IllegalStateException, NullPointerException, RuntimeException } from '../../../src/agrona/jdk.js';
+import { CountersReader } from '../../../src/agrona/concurrent/status/CountersReader.js';
 import { StandardCharsets } from '../../../src/agrona/jdkLang.js';
 import {
     getCause,
@@ -44,6 +45,14 @@ describe('ErrorLogAndHandlersExtra', () => {
             for (const line of lines.slice(1, -1)) {
                 expect(line.startsWith('\tat ')).toBe(true);
             }
+        });
+
+        it('aMessageThatLooksLikeAFrameIsNotTakenForTheFrames', () => {
+            const error = new RuntimeException('a\n    at fake');
+
+            expect(stackTraceString(error).startsWith('RuntimeException: a\n    at fake\n\tat ')).toBe(true);
+            // the frames start after the header, not at the frame-like text inside the message
+            expect(stackTraceFrames(error)).not.toContain('fake');
         });
 
         it('aCauseIsPrintedAfterCausedBy', () => {
@@ -132,6 +141,33 @@ describe('ErrorLogAndHandlersExtra', () => {
 
             // the third differs from the first only by where it was made (its call of make is on another line)
             expect(readAll().length).toBe(3);
+        });
+
+        it('twoErrorsMadeAtTheSamePlaceWithDifferentCausesAreTwoObservations', () => {
+            const errs = ['c1', 'c2'].map((c) => new RuntimeException('m', { cause: new Exception(c) }));
+            expect(log.record(errs[0]!)).toBe(true);
+            expect(log.record(errs[1]!)).toBe(true);
+
+            expect(readAll()).toHaveLength(2);
+        });
+
+        it('aRecordWithAnEmptyErrorAtTheLastPossibleOffsetIsRead', () => {
+            const small = new UnsafeBuffer(new ArrayBuffer(64));
+            const { ENCODED_ERROR_OFFSET, LENGTH_OFFSET, OBSERVATION_COUNT_OFFSET } = DistinctErrorLog;
+            const { LAST_OBSERVATION_TIMESTAMP_OFFSET, FIRST_OBSERVATION_TIMESTAMP_OFFSET } = DistinctErrorLog;
+            const write = (offset: number, length: number, text: string): void => {
+                small.putInt(offset + OBSERVATION_COUNT_OFFSET, 1);
+                small.putLong(offset + LAST_OBSERVATION_TIMESTAMP_OFFSET, 2);
+                small.putLong(offset + FIRST_OBSERVATION_TIMESTAMP_OFFSET, 1);
+                small.putBytes(offset + ENCODED_ERROR_OFFSET, new TextEncoder().encode(text));
+                small.putIntRelease(offset + LENGTH_OFFSET, length);
+            };
+            write(0, 40, 'sixteen ascii ch');
+            write(40, ENCODED_ERROR_OFFSET, '');
+
+            const texts: string[] = [];
+            expect(ErrorLogReader.read(small, (_c, _f, _l, text) => texts.push(text))).toBe(2);
+            expect(texts).toEqual(['sixteen ascii ch', '']);
         });
 
         it('recordsAreEightByteAlignedAndReadBackInOrder', () => {
@@ -254,9 +290,11 @@ describe('ErrorLogAndHandlersExtra', () => {
     describe('CountedErrorHandler', () => {
         const COUNTER_ID = 1;
         let counter: AtomicCounter;
+        let countersBuffer: UnsafeBuffer;
 
         beforeEach(() => {
-            counter = new AtomicCounter(new UnsafeBuffer(new ArrayBuffer(2 * 128)), COUNTER_ID);
+            countersBuffer = new UnsafeBuffer(new ArrayBuffer(2 * 128));
+            counter = new AtomicCounter(countersBuffer, COUNTER_ID);
         });
 
         it('incrementsTheCounterThenDelegates', () => {
@@ -282,6 +320,7 @@ describe('ErrorLogAndHandlersExtra', () => {
             handler.onError(new RuntimeException('x'));
 
             expect(delegate.onError).toHaveBeenCalledTimes(1);
+            expect(countersBuffer.getLong(CountersReader.counterOffset(COUNTER_ID))).toBe(0);
         });
 
         it('aClosedHandlerPrintsToSystemErrAndDoesNotDelegateOrCount', () => {

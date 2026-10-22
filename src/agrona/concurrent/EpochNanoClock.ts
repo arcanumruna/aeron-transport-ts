@@ -29,4 +29,23 @@ export interface EpochNanoClock {
      * @return the number of nanoseconds since 1 Jan 1970 UTC.
      */
     nanoTime(): number;
+
+    /** Addition (spec D17): the exact nanoTime() as the two int halves of the Java long, out[0] = low, out[1] = high. No allocation. */
+    nanoTimeHalves(out: Int32Array): void;
+}
+
+const TWO_21 = 2097152;
+const TWO_11 = 2048;
+
+/** Writes ms * 1e6 + subNs (ms a safe integer in [0, 2^41), subNs in [0, 1e6)) exactly into out as [lo, hi]. */
+export function epochNanosHalves(ms: number, subNs: number, out: Int32Array): void {
+    const msHi = Math.floor(ms / TWO_21);
+    const msLo = ms - msHi * TWO_21;
+    const b = msLo * 1e6 + subNs;
+    const bHi = Math.floor(b / TWO_21);
+    const bLo = b - bHi * TWO_21;
+    const c = msHi * 1e6 + bHi;
+    const hi = Math.floor(c / TWO_11);
+    out[0] = ((c - hi * TWO_11) * TWO_21 + bLo) | 0;
+    out[1] = hi | 0;
 }

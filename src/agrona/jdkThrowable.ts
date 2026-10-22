@@ -61,7 +61,8 @@ export function stackTraceFrames(error: Error): string {
         return '';
     }
 
-    const start = stack.indexOf(FRAMES_START);
+    const head = throwableToString(error);
+    const start = stack.indexOf(FRAMES_START, stack.startsWith(head) ? head.length : 0);
 
     return -1 === start ? '' : stack.substring(start);
 }

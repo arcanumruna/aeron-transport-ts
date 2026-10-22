@@ -12,10 +12,12 @@ import { ConcurrentCountersManager } from '../../../src/agrona/concurrent/status
 import { CountersManager } from '../../../src/agrona/concurrent/status/CountersManager.js';
 import { CountersReader } from '../../../src/agrona/concurrent/status/CountersReader.js';
 import { UnsafeBufferStatusIndicator } from '../../../src/agrona/concurrent/status/UnsafeBufferStatusIndicator.js';
+import { epochNanosHalves } from '../../../src/agrona/concurrent/EpochNanoClock.js';
 import { SystemEpochNanoClock } from '../../../src/agrona/concurrent/SystemEpochNanoClock.js';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { SemanticVersion } from '../../../src/agrona/SemanticVersion.js';
 import {
+    ByteOrder,
     IllegalArgumentException,
     IllegalStateException,
     Integer,
@@ -24,6 +26,7 @@ import {
 } from '../../../src/agrona/jdk.js';
 import { NoSuchElementException } from '../../../src/agrona/jdkUtil.js';
 import { assertThrows } from '../../support/Assertions.js';
+import { expectNoAllocation } from '../../support/Allocation.js';
 import { mulberry32 } from '../../support/Random.js';
 
 const { COUNTER_LENGTH, METADATA_LENGTH } = CountersReader;
@@ -108,6 +111,73 @@ describe('ConcurrentSupportExtra', () => {
             expect(previous).toBeLessThan(after + 1e9);
             expect(Number.isSafeInteger(previous)).toBe(false);
             expect(new SystemEpochNanoClock().nanoTime()).toBeGreaterThanOrEqual(previous);
+        });
+
+        it('epochNanosHalvesIsExactAgainstABigIntModel', () => {
+            const random = mulberry32(0xc10c);
+            const out = new Int32Array(2);
+            const check = (ms: number, subNs: number): void => {
+                epochNanosHalves(ms, subNs, out);
+                const expected = BigInt(ms) * 1000000n + BigInt(subNs);
+                expect((BigInt(out[1]!) << 32n) | BigInt(out[0]! >>> 0)).toBe(BigInt.asIntN(64, expected));
+            };
+
+            for (let i = 0; i < 100_000; i++) {
+                check(Math.floor(random() * 2 ** 41), Math.floor(random() * 1e6));
+            }
+            for (const [ms, subNs] of [
+                [0, 0],
+                [0, 999999],
+                [2 ** 41 - 1, 999999],
+                [4294, 967295],
+                [4294, 967296],
+            ] as const) {
+                check(ms, subNs);
+            }
+        });
+
+        it('nanoTimeHalvesIsTheExactWallClockAndNeverGoesBack', () => {
+            const clock = SystemEpochNanoClock.INSTANCE;
+            const out = new Int32Array(2);
+            const buffer = new UnsafeBuffer(new ArrayBuffer(8));
+            const read = (): bigint => {
+                clock.nanoTimeHalves(out);
+                buffer.putInt(0, out[0]!, ByteOrder.LITTLE_ENDIAN);
+                buffer.putInt(4, out[1]!, ByteOrder.LITTLE_ENDIAN);
+                return buffer.getLongBigInt(0, ByteOrder.LITTLE_ENDIAN);
+            };
+
+            const before = BigInt(Date.now()) * 1000000n;
+            let previous = read();
+            for (let i = 0; i < 1000; i++) {
+                const now = read();
+                expect(now >= previous).toBe(true);
+                previous = now;
+            }
+            const after = BigInt(Date.now()) * 1000000n;
+
+            // within 5 ms of the wall clock (the monotonic clock can drift from it)
+            expect(previous > before - 5_000_000n).toBe(true);
+            expect(previous < after + 5_000_000n).toBe(true);
+        });
+
+        // performance.now() itself returns one heap number per call: nanoTimeHalves adds none of its own (heapNumbers = 1)
+        it('nanoTimeHalvesAllocatesNothing', async () => {
+            const clock = SystemEpochNanoClock.INSTANCE;
+            const out = new Int32Array(2);
+
+            await expectNoAllocation(
+                (n) => {
+                    let sum = 0;
+                    for (let i = 0; i < n; i++) {
+                        clock.nanoTimeHalves(out);
+                        sum = (sum + (out[0]! & 1)) & 0xffff;
+                    }
+                    expect(sum).toBeGreaterThanOrEqual(0);
+                },
+                undefined,
+                1,
+            );
         });
     });
 
@@ -282,10 +352,22 @@ describe('ConcurrentSupportExtra', () => {
 
         it('aPolledNodeDoesNotRetainItsValue', () => {
             const queue = new ManyToOneConcurrentLinkedQueue<object>();
+            const first = {};
+            queue.offer(first);
+            queue.offer({});
+
+            expect(queue.poll()).toBe(first);
+            expect((queue as unknown as { head: { value: unknown } }).head.value).toBeNull();
+        });
+
+        it('theLastPolledItemResetsTheTailToTheEmptyNode', () => {
+            const queue = new ManyToOneConcurrentLinkedQueue<object>();
             const item = {};
             queue.offer(item);
 
             expect(queue.poll()).toBe(item);
+            const internals = queue as unknown as { tail: unknown; empty: unknown };
+            expect(internals.tail).toBe(internals.empty);
             expect(queue.peek()).toBeNull();
             expect(queue.poll()).toBeNull();
         });

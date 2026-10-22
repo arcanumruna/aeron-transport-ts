@@ -65,13 +65,13 @@ export class ManyToOneConcurrentLinkedQueue<E> {
     private readonly empty: Node<E> = new Node<E>(null);
 
     private tail: Node<E>;
-    private head: Node<E>;
+    private head: Node<E> = this.empty;
 
     /**
      * Constructs an empty queue.
      */
     public constructor() {
-        this.head = this.empty;
+        this.headOrdered(this.empty);
         this.tail = this.empty;
     }
 
@@ -129,7 +129,7 @@ export class ManyToOneConcurrentLinkedQueue<E> {
                 }
             }
 
-            this.head = next;
+            this.headOrdered(next);
         }
 
         return value;
@@ -236,6 +236,10 @@ export class ManyToOneConcurrentLinkedQueue<E> {
         }
 
         return sb + '}';
+    }
+
+    private headOrdered(head: Node<E>): void {
+        this.head = head;
     }
 
     private swapTail(newTail: Node<E>): Node<E> {

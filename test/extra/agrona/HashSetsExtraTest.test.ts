@@ -2,6 +2,7 @@
 // LongHashSet against a JS Set model for seeded random operations, the paths IntHashSetTest does not reach (compact,
 // copy, an uncached iterator, iterator misuse, constructor limits), and the long keys of LongHashSet (spec D5).
 import { describe, expect, it } from 'vitest';
+import { Hashing } from '../../../src/agrona/collections/Hashing.js';
 import { IntHashSet } from '../../../src/agrona/collections/IntHashSet.js';
 import { LongHashSet } from '../../../src/agrona/collections/LongHashSet.js';
 import { IllegalArgumentException, IllegalStateException, Long } from '../../../src/agrona/jdk.js';
@@ -14,6 +15,37 @@ function sorted(values: Iterable<number>): number[] {
 }
 
 describe('HashSetsExtra', () => {
+    it('compactChainMovesAnEntryThatWrappedPastTheEndBack', () => {
+        const set = new IntHashSet(16);
+        const mask = set.capacity() - 1;
+        const atEnd: number[] = [];
+        for (let v = 1; atEnd.length < 2; v++) {
+            if (Hashing.hash(v, mask) === mask) atEnd.push(v);
+        }
+        const [a, b] = atEnd as [number, number];
+        set.add(a);
+        set.add(b);
+        expect(set.remove(a)).toBe(true);
+        expect(set.contains(b)).toBe(true);
+        expect(set.size()).toBe(1);
+    });
+
+    it('resizesOnlyWhenTheSizePassesTheThreshold', () => {
+        const set = new IntHashSet();
+        const threshold = set.resizeThreshold();
+        for (let i = 1; i <= threshold; i++) set.add(i);
+        expect(set.capacity()).toBe(8);
+        set.add(100);
+        expect(set.capacity()).toBe(16);
+    });
+
+    it('compactUsesTheLoadFactor', () => {
+        const set = new IntHashSet();
+        for (let i = 1; i <= 12; i++) set.add(i);
+        set.compact();
+        expect(set.capacity()).toBe(32);
+    });
+
     it('intHashSetAgreesWithASetModelForRandomOperations', () => {
         const random = mulberry32(0x5eed);
         const set = new IntHashSet(2);
