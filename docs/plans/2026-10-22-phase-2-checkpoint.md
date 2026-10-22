@@ -20,7 +20,7 @@ Owner rule: 64-bit values keep Aeron's exact layout and true 64-bit semantics (n
 | T9 | `UdpChannel`, `ControlMode`, `InvalidChannelException` | merged (e43d6d2) |
 | T2b | True 64-bit atomics on shared buffers via a 1024-stripe lock table (D16); fast path, dead-holder spin cap, kill tests, zero heap numbers at 2^40 | merged (a4abb41) |
 | T6 | Command flyweights, CnC layout, client status (`receiverId`/`groupTag` as `bigint`) | merged (29105c6) |
-| T3 | Bench gate (PASS / FAIL / NO_VERDICT, exit codes 0/1/2/3), `releaseFence` (D21), ring buffers and large-position allocation tests | merged (this merge commit). `bench:gate` not yet run on an idle host |
+| T3 | Bench gate (PASS / FAIL / NO_VERDICT, exit codes 0/1/2/3), `releaseFence` (D21), ring buffers and large-position allocation tests | merged (this merge commit). `bench:gate` run after T7a: an A/A run fails on the shared cloud host (pair spread ±10–25% against a 5% limit), so its verdicts there are not trusted yet (#29) |
 | T7a | Driver `status/*` counters, `DutyCycleTracker`, `ThreadingMode`, `DriverManagedResource`, `SessionKey`, full `AeronCounters`, `SystemCounters`, `MediaDriverVersion` | merged after an Opus review (no urgent findings); review fixes in the same push, minors filed as #25–#28 |
 | — | Flaky allocation-test fix (consumer closure hoisted out of the measured loop) | merged (b59d4d9) |
 
