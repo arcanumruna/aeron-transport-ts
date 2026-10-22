@@ -23,7 +23,7 @@ import { AeronException } from '../exceptions/AeronException.js';
 import { FrameDescriptor } from '../logbuffer/FrameDescriptor.js';
 import { HeaderFlyweight } from './HeaderFlyweight.js';
 
-const { SIZE_OF_LONG } = BitUtil;
+const { SIZE_OF_INT, SIZE_OF_LONG } = BitUtil;
 const { LITTLE_ENDIAN } = ByteOrder;
 
 /**
@@ -233,6 +233,60 @@ export class StatusMessageFlyweight extends HeaderFlyweight {
         }
 
         return this.putLongUnaligned(StatusMessageFlyweight.RECEIVER_ID_FIELD_OFFSET, id);
+    }
+
+    /**
+     * The upper 32 bits of the receiver id, without a `bigint`: the high half of the 8 byte little endian field.
+     * <p>
+     * Not in Java (spec D14).
+     *
+     * @return the upper half of the receiver id, an `int`.
+     */
+    public receiverIdHigh(): number;
+    /**
+     * Set the upper 32 bits of the receiver id, without a `bigint`.
+     * <p>
+     * Not in Java (spec D14).
+     *
+     * @param high the upper half of the receiver id, an `int`.
+     * @return this for a fluent API.
+     */
+    public receiverIdHigh(high: number): StatusMessageFlyweight;
+    public receiverIdHigh(high?: number): number | StatusMessageFlyweight {
+        if (undefined === high) {
+            return this.getInt(StatusMessageFlyweight.RECEIVER_ID_FIELD_OFFSET + SIZE_OF_INT, LITTLE_ENDIAN);
+        }
+
+        this.putInt(StatusMessageFlyweight.RECEIVER_ID_FIELD_OFFSET + SIZE_OF_INT, high, LITTLE_ENDIAN);
+
+        return this;
+    }
+
+    /**
+     * The lower 32 bits of the receiver id, without a `bigint`: the low half of the 8 byte little endian field.
+     * <p>
+     * Not in Java (spec D14).
+     *
+     * @return the lower half of the receiver id, an `int`.
+     */
+    public receiverIdLow(): number;
+    /**
+     * Set the lower 32 bits of the receiver id, without a `bigint`.
+     * <p>
+     * Not in Java (spec D14).
+     *
+     * @param low the lower half of the receiver id, an `int`.
+     * @return this for a fluent API.
+     */
+    public receiverIdLow(low: number): StatusMessageFlyweight;
+    public receiverIdLow(low?: number): number | StatusMessageFlyweight {
+        if (undefined === low) {
+            return this.getInt(StatusMessageFlyweight.RECEIVER_ID_FIELD_OFFSET, LITTLE_ENDIAN);
+        }
+
+        this.putInt(StatusMessageFlyweight.RECEIVER_ID_FIELD_OFFSET, low, LITTLE_ENDIAN);
+
+        return this;
     }
 
     /**
