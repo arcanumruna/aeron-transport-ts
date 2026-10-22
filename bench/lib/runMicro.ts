@@ -1,7 +1,9 @@
 // `npm run bench:micro [-- --filter <substring>] [--samples <n>] [--json] [--file <substring>]`: runs the micro benches
 // of bench/micro/*.bench.ts. One JSON line per bench on stdout, `{name, nsPerOp, p50, p99, p999, opsPerSec?}`, and a
-// table on stderr (not with --json). A bench or a file that fails prints `{name, error}` instead of a result.
+// table on stderr (not with --json). A bench or a file that fails prints `{name, error}` instead of a result. Start the
+// process with `--expose-gc` (bench:micro and the gate do): a full collection runs before every timed region.
 import { readdirSync } from 'node:fs';
+import { availableParallelism, loadavg } from 'node:os';
 import { DEFAULT_SAMPLES, measure } from './runner.js';
 import type { BenchModule, ErrorLine, Result } from './types.js';
 
@@ -70,6 +72,17 @@ async function main(): Promise<void> {
         .filter((f) => f.endsWith('.bench.ts') && f.includes(options.file))
         .sort();
 
+    if (!options.json) {
+        process.stderr.write(
+            'load average ' +
+                loadavg()
+                    .map((l) => l.toFixed(2))
+                    .join(' ') +
+                ' on ' +
+                availableParallelism() +
+                ' cores\n',
+        );
+    }
     const results: Result[] = [];
     for (const file of files) {
         let module: BenchModule;

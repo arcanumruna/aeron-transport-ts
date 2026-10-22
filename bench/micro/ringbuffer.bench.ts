@@ -1,5 +1,6 @@
 // Micro benches of the Agrona ring buffers over a SharedArrayBuffer of 64 KiB (phase 2, T3): write + read and
 // tryClaim + commit + read of a 64 byte message in one thread, and four producer workers with one consumer.
+import { availableParallelism } from 'node:os';
 import { Worker } from 'node:worker_threads';
 import { BufferUtil } from '../../src/agrona/BufferUtil.js';
 import type { MessageHandler } from '../../src/agrona/concurrent/MessageHandler.js';
@@ -8,7 +9,7 @@ import { OneToOneRingBuffer } from '../../src/agrona/concurrent/ringbuffer/OneTo
 import type { RingBuffer } from '../../src/agrona/concurrent/ringbuffer/RingBuffer.js';
 import { RingBufferDescriptor } from '../../src/agrona/concurrent/ringbuffer/RingBufferDescriptor.js';
 import { UnsafeBuffer } from '../../src/agrona/concurrent/UnsafeBuffer.js';
-import type { Bench, RunSamples, SyncBench } from '../lib/types.js';
+import { type Bench, NO_VERDICT_PREFIX, type RunSamples, type SyncBench } from '../lib/types.js';
 
 const CAPACITY = 64 * 1024;
 const LENGTH = 64;
@@ -70,20 +71,27 @@ function claimCommitAndRead(name: string, create: (buffer: UnsafeBuffer) => Ring
     };
 }
 
-const PRODUCERS = 4;
+/** Up to four producers, and two cores left for the consumer (the main thread) and the rest of the host. */
+const PRODUCERS = Math.min(4, availableParallelism() - 2);
 const WARM_UP_PER_PRODUCER = 50_000;
 const PER_PRODUCER = 250_000;
 const MAX_SPINS = 400_000_000;
 
 /**
- * Four producer workers write 250k messages each to one ring buffer, and the main thread reads. The throughput is the
+ * PRODUCERS (at most four) producer workers write 250k messages each to one ring buffer, and the main thread reads. With
+ * fewer than three cores there is no producer and the bench gives NO_VERDICT. The throughput is the
  * messages read per second between the start of the measured round and the last message; a sample is the time per
  * message over a window of messages read.
  */
 function manyProducers(): Bench {
     return {
-        name: 'ManyToOneRingBuffer write 64B (4 producer workers, 1 consumer, throughput)',
+        name: 'ManyToOneRingBuffer write 64B (producer workers, 1 consumer, throughput)',
         run: async ({ samples }): Promise<RunSamples> => {
+            if (PRODUCERS < 1) {
+                throw new Error(
+                    NO_VERDICT_PREFIX + 'the host has ' + availableParallelism() + ' cores; the bench needs at least 3',
+                );
+            }
             const buffer = BufferUtil.allocateShared(CAPACITY + RingBufferDescriptor.TRAILER_LENGTH, 64);
             const control = new SharedArrayBuffer(64);
             const controlView = new Int32Array(control);
@@ -167,6 +175,7 @@ function manyProducers(): Bench {
                 await Promise.all(done);
                 return { samplesNsPerOp: Array.from(windows.subarray(0, n)), totalOps: total, elapsedMs };
             } finally {
+                // every producer has finished and posted its result here, or the bench is failing and the process ends
                 await Promise.all(workers.map((w) => w.terminate()));
             }
         },

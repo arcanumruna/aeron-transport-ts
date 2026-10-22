@@ -18,7 +18,7 @@
 // Port of org/agrona/concurrent/ringbuffer/OneToOneRingBuffer.java @ Agrona 2.6.1
 import { BitUtil } from '../../BitUtil.js';
 import type { DirectBuffer } from '../../DirectBuffer.js';
-import { IllegalArgumentException, IllegalStateException } from '../../jdk.js';
+import { IllegalArgumentException, IllegalStateException, VarHandle } from '../../jdk.js';
 import type { AtomicBuffer } from '../AtomicBuffer.js';
 import { Action } from '../ControlledMessageHandler.js';
 import type { ControlledMessageHandler } from '../ControlledMessageHandler.js';
@@ -111,9 +111,8 @@ export class OneToOneRingBuffer implements RingBuffer {
             return false;
         }
 
-        // The length is a seq-cst store (Atomics) on a shared buffer, which is the release fence of Java's
-        // `VarHandle.releaseFence()` that follows it: the payload stores cannot move before it.
         buffer.putIntRelease(lengthOffset(recordIndex), -recordLength);
+        VarHandle.releaseFence();
 
         buffer.putBytes(encodedMsgOffset(recordIndex), srcBuffer, offset, length);
         buffer.putInt(typeOffset(recordIndex), msgTypeId);
@@ -135,6 +134,7 @@ export class OneToOneRingBuffer implements RingBuffer {
         }
 
         buffer.putIntRelease(lengthOffset(recordIndex), -recordLength);
+        VarHandle.releaseFence();
         buffer.putInt(typeOffset(recordIndex), msgTypeId);
 
         return encodedMsgOffset(recordIndex);
@@ -384,6 +384,7 @@ export class OneToOneRingBuffer implements RingBuffer {
         if (0 !== padding) {
             buffer.putLong(0, 0);
             buffer.putIntRelease(lengthOffset(recordIndex), -padding);
+            VarHandle.releaseFence();
 
             buffer.putInt(typeOffset(recordIndex), PADDING_MSG_TYPE_ID);
             buffer.putIntRelease(lengthOffset(recordIndex), padding);

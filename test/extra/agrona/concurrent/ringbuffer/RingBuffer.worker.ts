@@ -156,7 +156,12 @@ function consumer(): ConsumerResult {
     return { delivered, error };
 }
 
-/** Claims a record and leaves without committing it: the producer that dies in the act of offering. */
+/**
+ * Claims a record and leaves without committing it: the producer that dies in the act of offering. The worker exits
+ * ITSELF, by returning from its main function right after `tryClaim`; the main thread never terminates a worker that may
+ * be inside a shared-buffer operation, since the 64-bit atomics take a short stripe lock that a killed worker would
+ * leave locked forever.
+ */
 function claimAndExit(): { index: number } {
     const index = ring.tryClaim(data.id + 1, data.iterations);
     return { index };

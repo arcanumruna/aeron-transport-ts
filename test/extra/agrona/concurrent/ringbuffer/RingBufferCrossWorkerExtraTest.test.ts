@@ -26,11 +26,10 @@ const SEED = 0x5eed1234;
 
 const PRODUCERS = 4;
 /**
- * Messages per producer. The plan asks for 4 x 250k with many producers; that takes about 30 s of the file here, so the
- * four producers write 100k each (400k messages), and the one producer of the one-to-one ring 250k. The claim variants
- * run 100k as well: a claim and a commit cost more than a write.
+ * Messages per producer: the plan's 4 x 250k with many producers, 250k for the one producer of the one-to-one ring.
+ * The claim variants run 100k: a claim and a commit cost more than a write.
  */
-const PER_PRODUCER_MANY = 100_000;
+const PER_PRODUCER_MANY = 250_000;
 const PER_PRODUCER_ONE = 250_000;
 const PER_PRODUCER_CLAIM = 100_000;
 
@@ -48,7 +47,7 @@ function newShared(): SharedArrayBuffer {
     return BufferUtil.allocateShared(RING_CAPACITY + RingBufferDescriptor.TRAILER_LENGTH, 64);
 }
 
-/** Starts the head, the tail and the head cache at `position`, written as the low `int` of their slot. */
+/** Starts the head, the tail and the head cache at `position`, each written as a whole `long` (`putLong`). */
 function startAt(sab: SharedArrayBuffer, position: number): void {
     const buffer = new UnsafeBuffer(sab);
     buffer.putLong(RING_CAPACITY + RingBufferDescriptor.TAIL_POSITION_OFFSET, position);
@@ -176,7 +175,10 @@ describe('RingBufferCrossWorkerExtraTest', () => {
             const ring = newRing('many-to-one', sab);
             const scratch = new UnsafeBuffer(new Uint8Array(64));
 
-            // two messages, then a claim of a worker that exits without committing it, then three more
+            // two messages, then a claim of a worker that exits without committing it, then three more. The dying
+            // producer is modelled by the worker exiting itself right after tryClaim (RingBuffer.worker.ts): no test
+            // terminates a worker mid-operation, because a killed worker could leave a stripe lock of the 64-bit
+            // atomics locked forever.
             expect(ring.write(1, scratch, 0, 16)).toBe(true);
             expect(ring.write(1, scratch, 0, 24)).toBe(true);
             const [claimed] = (await runWorkers(
@@ -221,7 +223,7 @@ describe('RingBufferCrossWorkerExtraTest', () => {
             expect((results[0] as ConsumerResult).error).toBeNull();
             expect((results[0] as ConsumerResult).delivered).toBe(3 * 20_000);
             expect(ring.producerPosition()).toBe(ring.consumerPosition());
-            expect((ring.consumerPosition() - start) | 0).toBeGreaterThan(0);
+            expect(ring.consumerPosition() - start).toBeGreaterThan(0);
         },
         TEST_TIMEOUT_MS,
     );
@@ -272,6 +274,7 @@ describe('RingBufferCrossWorkerExtraTest', () => {
             const control = new SharedArrayBuffer(16);
             const reader = newRing('many-to-one', sab);
             const buffer = reader.buffer();
+            let settled = false;
             const done = runWorkers(
                 SCRIPT,
                 [
@@ -291,6 +294,10 @@ describe('RingBufferCrossWorkerExtraTest', () => {
                 ],
                 TIMEOUT_MS,
             );
+            void done.then(
+                () => (settled = true),
+                () => (settled = true),
+            );
 
             // the same progress window check as SharedAtomicsExtraTest: the value read is one the writer wrote at a position
             // from the last write that was complete before the read to the one that may have been under way after it
@@ -298,24 +305,31 @@ describe('RingBufferCrossWorkerExtraTest', () => {
             let torn = 0;
             let firstTorn = '';
             let finished = false;
-            for (let spins = 0; spins < 400_000_000 && !finished; spins++) {
-                finished = 0 !== buffer.getIntVolatile(HEARTBEAT_DONE);
-                const before = buffer.getIntVolatile(HEARTBEAT_PROGRESS);
-                const value = reader.consumerHeartbeatTime();
-                const after = buffer.getIntVolatile(HEARTBEAT_PROGRESS);
-                reads++;
+            // The main thread spins in chunks and yields between them, so that the event loop (the timeout of runWorkers, the
+            // worker messages) runs; it stops as soon as the workers have settled, and a hard cap bounds the chunks.
+            const CHUNK = 100_000;
+            for (let chunk = 0; chunk < 4_000 && !finished && !settled; chunk++) {
+                for (let spins = 0; spins < CHUNK && !finished; spins++) {
+                    finished = 0 !== buffer.getIntVolatile(HEARTBEAT_DONE);
+                    const before = buffer.getIntVolatile(HEARTBEAT_PROGRESS);
+                    const value = reader.consumerHeartbeatTime();
+                    const after = buffer.getIntVolatile(HEARTBEAT_PROGRESS);
+                    reads++;
 
-                const first = Math.max(before - 1, 0);
-                const index = indexOf(value);
-                let valid = index >= 0;
-                if (valid) {
-                    const position = first + ((((index - first) % PASS_LENGTH) + PASS_LENGTH) % PASS_LENGTH);
-                    valid = position <= after;
+                    const first = Math.max(before - 1, 0);
+                    const index = indexOf(value);
+                    let valid = index >= 0;
+                    if (valid) {
+                        const position = first + ((((index - first) % PASS_LENGTH) + PASS_LENGTH) % PASS_LENGTH);
+                        valid = position <= after;
+                    }
+                    if (!valid && ++torn === 1) {
+                        firstTorn = value + ' (progress ' + before + ' .. ' + after + ')';
+                    }
                 }
-                if (!valid && ++torn === 1) {
-                    firstTorn = value + ' (progress ' + before + ' .. ' + after + ')';
-                }
+                await new Promise((resolve) => setImmediate(resolve));
             }
+            finished = finished || 0 !== buffer.getIntVolatile(HEARTBEAT_DONE);
 
             const [written] = (await done) as [number];
             expect(finished).toBe(true);

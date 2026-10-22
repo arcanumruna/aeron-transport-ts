@@ -1,34 +1,55 @@
-// `npm run bench:gate -- --base <ref> [--pairs n] [--filter s] [--samples n]`: the performance regression gate.
+// `npm run bench:gate -- --base <ref> [--pairs n] [--filter s] [--samples n] [--seed n] [--ignore-load]`: the performance regression gate.
 //
 // 1. Resolves <ref> (default origin/main) to a sha and extracts it with `git archive` into a fresh directory under the
 //    temp directory, outside the repository, with a symlink to node_modules and the CANDIDATE's bench/ and worker
 //    loader copied in: base and candidate run the same bench code against their own src/.
-// 2. Runs each bench file in the base: a bench whose import or setup fails there (the API does not exist yet) is
-//    "n/a in base", not a failure.
-// 3. Interleaves separate processes, base, candidate, base, candidate, for --pairs pairs (default 5).
+// 2. A bench file that fails to import in the base (the API does not exist yet) is "n/a in base", not a failure;
+//    any other failure of the base is NO_VERDICT.
+// 3. Runs base and candidate as separate processes, --pairs pairs (default 5), in an order drawn per pair from --seed.
 // 4. For each bench, the verdict (verdict.ts) is on the median of the per-pair ratios candidate / base.
-// 5. Prints a table and exits 1 on a failure. The scratch directory is deleted at the end, also on a failure.
+// 5. Prints a table. Exit 0: everything passes; 1: a failure; 3: no verdict (and no failure), also when the host is too
+//    busy; 2: a usage error. The scratch directory is deleted at the end, also on a failure.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { availableParallelism, loadavg, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { median } from './stats.js';
-import type { ErrorLine, Result } from './types.js';
-import { type Pair, ratios, RULES, verdict } from './verdict.js';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import type { BenchModule } from './types.js';
+import {
+    EXIT_NO_VERDICT,
+    EXIT_USAGE,
+    type Expected,
+    type Line,
+    MIN_TAIL_SAMPLES,
+    type PairLines,
+    REQUIRED_PAIRS,
+    RULES,
+    summarize,
+} from './verdict.js';
 
 interface Options {
     base: string;
     pairs: number;
     filter: string;
     samples: number;
+    seed: number;
+    ignoreLoad: boolean;
 }
 
-/** Latency benches need this many pairs for a verdict; a throughput bench needs 3. */
-const LATENCY_PAIRS = 5;
+class UsageError extends Error {}
+
+/** A load average per core above this makes the host too busy for a latency verdict. */
+const MAX_LOAD_PER_CORE = 0.5;
 
 function parseArgs(argv: string[]): Options {
-    const options: Options = { base: 'origin/main', pairs: 5, filter: '', samples: 2000 };
+    const options: Options = {
+        base: 'origin/main',
+        pairs: 5,
+        filter: '',
+        samples: 2000,
+        seed: (Date.now() ^ (process.pid << 8)) >>> 0,
+        ignoreLoad: false,
+    };
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
         switch (arg) {
@@ -38,7 +59,7 @@ function parseArgs(argv: string[]): Options {
             case '--pairs':
                 options.pairs = Number(argv[++i]);
                 if (!Number.isInteger(options.pairs) || options.pairs < 1) {
-                    throw new Error('--pairs needs a positive integer');
+                    throw new UsageError('--pairs needs a positive integer');
                 }
                 break;
             case '--filter':
@@ -46,19 +67,42 @@ function parseArgs(argv: string[]): Options {
                 break;
             case '--samples':
                 options.samples = Number(argv[++i]);
+                if (!Number.isInteger(options.samples) || options.samples < 10) {
+                    throw new UsageError('--samples needs an integer of 10 or more');
+                }
+                break;
+            case '--seed':
+                options.seed = Number(argv[++i]);
+                if (!Number.isInteger(options.seed) || options.seed < 0 || options.seed > 0xffffffff) {
+                    throw new UsageError('--seed needs an integer from 0 to 4294967295');
+                }
+                break;
+            case '--ignore-load':
+                options.ignoreLoad = true;
                 break;
             default:
-                throw new Error('unknown argument: ' + arg);
+                throw new UsageError('unknown argument: ' + arg);
         }
     }
     return options;
 }
 
-type Line = Result | ErrorLine;
+/** mulberry32: a small seeded PRNG, so that the A/B order of a run can be repeated with `--seed`. */
+function prng(seed: number): () => number {
+    let a = seed >>> 0;
+    return () => {
+        a = (a + 0x6d2b79f5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
 
-/** Runs one bench file in `cwd` as a separate process; the JSON lines it printed, and whether it ran at all. */
-function runFile(cwd: string, file: string, options: Options): { lines: Line[]; ok: boolean; stderr: string } {
+/** Runs one bench file in `cwd` as a separate process; the JSON lines it printed, and a line for a process that failed. */
+function runFile(cwd: string, file: string, options: Options): Line[] {
     const args = [
+        '--expose-gc',
         '--import',
         './test/support/workerRegister.mjs',
         '--no-warnings',
@@ -75,7 +119,7 @@ function runFile(cwd: string, file: string, options: Options): { lines: Line[]; 
     const run = spawnSync(process.execPath, args, {
         cwd,
         encoding: 'utf8',
-        timeout: 10 * 60 * 1000,
+        timeout: 20 * 60 * 1000,
         maxBuffer: 1 << 26,
     });
     const lines: Line[] = [];
@@ -88,11 +132,29 @@ function runFile(cwd: string, file: string, options: Options): { lines: Line[]; 
             }
         }
     }
-    return { lines, ok: 0 === run.status, stderr: run.stderr ?? '' };
+    if (0 !== run.status) {
+        const tail = (run.stderr ?? '').trim().split('\n').slice(-3).join(' ');
+        lines.push({ name: file, error: 'the process failed (' + String(run.status ?? run.signal) + '): ' + tail });
+    }
+    return lines;
 }
 
-function isError(line: Line): line is ErrorLine {
-    return 'error' in line;
+/** The benches the candidate's bench modules export (matching the filter); a module that does not import is one entry. */
+async function expectedBenches(repo: string, files: readonly string[], filter: string): Promise<Expected[]> {
+    const expected: Expected[] = [];
+    for (const file of files) {
+        try {
+            const module = (await import(pathToFileURL(join(repo, 'bench', 'micro', file)).href)) as BenchModule;
+            for (const bench of module.benches) {
+                if (bench.name.includes(filter)) {
+                    expected.push({ name: bench.name, file });
+                }
+            }
+        } catch {
+            expected.push({ name: file, file });
+        }
+    }
+    return expected;
 }
 
 /** Extracts `sha` into a fresh directory outside the repository and makes it runnable. */
@@ -112,9 +174,29 @@ function pad(text: string, width: number): string {
     return text.padEnd(width);
 }
 
-function main(): number {
+async function main(): Promise<number> {
     const options = parseArgs(process.argv.slice(2));
     const repo = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+
+    const cores = availableParallelism();
+    const load = loadavg();
+    process.stderr.write('load average ' + load.map((l) => l.toFixed(2)).join(' ') + ' on ' + cores + ' cores\n');
+    if (load[0]! > MAX_LOAD_PER_CORE * cores) {
+        if (!options.ignoreLoad) {
+            process.stderr.write(
+                'warning: the 1-minute load average ' +
+                    load[0]!.toFixed(2) +
+                    ' is over ' +
+                    MAX_LOAD_PER_CORE * cores +
+                    ' (0.5 x cores): the host is too busy for a verdict; NO_VERDICT (--ignore-load overrides)\n',
+            );
+            return EXIT_NO_VERDICT;
+        }
+    }
+    if (options.ignoreLoad) {
+        process.stderr.write('--ignore-load: the load average is not checked; the numbers are for local experiments\n');
+    }
+
     const sha = execFileSync('git', ['rev-parse', '--verify', options.base + '^{commit}'], {
         cwd: repo,
         encoding: 'utf8',
@@ -122,101 +204,79 @@ function main(): number {
     const files = readdirSync(join(repo, 'bench', 'micro'))
         .filter((f) => f.endsWith('.bench.ts'))
         .sort();
+    const expected = await expectedBenches(repo, files, options.filter);
 
     process.stderr.write(
-        'bench gate: base ' + options.base + ' (' + sha.slice(0, 12) + '), ' + options.pairs + ' pairs\n',
+        'bench gate: base ' +
+            options.base +
+            ' (' +
+            sha.slice(0, 12) +
+            '), ' +
+            options.pairs +
+            ' pairs, seed ' +
+            options.seed +
+            '\n',
     );
-    if (options.pairs < LATENCY_PAIRS) {
+    if (options.pairs < REQUIRED_PAIRS.latency) {
         process.stderr.write(
             'warning: ' +
                 options.pairs +
                 ' pairs; latency benches need ' +
-                LATENCY_PAIRS +
-                ' (throughput benches 3) for a verdict\n',
+                REQUIRED_PAIRS.latency +
+                ' (throughput benches ' +
+                REQUIRED_PAIRS.throughput +
+                ') for a verdict\n',
         );
     }
 
     const scratch = mkdtempSync(join(tmpdir(), 'aeron-bench-gate-'));
-    const pairs = new Map<string, Pair[]>();
-    const order: string[] = [];
-    const errors = new Map<string, string>();
+    const random = prng(options.seed);
+    const runs: PairLines[] = [];
     try {
         prepareBase(repo, sha, scratch);
 
         for (let k = 0; k < options.pairs; k++) {
+            const base: Line[] = [];
+            const cand: Line[] = [];
             for (const file of files) {
-                // A then B: base, candidate, base, candidate
-                const base = runFile(scratch, file, options);
-                const cand = runFile(repo, file, options);
-                const baseResults = new Map<string, Result>();
-                for (const line of base.lines) {
-                    if (!isError(line)) {
-                        baseResults.set(line.name, line);
-                    }
-                }
-                for (const line of cand.lines) {
-                    if (isError(line)) {
-                        errors.set(line.name, line.error);
-                        if (!order.includes(line.name)) {
-                            order.push(line.name);
-                        }
-                        continue;
-                    }
-                    if (!order.includes(line.name)) {
-                        order.push(line.name);
-                    }
-                    const b = baseResults.get(line.name);
-                    if (undefined === b) {
-                        continue; // reported as n/a in base below, unless an earlier pair had it
-                    }
-                    const list = pairs.get(line.name) ?? [];
-                    list.push({ base: b, cand: line });
-                    pairs.set(line.name, list);
-                }
-                if (!cand.ok && 0 === cand.lines.length) {
-                    errors.set(file, 'the candidate run failed: ' + cand.stderr.trim().split('\n').slice(-3).join(' '));
-                    if (!order.includes(file)) {
-                        order.push(file);
-                    }
+                // base and candidate in an order drawn per pair from the seed, so that neither always runs first
+                if (random() < 0.5) {
+                    base.push(...runFile(scratch, file, options));
+                    cand.push(...runFile(repo, file, options));
+                } else {
+                    cand.push(...runFile(repo, file, options));
+                    base.push(...runFile(scratch, file, options));
                 }
             }
+            runs.push({ base, cand });
         }
 
-        // the table and the verdicts
-        let failed = false;
-        const width = Math.max(...order.map((n) => n.length), 5);
-        const header = [pad('bench', width), ...RULES.map((r) => r.label.padStart(8)), '  verdict'].join(' ');
+        const summary = summarize(runs, expected, REQUIRED_PAIRS);
+
+        const width = Math.max(...summary.benches.map((b) => b.name.length), 5);
         process.stderr.write(
-            '\nmedian ratio candidate / base over the pairs (ns/op, p50: limit 1.05; p99, p99.9: 1.10; ops/s: 0.95)\n',
+            '\nmedian ratio candidate / base over the pairs (ns/op, p50: limit 1.05; p99, p99.9: 1.10 from ' +
+                MIN_TAIL_SAMPLES +
+                ' samples, else information (~); ops/s: 0.95)\n',
         );
-        process.stderr.write(header + '\n');
-        for (const name of order) {
-            const error = errors.get(name);
-            if (undefined !== error) {
-                failed = true;
-                process.stderr.write(pad(name, width) + '  FAIL: ' + error + '\n');
-                continue;
-            }
-            const list = pairs.get(name);
-            if (undefined === list || 0 === list.length) {
-                process.stderr.write(pad(name, width) + '  n/a in base\n');
-                continue;
-            }
-            const { pass, failures } = verdict(list);
+        process.stderr.write(
+            [pad('bench', width), ...RULES.map((r) => r.label.padStart(9)), '  verdict'].join(' ') + '\n',
+        );
+        for (const bench of summary.benches) {
             const cells = RULES.map((rule) => {
-                const r = ratios(list, rule.metric);
-                return (0 === r.length ? '-' : median(r).toFixed(3)).padStart(8);
-            });
-            process.stderr.write([pad(name, width), ...cells, '  ' + (pass ? 'pass' : 'FAIL')].join(' ') + '\n');
-            if (!pass) {
-                failed = true;
-                for (const failure of failures) {
-                    process.stderr.write('    ' + name + ': ' + failure + '\n');
+                const metric = bench.metrics.find((m) => m.label === rule.label);
+                if (undefined === metric || Number.isNaN(metric.median)) {
+                    return '-'.padStart(9);
                 }
+                return (metric.median.toFixed(3) + ('INFO' === metric.status ? '~' : '')).padStart(9);
+            });
+            process.stderr.write([pad(bench.name, width), ...cells, '  ' + bench.status].join(' ') + '\n');
+            for (const note of bench.notes) {
+                process.stderr.write('    ' + bench.name + ': ' + note + '\n');
             }
         }
-        process.stderr.write(failed ? '\nbench gate: FAILED\n' : '\nbench gate: passed\n');
-        return failed ? 1 : 0;
+        process.stderr.write('\nbench gate: ' + summary.status + ' (exit ' + summary.exitCode + ')\n');
+        return summary.exitCode;
     } finally {
         try {
             unlinkSync(join(scratch, 'node_modules'));
@@ -227,4 +287,12 @@ function main(): number {
     }
 }
 
-process.exitCode = main();
+main().then(
+    (code) => {
+        process.exitCode = code;
+    },
+    (e: unknown) => {
+        process.stderr.write(String(e instanceof Error ? (e.stack ?? e.message) : e) + '\n');
+        process.exitCode = e instanceof UsageError ? EXIT_USAGE : 1;
+    },
+);

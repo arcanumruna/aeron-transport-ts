@@ -5,12 +5,14 @@ export interface Result {
     name: string;
     /** Total time / total operations. */
     nsPerOp: number;
-    /** Percentiles of the per-sample ns per operation. */
+    /** Percentiles of the per-sample ns per operation (a sample is the mean of a batch); the median of the runs. */
     p50: number;
     p99: number;
     p999: number;
     /** Throughput; only the benches that run workers report one. */
     opsPerSec?: number;
+    /** The samples of one run: p99 and p99.9 are a verdict only from MIN_TAIL_SAMPLES of them (bench/lib/verdict.ts). */
+    samples?: number;
 }
 
 /** A bench that times batches of `op` calls in this thread. */
@@ -49,3 +51,6 @@ export interface ErrorLine {
     name: string;
     error: string;
 }
+
+/** The start of the error text of a bench that cannot give a verdict on this host (too few cores): NO_VERDICT, not FAIL. */
+export const NO_VERDICT_PREFIX = 'no-verdict: ';
