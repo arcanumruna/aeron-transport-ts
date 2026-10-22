@@ -19,14 +19,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { ThreadLocalRandom } from '../../../src/agrona/jdk.js';
+import { FrameDescriptor } from '../../../src/client/logbuffer/FrameDescriptor.js';
+import { LogBufferDescriptor } from '../../../src/client/logbuffer/LogBufferDescriptor.js';
 import { DataHeaderFlyweight } from '../../../src/client/protocol/DataHeaderFlyweight.js';
 import { SetupFlyweight } from '../../../src/client/protocol/SetupFlyweight.js';
 
-// FrameDescriptor.FRAME_ALIGNMENT, LogBufferDescriptor.TERM_MIN_LENGTH and TERM_MAX_LENGTH: both classes are ported in
-// T9, which replaces these with their constants.
-const FRAME_ALIGNMENT = 32;
-const TERM_MIN_LENGTH = 64 * 1024;
-const TERM_MAX_LENGTH = 1024 * 1024 * 1024;
+const { FRAME_ALIGNMENT } = FrameDescriptor;
+const { TERM_MAX_LENGTH, TERM_MIN_LENGTH } = LogBufferDescriptor;
 
 const { HEADER_LENGTH, MAX_UDP_PAYLOAD_LENGTH } = SetupFlyweight;
 

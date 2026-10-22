@@ -19,20 +19,14 @@
 import { BitUtil } from '../../agrona/BitUtil.js';
 import { UnsafeBuffer } from '../../agrona/concurrent/UnsafeBuffer.js';
 import { ByteOrder } from '../../agrona/jdk.js';
+import { FrameDescriptor } from '../logbuffer/FrameDescriptor.js';
+import { LogBufferDescriptor } from '../logbuffer/LogBufferDescriptor.js';
 import { DataHeaderFlyweight } from './DataHeaderFlyweight.js';
 import { HeaderFlyweight } from './HeaderFlyweight.js';
 
 const { LITTLE_ENDIAN } = ByteOrder;
-
-// LogBufferDescriptor.TERM_MAX_LENGTH and TERM_MIN_LENGTH and FrameDescriptor.isFrameAligned: both classes are ported in
-// T9, which replaces these with theirs.
-const TERM_MAX_LENGTH = 1024 * 1024 * 1024;
-const TERM_MIN_LENGTH = 64 * 1024;
-const FRAME_ALIGNMENT = 32;
-
-function isFrameAligned(value: number): boolean {
-    return 0 === (value & (FRAME_ALIGNMENT - 1));
-}
+const { TERM_MAX_LENGTH, TERM_MIN_LENGTH } = LogBufferDescriptor;
+const { isFrameAligned } = FrameDescriptor;
 
 /**
  * HeaderFlyweight for Setup Message Frames.
