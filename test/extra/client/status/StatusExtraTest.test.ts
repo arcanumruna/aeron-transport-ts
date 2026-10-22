@@ -388,8 +388,8 @@ describe('StatusExtraTest', () => {
                 .destinationRegistrationId(-1)
                 .sessionId(-5)
                 .streamId(1001)
-                .receiverId(2 ** 32)
-                .groupTag(-MAX_SAFE)
+                .receiverId(2n ** 32n)
+                .groupTag(-BigInt(MAX_SAFE))
                 .errorCode(ErrorCode.INVALID_CHANNEL)
                 .errorMessage('bad channel')
                 .sourceAddress(
@@ -406,8 +406,8 @@ describe('StatusExtraTest', () => {
             expect(frame.destinationRegistrationId()).toBe(-1);
             expect(frame.sessionId()).toBe(-5);
             expect(frame.streamId()).toBe(1001);
-            expect(frame.receiverId()).toBe(2 ** 32);
-            expect(frame.groupTag()).toBe(-MAX_SAFE);
+            expect(frame.receiverId()).toBe(2n ** 32n);
+            expect(frame.groupTag()).toBe(-BigInt(MAX_SAFE));
             expect(frame.errorCode()).toBe(ErrorCode.INVALID_CHANNEL.value());
             expect(frame.errorMessage()).toBe('bad channel');
             expect(frame.sourceAddress()!.getPort()).toBe(40124);

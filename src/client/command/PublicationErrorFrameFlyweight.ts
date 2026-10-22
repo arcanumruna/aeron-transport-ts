@@ -18,7 +18,7 @@
 // Port of io/aeron/command/PublicationErrorFrameFlyweight.java @ 1.53.3
 import { BitUtil } from '../../agrona/BitUtil.js';
 import { type MutableDirectBuffer } from '../../agrona/MutableDirectBuffer.js';
-import { type Appendable, IllegalArgumentException, NullPointerException } from '../../agrona/jdk.js';
+import { type Appendable, IllegalArgumentException, Long, NullPointerException } from '../../agrona/jdk.js';
 import {
     Inet4Address,
     Inet6Address,
@@ -214,20 +214,23 @@ export class PublicationErrorFrameFlyweight {
      *
      * @return receiver id.
      */
-    public receiverId(): number;
+    public receiverId(): bigint;
     /**
      * Set the receiver id.
      *
      * @param receiverId field value.
      * @return this for a fluent API.
      */
-    public receiverId(receiverId: number): PublicationErrorFrameFlyweight;
-    public receiverId(receiverId?: number): number | PublicationErrorFrameFlyweight {
+    public receiverId(receiverId: bigint): PublicationErrorFrameFlyweight;
+    public receiverId(receiverId?: bigint): bigint | PublicationErrorFrameFlyweight {
         if (undefined === receiverId) {
-            return this.buffer.getLong(this.offset + PublicationErrorFrameFlyweight.RECEIVER_ID_OFFSET);
+            return this.buffer.getLongBigInt(this.offset + PublicationErrorFrameFlyweight.RECEIVER_ID_OFFSET);
         }
 
-        this.buffer.putLong(this.offset + PublicationErrorFrameFlyweight.RECEIVER_ID_OFFSET, receiverId);
+        this.buffer.putLongBigInt(
+            this.offset + PublicationErrorFrameFlyweight.RECEIVER_ID_OFFSET,
+            Long.checkInt64(receiverId),
+        );
 
         return this;
     }
@@ -237,20 +240,23 @@ export class PublicationErrorFrameFlyweight {
      *
      * @return group tag.
      */
-    public groupTag(): number;
+    public groupTag(): bigint;
     /**
      * Set the group tag.
      *
      * @param groupTag field value.
      * @return this for a fluent API.
      */
-    public groupTag(groupTag: number): PublicationErrorFrameFlyweight;
-    public groupTag(groupTag?: number): number | PublicationErrorFrameFlyweight {
+    public groupTag(groupTag: bigint): PublicationErrorFrameFlyweight;
+    public groupTag(groupTag?: bigint): bigint | PublicationErrorFrameFlyweight {
         if (undefined === groupTag) {
-            return this.buffer.getLong(this.offset + PublicationErrorFrameFlyweight.GROUP_TAG_OFFSET);
+            return this.buffer.getLongBigInt(this.offset + PublicationErrorFrameFlyweight.GROUP_TAG_OFFSET);
         }
 
-        this.buffer.putLong(this.offset + PublicationErrorFrameFlyweight.GROUP_TAG_OFFSET, groupTag);
+        this.buffer.putLongBigInt(
+            this.offset + PublicationErrorFrameFlyweight.GROUP_TAG_OFFSET,
+            Long.checkInt64(groupTag),
+        );
 
         return this;
     }

@@ -28,9 +28,9 @@ export class PublicationErrorFrame {
     private _registrationId = 0;
     private _sessionId = 0;
     private _streamId = 0;
-    private _receiverId = 0;
+    private _receiverId = 0n;
     private _destinationRegistrationId = 0;
-    private _groupTag = 0;
+    private _groupTag = 0n;
     private _errorCode = 0;
     private _errorMessage: string | null = null;
     private _sourceAddress: InetSocketAddress | null = null;
@@ -72,7 +72,7 @@ export class PublicationErrorFrame {
      *
      * @return receiver id of the source that send the error frame.
      */
-    public receiverId(): number {
+    public receiverId(): bigint {
         return this._receiverId;
     }
 
@@ -82,7 +82,7 @@ export class PublicationErrorFrame {
      * @return group tag of the source that sent the error frame or {@link Aeron.NULL_VALUE} if the source did not
      * have a group tag set.
      */
-    public groupTag(): number {
+    public groupTag(): bigint {
         return this._groupTag;
     }
 

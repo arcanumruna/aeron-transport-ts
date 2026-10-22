@@ -206,7 +206,8 @@ export class RejectImageFlyweight extends CorrelatedMessageFlyweight {
             );
         }
 
-        if (length < RejectImageFlyweight.MINIMUM_SIZE + this.reasonBufferLength()) {
+        // Java sums these two as `int`, so a huge reason length wraps negative
+        if (length < ((RejectImageFlyweight.MINIMUM_SIZE + this.reasonBufferLength()) | 0)) {
             throw new ControlProtocolException(
                 MALFORMED_COMMAND,
                 'command=' + msgTypeId + ' too short: length=' + length,

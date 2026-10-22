@@ -354,8 +354,9 @@ export class CncFileDescriptor {
         metaDataBuffer: DirectBuffer,
     ): UnsafeBuffer {
         const offset =
-            CncFileDescriptor.META_DATA_LENGTH +
-            metaDataBuffer.getInt(CncFileDescriptor.TO_DRIVER_BUFFER_LENGTH_FIELD_OFFSET);
+            (CncFileDescriptor.META_DATA_LENGTH +
+                metaDataBuffer.getInt(CncFileDescriptor.TO_DRIVER_BUFFER_LENGTH_FIELD_OFFSET)) |
+            0;
 
         return new UnsafeBuffer(
             buffer,
@@ -376,9 +377,10 @@ export class CncFileDescriptor {
         metaDataBuffer: DirectBuffer,
     ): UnsafeBuffer {
         const offset =
-            CncFileDescriptor.META_DATA_LENGTH +
-            metaDataBuffer.getInt(CncFileDescriptor.TO_DRIVER_BUFFER_LENGTH_FIELD_OFFSET) +
-            metaDataBuffer.getInt(CncFileDescriptor.TO_CLIENTS_BUFFER_LENGTH_FIELD_OFFSET);
+            (CncFileDescriptor.META_DATA_LENGTH +
+                metaDataBuffer.getInt(CncFileDescriptor.TO_DRIVER_BUFFER_LENGTH_FIELD_OFFSET) +
+                metaDataBuffer.getInt(CncFileDescriptor.TO_CLIENTS_BUFFER_LENGTH_FIELD_OFFSET)) |
+            0;
 
         return new UnsafeBuffer(
             buffer,
@@ -399,10 +401,11 @@ export class CncFileDescriptor {
         metaDataBuffer: DirectBuffer,
     ): UnsafeBuffer {
         const offset =
-            CncFileDescriptor.META_DATA_LENGTH +
-            metaDataBuffer.getInt(CncFileDescriptor.TO_DRIVER_BUFFER_LENGTH_FIELD_OFFSET) +
-            metaDataBuffer.getInt(CncFileDescriptor.TO_CLIENTS_BUFFER_LENGTH_FIELD_OFFSET) +
-            metaDataBuffer.getInt(CncFileDescriptor.COUNTERS_METADATA_BUFFER_LENGTH_FIELD_OFFSET);
+            (CncFileDescriptor.META_DATA_LENGTH +
+                metaDataBuffer.getInt(CncFileDescriptor.TO_DRIVER_BUFFER_LENGTH_FIELD_OFFSET) +
+                metaDataBuffer.getInt(CncFileDescriptor.TO_CLIENTS_BUFFER_LENGTH_FIELD_OFFSET) +
+                metaDataBuffer.getInt(CncFileDescriptor.COUNTERS_METADATA_BUFFER_LENGTH_FIELD_OFFSET)) |
+            0;
 
         return new UnsafeBuffer(
             buffer,
@@ -423,11 +426,12 @@ export class CncFileDescriptor {
         metaDataBuffer: DirectBuffer,
     ): UnsafeBuffer {
         const offset =
-            CncFileDescriptor.META_DATA_LENGTH +
-            metaDataBuffer.getInt(CncFileDescriptor.TO_DRIVER_BUFFER_LENGTH_FIELD_OFFSET) +
-            metaDataBuffer.getInt(CncFileDescriptor.TO_CLIENTS_BUFFER_LENGTH_FIELD_OFFSET) +
-            metaDataBuffer.getInt(CncFileDescriptor.COUNTERS_METADATA_BUFFER_LENGTH_FIELD_OFFSET) +
-            metaDataBuffer.getInt(CncFileDescriptor.COUNTERS_VALUES_BUFFER_LENGTH_FIELD_OFFSET);
+            (CncFileDescriptor.META_DATA_LENGTH +
+                metaDataBuffer.getInt(CncFileDescriptor.TO_DRIVER_BUFFER_LENGTH_FIELD_OFFSET) +
+                metaDataBuffer.getInt(CncFileDescriptor.TO_CLIENTS_BUFFER_LENGTH_FIELD_OFFSET) +
+                metaDataBuffer.getInt(CncFileDescriptor.COUNTERS_METADATA_BUFFER_LENGTH_FIELD_OFFSET) +
+                metaDataBuffer.getInt(CncFileDescriptor.COUNTERS_VALUES_BUFFER_LENGTH_FIELD_OFFSET)) |
+            0;
 
         return new UnsafeBuffer(
             buffer,
@@ -502,13 +506,15 @@ export class CncFileDescriptor {
      * @return true is the length is correct otherwise false.
      */
     public static isCncFileLengthSufficient(metaDataBuffer: DirectBuffer, cncFileLength: number): boolean {
+        // Java sums these as `int`: the sum wraps
         const metadataRequiredLength =
-            CncFileDescriptor.META_DATA_LENGTH +
-            metaDataBuffer.getInt(CncFileDescriptor.TO_DRIVER_BUFFER_LENGTH_FIELD_OFFSET) +
-            metaDataBuffer.getInt(CncFileDescriptor.TO_CLIENTS_BUFFER_LENGTH_FIELD_OFFSET) +
-            metaDataBuffer.getInt(CncFileDescriptor.COUNTERS_METADATA_BUFFER_LENGTH_FIELD_OFFSET) +
-            metaDataBuffer.getInt(CncFileDescriptor.COUNTERS_VALUES_BUFFER_LENGTH_FIELD_OFFSET) +
-            metaDataBuffer.getInt(CncFileDescriptor.ERROR_LOG_BUFFER_LENGTH_FIELD_OFFSET);
+            (CncFileDescriptor.META_DATA_LENGTH +
+                metaDataBuffer.getInt(CncFileDescriptor.TO_DRIVER_BUFFER_LENGTH_FIELD_OFFSET) +
+                metaDataBuffer.getInt(CncFileDescriptor.TO_CLIENTS_BUFFER_LENGTH_FIELD_OFFSET) +
+                metaDataBuffer.getInt(CncFileDescriptor.COUNTERS_METADATA_BUFFER_LENGTH_FIELD_OFFSET) +
+                metaDataBuffer.getInt(CncFileDescriptor.COUNTERS_VALUES_BUFFER_LENGTH_FIELD_OFFSET) +
+                metaDataBuffer.getInt(CncFileDescriptor.ERROR_LOG_BUFFER_LENGTH_FIELD_OFFSET)) |
+            0;
 
         return cncFileLength >= metadataRequiredLength;
     }

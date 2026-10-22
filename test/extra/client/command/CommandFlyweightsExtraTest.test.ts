@@ -37,6 +37,16 @@ const FILL = 0xaa;
 const MAX_SAFE = 2 ** 53 - 1;
 /** The D5 bounds and the values around the 32 bit boundaries. */
 const LONGS = [MAX_SAFE, -MAX_SAFE, 0, -1, 1, 2 ** 32, 2 ** 32 - 1, -(2 ** 32), 2 ** 31, -(2 ** 31)];
+/** Seeded xorshift64*, so that the random 64 bit case is the same on every run. */
+function seededInt64(seed: bigint): bigint {
+    let x = seed;
+    const mask = (1n << 64n) - 1n;
+    x ^= x >> 12n;
+    x ^= (x << 25n) & mask;
+    x ^= x >> 27n;
+    return BigInt.asIntN(64, (x * 0x2545f4914f6cdd1dn) & mask);
+}
+const BIGS = [-(2n ** 63n), 2n ** 63n - 1n, 0n, -1n, 2n ** 53n, seededInt64(0x9e3779b97f4a7c15n)];
 const INTS = [-(2 ** 31), -1, 0, 1, 2 ** 31 - 1];
 
 interface Window {
@@ -91,6 +101,8 @@ interface Spec {
     make: () => Wrappable;
     /** field name to its offset in the message */
     longs: Record<string, number>;
+    /** Opaque 64 bit wire values (spec 5.2): `bigint` accessors. */
+    bigs?: Record<string, number>;
     ints: Record<string, number>;
 }
 
@@ -189,7 +201,8 @@ const SPECS: Spec[] = [
     {
         name: 'PublicationErrorFrameFlyweight',
         make: () => new PublicationErrorFrameFlyweight(),
-        longs: { registrationId: 0, destinationRegistrationId: 8, receiverId: 24, groupTag: 32 },
+        longs: { registrationId: 0, destinationRegistrationId: 8 },
+        bigs: { receiverId: 24, groupTag: 32 },
         ints: { sessionId: 16, streamId: 20, errorCodeValue: 60 },
     },
 ];
@@ -205,7 +218,38 @@ function setInt(flyweight: object, name: string, value: number): void {
 }
 
 describe('CommandFlyweightsExtraTest', () => {
-    describe.each(SPECS)('$name fields', ({ make, longs, ints }) => {
+    describe.each(SPECS)('$name fields', ({ make, longs, ints, bigs = {} }) => {
+        const bigCases = Object.entries(bigs).flatMap(([field, offset]) =>
+            BIGS.map((v) => [field, offset, v] as const),
+        );
+
+        it.each(bigCases)('bigint %s at %i round trips %d exactly', (field, offset, value) => {
+            // mutation: read or write the opaque 64 bit field as a number (throws or rounds above 2^53)
+            const { buffer, dv } = newWindow(256);
+            const flyweight = make();
+            flyweight.wrap(buffer, BASE);
+            const big = (flyweight as unknown as Record<string, (v?: bigint) => bigint>)[field]!.bind(flyweight);
+
+            big(value);
+
+            expect(big()).toBe(value);
+            expect(dv.getBigInt64(BASE + offset, true)).toBe(value);
+            expect(dv.getUint8(BASE + offset - 1)).toBe(FILL);
+            expect(dv.getUint8(BASE + offset + 8)).toBe(FILL);
+        });
+
+        it.each(Object.keys(bigs))('bigint %s refuses 2^63 and -2^63-1 and writes nothing', (field) => {
+            const { buffer, ab } = newWindow(256);
+            const flyweight = make();
+            flyweight.wrap(buffer, BASE);
+            const big = (flyweight as unknown as Record<string, (v?: bigint) => unknown>)[field]!.bind(flyweight);
+            const before = new Uint8Array(ab).slice();
+
+            expect(() => big(2n ** 63n)).toThrow();
+            expect(() => big(-(2n ** 63n) - 1n)).toThrow();
+            expect(new Uint8Array(ab)).toEqual(before);
+        });
+
         const longCases = Object.entries(longs).flatMap(([field, offset]) =>
             LONGS.map((v) => [field, offset, v] as const),
         );
@@ -268,6 +312,13 @@ describe('CommandFlyweightsExtraTest', () => {
                 expected.push([field, value]);
                 n++;
             }
+            const bigExpected: Array<[string, bigint]> = [];
+            for (const field of Object.keys(bigs)) {
+                const value = BigInt(n) * 0x1000000000001n * -1n;
+                (flyweight as unknown as Record<string, (v: bigint) => unknown>)[field]!(value);
+                bigExpected.push([field, value]);
+                n++;
+            }
             for (const field of Object.keys(ints)) {
                 const value = -(n * 1000 + 7);
                 setInt(flyweight, field, value);
@@ -276,6 +327,9 @@ describe('CommandFlyweightsExtraTest', () => {
             }
             for (const [field, value] of expected) {
                 expect(accessor(flyweight, field)(), field).toBe(value);
+            }
+            for (const [field, value] of bigExpected) {
+                expect((flyweight as unknown as Record<string, () => bigint>)[field]!(), field).toBe(value);
             }
         });
     });
