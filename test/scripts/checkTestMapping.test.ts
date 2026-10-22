@@ -107,4 +107,36 @@ describe('checkTestMapping', () => {
             'listed skip shouldDoA is not an it.skip',
         );
     });
+
+    describe('Sources table', () => {
+        const sources = (rows: string[]): string =>
+            ['## Sources', '| Java source | TypeScript source | Notes |', '|---|---|---|', ...rows, ''].join('\n') +
+            mapping([BASE_ROW, JAVA_ROW], [SKIP_ROW]);
+        const exists = (present: string[]) => (path: string) => present.includes(path);
+        const runWith = (md: string, fileExists: (path: string) => boolean): string[] =>
+            checkMapping(md, { roots: { fx: join(fixtures, 'java') }, readTs: read, fileExists });
+
+        it('passes when every TypeScript file of a row exists', () => {
+            const md = sources([
+                '| `aeron:a/A.java` | `src/client/A.ts` | note |',
+                '| (no Java file) | `test/support/B.ts`, `test/support/C.ts` | helpers |',
+            ]);
+            expect(runWith(md, exists(['src/client/A.ts', 'test/support/B.ts', 'test/support/C.ts']))).toEqual([]);
+        });
+
+        it('fails on a row that points at a file that does not exist, such as a deleted stand-in', () => {
+            const md = sources([
+                '| `aeron:a/A.java` | `src/client/A.ts` | note |',
+                '| (none) | `src/client/ChannelUriLogBuffer.ts` | Stand-in until T9 |',
+            ]);
+            expect(runWith(md, exists(['src/client/A.ts']))).toEqual([
+                'src/client/ChannelUriLogBuffer.ts: Sources row for (none) points at a missing file',
+            ]);
+        });
+
+        it('fails on each missing file of a row that names several', () => {
+            const md = sources(['| (no Java file) | `test/support/B.ts`, `test/support/C.ts` | helpers |']);
+            expect(runWith(md, exists(['test/support/B.ts'])).join('\n')).toContain('test/support/C.ts');
+        });
+    });
 });

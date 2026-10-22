@@ -143,6 +143,8 @@ function multisetDiff(a, b) {
  * @param md mapping.md text
  * @param opts.roots map of prefix (`aeron`, `agrona`) to a directory; a Java cell is `prefix:relative/path`
  * @param opts.readTs reads a TS test file by its repo-relative path
+ * @param opts.fileExists optional: whether a repo-relative path exists; when given, every TS file named in the
+ *        "Sources" table must exist
  * @returns error messages, empty when the mapping holds
  */
 export function checkMapping(md, opts) {
@@ -219,6 +221,14 @@ export function checkMapping(md, opts) {
         for (const t of tsTestTitles(opts.readTs(ts))) if (t.skip) skips.push(`${ts}|${t.name}`);
     }
 
+    // Every TS file in the "Sources" table must exist (a deleted file must lose its row).
+    if (opts.fileExists) {
+        for (const [java, ts] of tableRows(md, 'Sources')) {
+            for (const path of ts.match(/(?:src|test|scripts)\/[\w./-]+/g) ?? [])
+                if (!opts.fileExists(path)) errors.push(`${path}: Sources row for ${java} points at a missing file`);
+        }
+    }
+
     const listed = tableRows(md, 'Skipped tests').map(([ts, name]) => `${ts}|${name}`);
     for (const s of multisetDiff(skips, listed)) {
         const [ts, name] = s.split('|');
@@ -245,7 +255,11 @@ function main() {
         }
     }
     const md = readFileSync(join(repo, 'docs/mapping.md'), 'utf8');
-    const errors = checkMapping(md, { roots, readTs: (p) => readFileSync(join(repo, p), 'utf8') });
+    const errors = checkMapping(md, {
+        roots,
+        readTs: (p) => readFileSync(join(repo, p), 'utf8'),
+        fileExists: (p) => existsSync(join(repo, p)),
+    });
 
     // Every TS test file under test/ (outside extras, interop, system, scripts) must have a mapping row.
     const mapped = new Set(tableRows(md, 'Tests').map((r) => r[1]));

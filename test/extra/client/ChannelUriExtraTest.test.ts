@@ -349,6 +349,12 @@ describe('ChannelUri extra', () => {
             expect(a.diff(ChannelUri.parse('aeron:ipc?a=1|b=2'))).toEqual(new Map([['media', 'udp != ipc']]));
         });
 
+        it('diffDescribesADifferingPrefix', () => {
+            expect(ChannelUri.parse('aeron-spy:aeron:udp?a=1').diff(ChannelUri.parse('aeron:udp?a=1'))).toEqual(
+                new Map([['prefix', 'aeron-spy != ']]),
+            );
+        });
+
         it('hashCodeIsPinnedToTheJavaValue', () => {
             expect(
                 ChannelUri.parse('aeron:udp?endpoint=localhost:4652|interface=eth0|ttl=8|mtu=1440|tags=1,2').hashCode(),
@@ -521,6 +527,36 @@ describe('ChannelUriStringBuilder extra', () => {
         );
     });
 
+    it('groupTagAndTaggedFlowControlRejectABigintOutside64BitsRegression', () => {
+        for (const bad of [2n ** 63n, 2n ** 64n, -(2n ** 63n) - 1n]) {
+            expect(() => new ChannelUriStringBuilder().groupTag(bad), String(bad)).toThrow(RangeError);
+            expect(() => new ChannelUriStringBuilder().taggedFlowControl(bad, 2, null), String(bad)).toThrow(
+                RangeError,
+            );
+        }
+
+        const builder = new ChannelUriStringBuilder().groupTag(7n);
+        expect(() => builder.groupTag(2n ** 64n)).toThrow(RangeError);
+        expect(builder.groupTag()).toBe(7n);
+        expect(() => builder.taggedFlowControl(2n ** 64n, null, null)).toThrow(RangeError);
+        expect(builder.flowControl()).toBeNull();
+        expect(new ChannelUriStringBuilder().groupTag(null).groupTag()).toBeNull();
+        expect(new ChannelUriStringBuilder().taggedFlowControl(null, 2, null).flowControl()).toBe('tagged,g:/2');
+    });
+
+    it('theIntSettersDoNotCheckForALongRegression', () => {
+        // maxResend, socketSndbuf, socketRcvbuf, receiverWindowLength and publicationWindowLength are Java ints: only
+        // the sign is checked, as before, where the long setters also reject what a number cannot hold as a long
+        expect(() => new ChannelUriStringBuilder().maxResend(1.5)).not.toThrow();
+        expect(() => new ChannelUriStringBuilder().socketSndbufLength(1.5)).not.toThrow();
+        expect(() => new ChannelUriStringBuilder().socketRcvbufLength(1.5)).not.toThrow();
+        expect(() => new ChannelUriStringBuilder().receiverWindowLength(1.5)).not.toThrow();
+        expect(() => new ChannelUriStringBuilder().publicationWindowLength(1.5)).not.toThrow();
+        expect(() => new ChannelUriStringBuilder().maxResend(-1)).toThrow(IllegalArgumentException);
+        expect(() => new ChannelUriStringBuilder().linger(1.5)).toThrow(RangeError);
+        expect(() => new ChannelUriStringBuilder().linger(-1)).toThrow(IllegalArgumentException);
+    });
+
     it('longSettersRejectWhatANumberCannotHold', () => {
         const unsafe = 2 ** 53;
         const setters: Array<[string, (b: ChannelUriStringBuilder, v: number) => unknown]> = [
@@ -548,6 +584,16 @@ describe('ChannelUriStringBuilder extra', () => {
 
         expect(builder.sessionId()).toBe(1);
         expect(builder.media('ipc').build()).toBe('aeron:ipc?session-id=tag:4294967297');
+    });
+
+    it.each([
+        [-4294967297, -1],
+        [4294967297, 1],
+        [2147483647, 2147483647],
+        [2147483648, -2147483648],
+        [-2147483649, 2147483647],
+    ])('theIntGetterOfTaggedSessionId%dIsJavasIntCast %d', (tag, expected) => {
+        expect(new ChannelUriStringBuilder().taggedSessionId(tag).sessionId()).toBe(expected);
     });
 
     it('mediaNullThrowsNullPointerException', () => {

@@ -22,8 +22,9 @@ import { IllegalArgumentException, IllegalStateException, Long } from '../agrona
 import { hashCodeOf, objectsEquals, requireNonNull } from '../agrona/jdkUtil.js';
 import { Strings } from '../agrona/Strings.js';
 import { Aeron } from './Aeron.js';
-import { FRAME_ALIGNMENT, computeTermIdFromPosition, positionBitsToShift } from './ChannelUriLogBuffer.js';
 import { CommonContext } from './CommonContext.js';
+import { FrameDescriptor } from './logbuffer/FrameDescriptor.js';
+import { LogBufferDescriptor } from './logbuffer/LogBufferDescriptor.js';
 
 type State = 'MEDIA' | 'PARAMS_KEY' | 'PARAMS_VALUE';
 
@@ -334,12 +335,12 @@ export class ChannelUri {
      */
     public initialPosition(position: number, initialTermId: number, termLength: number): void {
         Long.checkSafe(position);
-        if (position < 0 || 0 !== Long.and(position, FRAME_ALIGNMENT - 1)) {
+        if (position < 0 || 0 !== Long.and(position, FrameDescriptor.FRAME_ALIGNMENT - 1)) {
             throw new IllegalArgumentException('invalid position: ' + position);
         }
 
-        const bitsToShift = positionBitsToShift(termLength);
-        const termId = computeTermIdFromPosition(position, bitsToShift, initialTermId);
+        const bitsToShift = LogBufferDescriptor.positionBitsToShift(termLength);
+        const termId = LogBufferDescriptor.computeTermIdFromPosition(position, bitsToShift, initialTermId);
         const termOffset = Long.and(position, termLength - 1) | 0;
 
         this.put(CommonContext.INITIAL_TERM_ID_PARAM_NAME, String(initialTermId));

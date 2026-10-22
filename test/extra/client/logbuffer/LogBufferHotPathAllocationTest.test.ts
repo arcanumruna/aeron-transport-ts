@@ -3,9 +3,6 @@
 // 32-bit small integers when it is passed to or returned from a call that is not inlined, so the loops use ints. The
 // raw tail halves are read without a `bigint`. A minor garbage collection happens only after something is allocated,
 // so the test counts the collections over a long loop.
-import { PerformanceObserver, constants } from 'node:perf_hooks';
-import v8 from 'node:v8';
-import vm from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { UnsafeBuffer } from '../../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { BufferClaim } from '../../../../src/client/logbuffer/BufferClaim.js';
@@ -14,44 +11,17 @@ import { Header } from '../../../../src/client/logbuffer/Header.js';
 import { HeaderWriter } from '../../../../src/client/logbuffer/HeaderWriter.js';
 import { LogBufferDescriptor } from '../../../../src/client/logbuffer/LogBufferDescriptor.js';
 import { DataHeaderFlyweight } from '../../../../src/client/protocol/DataHeaderFlyweight.js';
-
-v8.setFlagsFromString('--expose-gc');
-const gc = vm.runInNewContext('gc') as () => void;
-
-const ITERATIONS = 2_000_000;
-const WARM_UP = 100_000;
-
-type Collection = { detail?: { kind: number } };
-
-/** The minor collections while `run(iterations)` runs, after a warm up. */
-async function minorCollections(run: (iterations: number) => void): Promise<number> {
-    run(WARM_UP);
-    run(WARM_UP);
-
-    const observer = new PerformanceObserver(() => {});
-    observer.observe({ entryTypes: ['gc'] });
-    gc();
-    await new Promise((resolve) => setImmediate(resolve));
-    observer.takeRecords();
-
-    run(ITERATIONS);
-
-    await new Promise((resolve) => setImmediate(resolve));
-    const collections = observer
-        .takeRecords()
-        .filter((e) => (e as unknown as Collection).detail?.kind === constants.NODE_PERFORMANCE_GC_MINOR).length;
-    observer.disconnect();
-    return collections;
-}
+import { ITERATIONS, expectNoAllocation, measure } from '../../../support/Allocation.js';
 
 /** A sink so that the loops are not optimised away. */
 let sink = 0;
+let bigSink = 0n;
 
 describe('log buffer hot paths allocate nothing', () => {
     it('FrameDescriptor accessors', async () => {
         const buffer = new UnsafeBuffer(new Uint8Array(4096));
 
-        const collections = await minorCollections((n) => {
+        await expectNoAllocation((n) => {
             let sum = 0;
             for (let i = 0; i < n; i++) {
                 const termOffset = (i & 63) << 5;
@@ -74,9 +44,7 @@ describe('log buffer hot paths allocate nothing', () => {
                 sum |= 0;
             }
             sink = sum;
-        });
-
-        expect(collections, 'minor collections').toBeLessThanOrEqual(1);
+        }, ITERATIONS);
     });
 
     it('Header getters and position', async () => {
@@ -88,7 +56,7 @@ describe('log buffer hot paths allocate nothing', () => {
         const header = new Header(5, 16);
         header.buffer(buffer).offset(128);
 
-        const collections = await minorCollections((n) => {
+        await expectNoAllocation((n) => {
             let sum = 0;
             for (let i = 0; i < n; i++) {
                 sum +=
@@ -104,9 +72,7 @@ describe('log buffer hot paths allocate nothing', () => {
                 sum |= 0;
             }
             sink = sum;
-        });
-
-        expect(collections, 'minor collections').toBeLessThanOrEqual(1);
+        }, ITERATIONS);
     });
 
     it('HeaderWriter.write', async () => {
@@ -117,13 +83,11 @@ describe('log buffer hot paths allocate nothing', () => {
         const writer = HeaderWriter.newInstance(defaultHeader);
         const term = new UnsafeBuffer(new Uint8Array(65536));
 
-        const collections = await minorCollections((n) => {
+        await expectNoAllocation((n) => {
             for (let i = 0; i < n; i++) {
                 writer.write(term, (i & 1023) << 6, 64 + (i & 31), i);
             }
-        });
-
-        expect(collections, 'minor collections').toBeLessThanOrEqual(1);
+        }, ITERATIONS);
     });
 
     it('BufferClaim wrap, accessors, commit and abort', async () => {
@@ -131,7 +95,7 @@ describe('log buffer hot paths allocate nothing', () => {
         const claim = new BufferClaim();
         const source = new UnsafeBuffer(new Uint8Array(64));
 
-        const collections = await minorCollections((n) => {
+        await expectNoAllocation((n) => {
             let sum = 0;
             for (let i = 0; i < n; i++) {
                 claim.wrap(term, (i & 511) << 7, 128);
@@ -145,9 +109,7 @@ describe('log buffer hot paths allocate nothing', () => {
                 sum |= 0;
             }
             sink = sum;
-        });
-
-        expect(collections, 'minor collections').toBeLessThanOrEqual(1);
+        }, ITERATIONS);
     });
 
     it('the raw tail halves, the active term count and the positions', async () => {
@@ -156,7 +118,7 @@ describe('log buffer hot paths allocate nothing', () => {
         LogBufferDescriptor.initialiseTailWithTermId(metadata, 1, 6);
         LogBufferDescriptor.initialiseTailWithTermId(metadata, 2, 7);
 
-        const collections = await minorCollections((n) => {
+        await expectNoAllocation((n) => {
             let sum = 0;
             for (let i = 0; i < n; i++) {
                 const index = LogBufferDescriptor.indexByTermCount(i & 1023);
@@ -175,12 +137,24 @@ describe('log buffer hot paths allocate nothing', () => {
                 sum |= 0;
             }
             sink = sum;
-        });
+        }, ITERATIONS);
+    });
 
-        expect(collections, 'minor collections').toBeLessThanOrEqual(1);
+    it('positive control: reading the raw tail as a bigint allocates and is seen', async () => {
+        const metadata = new UnsafeBuffer(new ArrayBuffer(LogBufferDescriptor.LOG_META_DATA_LENGTH));
+        LogBufferDescriptor.initialiseTailWithTermId(metadata, 0, 5);
+
+        const { collections } = await measure((n) => {
+            for (let i = 0; i < n; i++) {
+                bigSink = LogBufferDescriptor.rawTail(metadata, i & 1);
+            }
+        }, ITERATIONS);
+
+        expect(collections, 'minor collections of a loop that allocates').toBeGreaterThan(1);
     });
 
     it('keeps the sink alive', () => {
         expect(typeof sink).toBe('number');
+        expect(typeof bigSink).toBe('bigint');
     });
 });

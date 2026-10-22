@@ -19,7 +19,7 @@
 import { BitUtil } from '../../agrona/BitUtil.js';
 import { UnsafeBuffer } from '../../agrona/concurrent/UnsafeBuffer.js';
 import { DirectBuffer } from '../../agrona/DirectBuffer.js';
-import { ByteOrder } from '../../agrona/jdk.js';
+import { ByteOrder, Long } from '../../agrona/jdk.js';
 import { HeaderFlyweight } from './HeaderFlyweight.js';
 
 const { LITTLE_ENDIAN } = ByteOrder;
@@ -184,7 +184,7 @@ export class ErrorFlyweight extends HeaderFlyweight {
             return this.getLongBigInt(ErrorFlyweight.RECEIVER_ID_FIELD_OFFSET, LITTLE_ENDIAN);
         }
 
-        this.putLongBigInt(ErrorFlyweight.RECEIVER_ID_FIELD_OFFSET, receiverId, LITTLE_ENDIAN);
+        this.putLongBigInt(ErrorFlyweight.RECEIVER_ID_FIELD_OFFSET, Long.checkInt64(receiverId), LITTLE_ENDIAN);
 
         return this;
     }
@@ -210,6 +210,8 @@ export class ErrorFlyweight extends HeaderFlyweight {
         if (null === groupTag) {
             this.flags(~ErrorFlyweight.HAS_GROUP_ID_FLAG & this.flags());
         } else {
+            // checked before any write, so a throw changes nothing (spec D5)
+            Long.checkInt64(groupTag);
             this.putLongBigInt(ErrorFlyweight.GROUP_TAG_FIELD_OFFSET, groupTag);
             this.flags(ErrorFlyweight.HAS_GROUP_ID_FLAG | this.flags());
         }

@@ -19,10 +19,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { Integer, ThreadLocalRandom } from '../../../src/agrona/jdk.js';
+import { LogBufferDescriptor } from '../../../src/client/logbuffer/LogBufferDescriptor.js';
 import { NakFlyweight } from '../../../src/client/protocol/NakFlyweight.js';
 
-// LogBufferDescriptor.TERM_MIN_LENGTH: LogBufferDescriptor is ported in T9, which replaces this with its constant.
-const TERM_MIN_LENGTH = 64 * 1024;
+const { TERM_MIN_LENGTH } = LogBufferDescriptor;
 
 describe('NakFlyweight', () => {
     // JUnit creates a new test instance per test, so the field is rebuilt before each one

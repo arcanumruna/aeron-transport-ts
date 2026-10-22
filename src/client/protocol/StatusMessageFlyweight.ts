@@ -20,13 +20,11 @@ import { BitUtil } from '../../agrona/BitUtil.js';
 import { UnsafeBuffer } from '../../agrona/concurrent/UnsafeBuffer.js';
 import { ByteOrder, Long } from '../../agrona/jdk.js';
 import { AeronException } from '../exceptions/AeronException.js';
+import { FrameDescriptor } from '../logbuffer/FrameDescriptor.js';
 import { HeaderFlyweight } from './HeaderFlyweight.js';
 
 const { SIZE_OF_LONG } = BitUtil;
 const { LITTLE_ENDIAN } = ByteOrder;
-
-// FrameDescriptor.FRAME_ALIGNMENT: FrameDescriptor is ported in T9, which replaces this with its isFrameAligned.
-const FRAME_ALIGNMENT = 32;
 
 /**
  * Flyweight for a Status Message Frame.
@@ -338,7 +336,7 @@ export class StatusMessageFlyweight extends HeaderFlyweight {
         return (
             termOffset >= 0 &&
             termOffset < termLength &&
-            0 === (termOffset & (FRAME_ALIGNMENT - 1)) &&
+            FrameDescriptor.isFrameAligned(termOffset) &&
             receiverWindowLength >= 0 &&
             receiverWindowLength <= termLength >> 1
         );
