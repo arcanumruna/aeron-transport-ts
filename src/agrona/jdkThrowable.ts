@@ -36,6 +36,15 @@ export const SystemErr: PrintStream = {
 };
 
 /**
+ * `System.out`: each line goes to `console.log`.
+ */
+export const SystemOut: PrintStream = {
+    println(line: string): void {
+        console.log(line);
+    },
+};
+
+/**
  * `Throwable.toString()`: the class name, then `: ` and the message if there is one. The class name is the simple JS
  * name (spec D10): the `name` of an `Exception` is its class, a JS `Error` has the name of its type. A JS message of
  * `""` is Java's `null` message.

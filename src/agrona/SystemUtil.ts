@@ -16,16 +16,19 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of org/agrona/SystemUtil.java @ Agrona 2.6.1
+import { url as inspectorUrl } from 'node:inspector';
 import { AsciiEncoding } from './AsciiEncoding.js';
 import { Strings } from './Strings.js';
 import {
     Character,
     IllegalArgumentException,
+    Integer,
     LongOverflowError,
     longToNumber,
     NumberFormatException,
     TimeUnit,
 } from './jdk.js';
+import { System } from './jdkLang.js';
 
 /**
  * Utilities for inspecting the system.
@@ -45,6 +48,59 @@ export class SystemUtil {
     private static readonly ONE_SECOND_NS = SystemUtil.ONE_MILLISECOND_NS * 1000;
 
     private constructor() {}
+
+    /**
+     * Is a debugger attached to the process? Java looks for the JDWP agent in the JVM's input arguments; here it is
+     * the inspector (`node --inspect`, a debugger front end) being active.
+     *
+     * @return true if a debugger is attached otherwise false.
+     */
+    public static isDebuggerAttached(): boolean {
+        return undefined !== inspectorUrl();
+    }
+
+    /**
+     * Get a size value as an int from a system property. Supports a 'g', 'm', and 'k' suffix to indicate
+     * gigabytes, megabytes, or kilobytes respectively.
+     *
+     * @param propertyName to lookup.
+     * @param defaultValue to be applied if the system property is not set.
+     * @return the int value.
+     * @throws NumberFormatException if the value is out of range or mal-formatted.
+     */
+    public static getSizeAsInt(propertyName: string, defaultValue: number): number {
+        const propertyValue = System.getProperty(propertyName);
+        if (null !== propertyValue) {
+            const value = SystemUtil.parseSize(propertyName, propertyValue);
+            if (value < 0 || value > Integer.MAX_VALUE) {
+                throw new NumberFormatException(
+                    propertyName + ' must positive and less than Integer.MAX_VALUE: ' + value,
+                );
+            }
+
+            return value;
+        }
+
+        return defaultValue;
+    }
+
+    /**
+     * Get a size value as a long from a system property. Supports a 'g', 'm', and 'k' suffix to indicate
+     * gigabytes, megabytes, or kilobytes respectively.
+     *
+     * @param propertyName to lookup.
+     * @param defaultValue to be applied if the system property is not set.
+     * @return the long value.
+     * @throws NumberFormatException if the value is out of range or mal-formatted.
+     */
+    public static getSizeAsLong(propertyName: string, defaultValue: number): number {
+        const propertyValue = System.getProperty(propertyName);
+        if (null !== propertyValue) {
+            return SystemUtil.parseSize(propertyName, propertyValue);
+        }
+
+        return defaultValue;
+    }
 
     /**
      * Parse a string representation of a value with optional suffix of 'g', 'm', and 'k' suffix to indicate
@@ -130,6 +186,27 @@ export class SystemUtil {
         }
 
         return String(size);
+    }
+
+    /**
+     * Get a time duration in nanoseconds from a system property. Supports a 's', 'ms', 'us', or 'ns' suffix to
+     * indicate seconds, milliseconds, microseconds, or nanoseconds respectively. If no suffix is given nanoseconds
+     * is assumed.
+     * <p>
+     * If the resulting duration is greater than {@link Long#MAX_VALUE} (here 2^53 - 1) then {@link Long#MAX_VALUE} is used.
+     *
+     * @param propertyName to lookup.
+     * @param defaultValue to be applied if the system property is not set.
+     * @return the long value.
+     * @throws NumberFormatException if the value is negative or malformed.
+     */
+    public static getDurationInNanos(propertyName: string, defaultValue: number): number {
+        const propertyValue = System.getProperty(propertyName);
+        if (null !== propertyValue) {
+            return SystemUtil.parseDuration(propertyName, propertyValue);
+        }
+
+        return defaultValue;
     }
 
     /**

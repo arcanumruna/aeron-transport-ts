@@ -29,9 +29,14 @@ Run all checks after every merge:
 
 ## In flight
 
-Nothing. Every `wip/*` branch is merged or superseded and can be deleted.
+T7b (`Configuration`, `MediaDriver.Context`, `PublicationParams`, `SubscriptionParams`, `ThreadingMode.valueOf` #27)
+is committed as work in progress, pushed before the implementer finished because credits ran low.
 
-Next: T7b (add `ThreadingMode.valueOf`, #27).
+**Not verified:** no checks were run for T7b. None of typecheck, lint, format, mapping or vitest has been run, and
+there has been no review. Next session:
+1. Run the full checks.
+2. Finish any missing pieces: the T7a literal switch, the `docs/mapping.md` rows and the skip list.
+3. Run an Opus review, then fix what it finds.
 
 The allocation allowances at 2^40 (#19) are set to the minimum that passes:
 - many-to-one `size`, the positions and the heartbeat measure 3 or 4 heap numbers per iteration depending on the inlining, so the allowance is 4;

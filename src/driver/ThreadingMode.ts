@@ -16,6 +16,7 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of io/aeron/driver/ThreadingMode.java @ 1.53.3
+import { IllegalArgumentException } from '../agrona/jdk.js';
 
 /**
  * Threading mode to be employed by the {@link org.agrona.concurrent.Agent}s in the {@link MediaDriver}: the Java enum
@@ -64,6 +65,23 @@ export class ThreadingMode {
      */
     public static values(): ThreadingMode[] {
         return [ThreadingMode.INVOKER, ThreadingMode.SHARED, ThreadingMode.SHARED_NETWORK, ThreadingMode.DEDICATED];
+    }
+
+    /**
+     * The constant with the given name: Java's `Enum.valueOf` (`ThreadingMode.valueOf(String)`).
+     *
+     * @param name of the constant, exactly as declared.
+     * @return the constant.
+     * @throws IllegalArgumentException if the name is not that of a constant.
+     */
+    public static valueOf(name: string): ThreadingMode {
+        for (const mode of ThreadingMode.values()) {
+            if (mode._name === name) {
+                return mode;
+            }
+        }
+
+        throw new IllegalArgumentException('No enum constant io.aeron.driver.ThreadingMode.' + name);
     }
 
     public name(): string {
