@@ -362,6 +362,30 @@ Members of ported files left out because they serve only out-of-scope features (
 | `BufferBuilder.newDirectBuffer` returning a `ByteBuffer` (`allocateDirect`, `order(LITTLE_ENDIAN)`) | An `ArrayBuffer` (spec D9); `UnsafeBuffer` is little-endian only. |
 | `ControlledAssemblyTest`, `PubAndSubTest` (the assembler cases) and the other system tests that use the assemblers | They need a media driver and a publication. The assemblers are covered by `FragmentAssemblerTest`, `BufferBuilderTest` and `test/extra/client/AssemblersExtraTest.test.ts` in phase 1, and the end-to-end cases belong to the later phases that have a client and a driver. |
 
+## Golden wire vectors
+
+`test/golden/goldenFrames.test.ts` is not a port of a Java test, so it has no row in **Tests**. It checks the flyweights
+and `FrameDescriptor` alignment against bytes that two real Aeron 1.53.3 **C** drivers exchanged (plan T13):
+
+| File | What |
+|---|---|
+| `scripts/capture-golden.mjs` | Runs `aeronmd` x2, `basic_publisher`/`streaming_publisher` and `basic_subscriber` in five scenarios (`basic`, `fragmented`, `pad`, `loss`, `setup-elicit`) through a loopback UDP relay that records every datagram, drops one chosen DATA frame in `loss`, and decodes each frame with an independent `DataView` decoder (offsets from `aeron_udp_protocol.h`). It keeps the first 12 datagrams of each frame class per scenario (the RTT measurement alone produces thousands) and always keeps PAD, NAK and SETUP. |
+| `test/golden/frames.json` | The committed capture: 239 datagrams. Frame kinds: SETUP, SM plain, SM with `SEND_SETUP` (0x80), SM with the end-of-stream flag (0x40), DATA unfragmented (0xc0), BEGIN (0x80) / MIDDLE (0x00) / END (0x40) fragments of a 3500 byte message at MTU 1408, PAD at term end (a PAD header follows the last data frame in the same datagram), heartbeat (0xc0, frame length 0), EOS heartbeat (0xe0), NAK, the retransmitted DATA, RTTM request and reply. |
+| `test/golden/goldenFrames.test.ts` | Per datagram: walks the frames with `FrameDescriptor.FRAME_ALIGNMENT`, decodes with the flyweights and compares to the recorded fields, re-encodes into a fresh zeroed buffer and compares the bytes. A coverage block asserts every type and flag above. Needs no C driver. |
+
+To re-run the capture, see the README ("Golden wire vectors").
+
+Not in these flows, so covered by their flyweight tests only: ERR, RSP_SETUP, RES, ATS frames.
+
+Facts the capture showed about the 1.53.3 C driver, which the flyweight tests did not pin down:
+
+- A heartbeat is a bare 32 byte DATA header whose `frameLength` field is `0`, not `32` (`DataHeaderFlyweight.isHeartbeat`).
+- A PAD frame is sent as its 32 byte header only; its `frameLength` covers the whole pad to the end of the term.
+- The C receiver's RTTM **request** carries `REPLY_FLAG` (0x80, "please reply"); the sender's **reply** has the flag clear.
+- The C sender puts the PAD header in the same datagram as the preceding data frame(s).
+
+Flyweight disagreements with the real bytes: none found. (No `it.skip` was needed.)
+
 ## Iteration counts
 
 The Java tests run their random round trips for 1,000,000 (`AsciiEncodingTest`) and 10,000,000 (`MutableDirectBufferTests`) iterations. Both loops run `count / ITERATIONS_SCALE` iterations, where `test/support/Iterations.ts` has `ITERATIONS_SCALE = process.env.AERON_TS_FULL_ITERATIONS ? 1 : 100`. CI sets `AERON_TS_FULL_ITERATIONS=1` on the Node 24 job only.
