@@ -1,0 +1,8 @@
+dist
+.refs
+node_modules
+package-lock.json
+docs
+LICENSE
+NOTICE
+test/golden/*.json

@@ -68,7 +68,7 @@ Paths below are relative to `aeron-client/src/{main,test}/java/io/aeron/` (Aeron
   `DataView` and a `Uint8Array`, little-endian by default with the `ByteOrder` overloads kept.
 - `BufferUtil.allocateDirectAligned(length, alignment)` returns an `ArrayBuffer` (alignment is a no-op, recorded).
 - Bounds checks follow Agrona (`SHOULD_BOUNDS_CHECK`, default on) and throw `IndexOutOfBoundsException`
-  (ported in `src/agrona/exceptions.ts` with the JDK exception names Agrona throws).
+  (ported in `src/agrona/jdk.ts` with the JDK exception names Agrona throws).
 - `*Volatile`, `*Ordered`, `*Release`, `*Acquire`, `*Opaque`, `compareAndSet*`, `getAndAdd*`, `getAndSet*` are
   plain single-threaded operations with the same names and return values.
 - Tests: `MutableDirectBufferTests` (33, shared function), `UnsafeBufferTest` (24 + the 33 inherited),
@@ -117,9 +117,16 @@ Paths below are relative to `aeron-client/src/{main,test}/java/io/aeron/` (Aeron
   ControlledFragmentHandler, BlockHandler, RawBlockHandler, BufferClaim}`.
 - `ControlledFragmentHandler.Action` keeps its ordinal order (`ABORT`, `BREAK`, `COMMIT`, `CONTINUE`).
 - Positions use `number`; `computePosition`, `computeTermIdFromPosition`, `rawTail*` keep Java's int wrapping with
-  `| 0` exactly where Java truncates. `rawTail` (term id in the high 32 bits, offset in the low 32) is held as two
-  `int` halves of the 64-bit metadata slot, read/written with the same method names.
+  `| 0` exactly where Java truncates. `rawTail` (term id in the high 32 bits, offset in the low 32) is a `bigint` at the Java method names
+  (`packTail`, `rawTail`, `rawTailVolatile`, `casRawTail`, `termId`, `termOffset`, spec D12); the slot is two
+  little-endian `int` halves, and the per-message paths use `initialiseTailWithTermId`, `rawTailTermId` and
+  `rawTailTermOffset`, which read and write the halves without a `bigint`.
 - Tests: `logbuffer/HeaderTest` (6), `logbuffer/HeaderWriterTest` (2), `logbuffer/LogBufferDescriptorTest` (4).
+- Replace the T7 stand-ins: switch `NakFlyweight` and `StatusMessageFlyweight` from their local `FRAME_ALIGNMENT` to
+  `FrameDescriptor.isFrameAligned`, and the two ported tests (`NakFlyweightTest`, `StatusMessageFlyweightTest`) from
+  their local term length to `LogBufferDescriptor.TERM_MIN_LENGTH`.
+- Delete the T12 stand-in `src/client/ChannelUriLogBuffer.ts`: switch the `ChannelUri` and `ChannelUriStringBuilder`
+  imports to `FrameDescriptor` / `LogBufferDescriptor`, and remove its row from `docs/mapping.md`. Done.
 
 ### T10 — Log buffers, part 2: readers, scanners, rebuild, gap fill, unblock
 - Sources: `logbuffer/{TermReader, TermScanner, TermBlockScanner, TermGapScanner, TermRebuilder, TermGapFiller,
@@ -157,7 +164,7 @@ Paths below are relative to `aeron-client/src/{main,test}/java/io/aeron/` (Aeron
 
 ## Interaction matrix
 Phase 1 is pure code; the ported tests carry most of the matrix. The extra tests below live in
-`test/extra/<path>/<Name>.extra.test.ts`, so mapped test files stay one-to-one.
+`test/extra/<path>/<Name>ExtraTest.test.ts`, so mapped test files stay one-to-one.
 
 | Area | Operations | Entities / values | Orderings / timings |
 |---|---|---|---|
