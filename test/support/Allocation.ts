@@ -21,13 +21,20 @@ const WARM_UP = 100_000;
 
 type Collection = { detail?: { kind: number } };
 
-/** The minor collections and the heap growth while `run(iterations)` runs, after a warm up. */
+/**
+ * The minor collections and the heap growth while `run(iterations)` runs, after a warm up.
+ *
+ * The warm up scales with the measured iterations (an eighth of them, between 1,000 and WARM_UP): a caller with few,
+ * expensive iterations (fragmented or interleaved reassembly) would otherwise spend more time warming up than
+ * measuring, while the optimizer needs only a few thousand iterations to compile the loop.
+ */
 export async function measure(
     run: (iterations: number) => void,
     iterations: number,
 ): Promise<{ collections: number; heapGrowth: number }> {
-    run(WARM_UP);
-    run(WARM_UP);
+    const warmUp = Math.min(WARM_UP, Math.max(1_000, iterations >> 3));
+    run(warmUp);
+    run(warmUp);
 
     const observer = new PerformanceObserver(() => {});
     observer.observe({ entryTypes: ['gc'] });
