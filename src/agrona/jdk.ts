@@ -196,6 +196,28 @@ export const Long = {
     MAX_VALUE: Number.MAX_SAFE_INTEGER,
     SIZE: 64,
 
+    /**
+     * `Long.parseLong(String)` (and `Long.valueOf(String)`): an optional sign and decimal ASCII digits. A value outside
+     * Java's `long` is a `NumberFormatException`; one inside it but outside +/-(2^53 - 1) is a {@link LongOverflowError}
+     * carrying the exact value (spec D5).
+     */
+    parseLong(s: string | null): number {
+        if (null === s) {
+            throw new NumberFormatException('Cannot parse null string: null');
+        }
+
+        if (!/^[+-]?[0-9]+$/.test(s)) {
+            throw new NumberFormatException('For input string: "' + s + '"');
+        }
+
+        const value = BigInt(s);
+        if (value < -(2n ** 63n) || value > 2n ** 63n - 1n) {
+            throw new NumberFormatException('For input string: "' + s + '"');
+        }
+
+        return longToNumber(value) + 0;
+    },
+
     /** `Long.numberOfLeadingZeros(long)` for a `number` holding a safe integer, or a `bigint` holding a long. */
     numberOfLeadingZeros(i: number | bigint): number {
         if (typeof i === 'bigint') {
