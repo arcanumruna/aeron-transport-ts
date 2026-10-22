@@ -18,6 +18,7 @@ Owner rule: 64-bit values keep Aeron's exact layout and true 64-bit semantics (n
 | T5 | Epoch-nanos halves (D17), hash sets, error log | merged |
 | T8 | `jdkNet` stand-ins (D20): `InetAddress`, `InetSocketAddress`, `NetworkInterface` | merged (4180569) |
 | T9 | `UdpChannel`, `ControlMode`, `InvalidChannelException` | merged (e43d6d2) |
+| T2b | True 64-bit atomics on shared buffers via a 1024-stripe lock table (D16); fast path, dead-holder spin cap, kill tests, zero heap numbers at 2^40 | merged (a4abb41) |
 | T6 | Command flyweights, CnC layout, client status (`receiverId`/`groupTag` as `bigint`) | merged (29105c6) |
 | — | Flaky allocation-test fix (consumer closure hoisted out of the measured loop) | merged (b59d4d9) |
 
@@ -30,11 +31,10 @@ The WIP snapshots were taken while the agents were still working. Treat them as 
 
 | Branch | Task | State | Next step |
 |---|---|---|---|
-| `wip/t2b-stripes` | T2b: true 64-bit atomics on shared buffers via a 1024-stripe lock table (D16) | Review done; fix round in progress (fast path, spin cap with a test-only setter, kill tests, allocation at 2^40, D16 text, bench) | Finish the fixes, verify, merge **first**, close #10 with the SHA |
-| `wip/t3-reviewed` | T3: bench gate (PASS / FAIL / NO_VERDICT, exit codes 0/1/2/3), `releaseFence` (D21), large-position allocation tests | Reviewed and fixed (d72ed58) | Merge after T2b. Resolve where D21 goes (after D20). Check the 20 `SharedNoAllocation` tests turn green, tighten `LARGE_POSITION_HEAP_NUMBERS`, run `bench:gate` on an idle host (exit 3 means a loaded host) |
+| `wip/t3-reviewed` | T3: bench gate (PASS / FAIL / NO_VERDICT, exit codes 0/1/2/3), `releaseFence` (D21), large-position allocation tests | Reviewed and fixed (d72ed58) | T2b is merged, so merge T3 next. Resolve where D21 goes (after D20). Check the 20 `SharedNoAllocation` tests turn green, tighten `LARGE_POSITION_HEAP_NUMBERS`, run `bench:gate` on an idle host (exit 3 means a loaded host) |
 | `wip/t7a-done` (90c4f5f; ignore the older `wip/t7a-status` snapshot) | T7a: driver `status/*`, `DutyCycleTracker`, `ThreadingMode`, `DriverManagedResource`, `SessionKey`, full `AeronCounters`, `SystemCounters`, `MediaDriverVersion`; plan split into T7a/T7b | Implemented: all checks green; 29 of 29 mutants killed. Not reviewed yet. Based on e43d6d2, so it compiles only once merged with T6 (now merged) | Opus review, then a fix round, then merge. Keep T7a's full `AeronCounters.ts` on the add/add conflict. Deviations to review: `MediaDriverVersion` fixed values, the placeholder `DriverConductor` type, `setRelease` at 2^40 needing `heapNumbers = 1` (#19)
 
-Merge order: T2b → T3 → T7a.
+Merge order: T3 → T7a (after its review).
 
 ## Not started (dependency order)
 
@@ -60,7 +60,6 @@ Merge order: T2b → T3 → T7a.
 
 ## Open issues to know about
 
-- #10 — close it when T2b merges.
 - #11–#16 — earlier review findings. #15 (licensing) waits on the owner.
 - #17–#24 — findings from this segment:
 
