@@ -535,6 +535,196 @@ describe('Int2NullableObjectHashMap extra', () => {
     });
 });
 
+describe('T4 review fixes', () => {
+    it('int2ObjectHashMapNormalisesAKeyThatIsNotAnInt32LikeJavasIntCastRegression', () => {
+        for (const map of [new Int2ObjectHashMap<string>(), new Int2NullableObjectHashMap<string>()]) {
+            expect(map.put(2 ** 31, 'a')).toBeNull();
+            expect(map.put(2 ** 31, 'b')).toBe('a');
+            expect(map.size()).toBe(1);
+            expect(map.get(2 ** 31)).toBe('b');
+            expect(map.get(-(2 ** 31))).toBe('b'); // (int) 2^31 is Integer.MIN_VALUE
+            expect(map.containsKey(2 ** 31)).toBe(true);
+            expect(map.containsKey(-(2 ** 31))).toBe(true);
+            expect(map.putIfAbsent(2 ** 32 + 5, 'c')).toBeNull();
+            expect(map.putIfAbsent(5, 'd')).toBe('c');
+            expect(map.computeIfAbsent(2 ** 32 + 5, () => 'x')).toBe('c');
+            expect(map.compute(5, (_k, v) => v + '!')).toBe('c!');
+            expect(map.merge(2 ** 32 + 5, '?', (o, n) => o + n)).toBe('c!?');
+            expect(map.replace(5, 'e')).toBe('c!?');
+            expect(map.size()).toBe(2);
+            expect(map.remove(2 ** 31, 'zzz')).toBe(false);
+            expect(map.remove(2 ** 31)).toBe('b');
+            expect(map.remove(-(2 ** 31))).toBeNull();
+            expect(map.remove(2 ** 32 + 5, 'e')).toBe(true);
+            expect(map.size()).toBe(0);
+        }
+    });
+
+    it('aMappingFunctionResultOfUndefinedIsNullNotAnEntryRegression', () => {
+        const undef = (): never => undefined as never;
+        const maps: [
+            {
+                computeIfAbsent(k: never, f: () => never): unknown;
+                compute(k: never, f: () => never): unknown;
+                computeIfPresent(k: never, f: () => never): unknown;
+                put(k: never, v: never): unknown;
+                size(): number;
+                get(k: never): unknown;
+            },
+            unknown,
+        ][] = [
+            [new Int2ObjectHashMap<string>() as never, 1],
+            [new Long2ObjectHashMap<string>() as never, 1],
+            [new Object2ObjectHashMap<string, string>() as never, 'a'],
+        ];
+        for (const [map, key] of maps) {
+            const k = key as never;
+            expect(map.computeIfAbsent(k, undef)).toBeNull();
+            expect(map.size()).toBe(0);
+            expect(map.compute(k, undef)).toBeNull();
+            expect(map.size()).toBe(0);
+            expect(map.computeIfPresent(k, undef)).toBeNull();
+            expect(map.size()).toBe(0);
+
+            map.put(k, 'v' as never);
+            expect(map.computeIfPresent(k, undef)).toBeNull();
+            expect(map.size()).toBe(0);
+            expect(map.get(k)).toBeNull();
+
+            map.put(k, 'v' as never);
+            expect(map.compute(k, undef)).toBeNull();
+            expect(map.size()).toBe(0);
+            expect(map.get(k)).toBeNull();
+        }
+
+        for (const map of [new Int2ObjectHashMap<string>(), new Long2ObjectHashMap<string>()]) {
+            map.put(1, 'v');
+            expect(map.merge(1, 'w', undef)).toBeNull();
+            expect(map.size()).toBe(0);
+
+            map.put(1, 'v');
+            expect(() => map.replaceAll(undef)).toThrow(NullPointerException);
+        }
+    });
+
+    it('longMapsCheckTheirFunctionsForNullBeforeTheKeyRegression', () => {
+        const nothing = null as never;
+        const objects = new Long2ObjectHashMap<string>();
+        expect(() => objects.computeIfAbsent(2 ** 53, nothing)).toThrow(NullPointerException);
+        expect(() => objects.compute(2 ** 53, nothing)).toThrow(NullPointerException);
+        expect(() => objects.merge(2 ** 53, 'a', nothing)).toThrow(NullPointerException);
+        expect(() => objects.merge(2 ** 53, null, () => 'b')).toThrow(NullPointerException);
+        expect(() => objects.put(2 ** 53, null)).toThrow(NullPointerException);
+        expect(() => objects.putIfAbsent(2 ** 53, null)).toThrow(NullPointerException);
+        expect(() => objects.computeIfAbsent(2 ** 53, () => 'a')).toThrow(RangeError);
+
+        const longs = new Long2LongHashMap(-1);
+        expect(() => longs.computeIfAbsent(2 ** 53, nothing)).toThrow(NullPointerException);
+        expect(() => longs.computeIfPresent(2 ** 53, nothing)).toThrow(NullPointerException);
+        expect(() => longs.compute(2 ** 53, nothing)).toThrow(NullPointerException);
+        expect(() => longs.merge(2 ** 53, 2 ** 53, nothing)).toThrow(NullPointerException);
+        expect(() => longs.merge(2 ** 53, 1, () => 1)).toThrow(RangeError);
+    });
+
+    it('longKeysAndValuesAreStoredAsPositiveZeroRegression', () => {
+        const objects = new Long2ObjectHashMap<string>();
+        objects.put(-0, 'a');
+        expect(objects.size()).toBe(1);
+        expect(objects.putIfAbsent(0, 'b')).toBe('a');
+        expect(Object.is(objects.keySet().iterator().nextLong(), 0)).toBe(true);
+        expect(objects.remove(0)).toBe('a');
+        objects.computeIfAbsent(-0, () => 'c');
+        expect(Object.is(objects.keySet().iterator().nextLong(), 0)).toBe(true);
+        objects.clear();
+        objects.compute(-0, () => 'd');
+        expect(Object.is(objects.keySet().iterator().nextLong(), 0)).toBe(true);
+        objects.clear();
+        objects.merge(-0, 'e', () => 'f');
+        expect(Object.is(objects.keySet().iterator().nextLong(), 0)).toBe(true);
+
+        const longs = new Long2LongHashMap(-1);
+        longs.put(-0, -0);
+        expect(Object.is(longs.get(0), 0)).toBe(true);
+        expect(Object.is(longs.keySet().iterator().nextValue(), 0)).toBe(true);
+        expect(Object.is(longs.values().iterator().nextValue(), 0)).toBe(true);
+        longs.clear();
+        longs.putIfAbsent(-0, -0);
+        expect(Object.is(longs.values().iterator().nextValue(), 0)).toBe(true);
+        longs.clear();
+        longs.computeIfAbsent(-0, () => -0);
+        expect(Object.is(longs.keySet().iterator().nextValue(), 0)).toBe(true);
+        expect(Object.is(longs.values().iterator().nextValue(), 0)).toBe(true);
+        longs.clear();
+        longs.compute(-0, () => -0);
+        expect(Object.is(longs.values().iterator().nextValue(), 0)).toBe(true);
+        longs.put(5, 1);
+        longs.computeIfPresent(5, () => -0);
+        longs.replace(5, -0);
+        expect(longs.values().contains(0)).toBe(true);
+        longs.replaceAll(() => -0);
+        for (const v of longs.values()) {
+            expect(Object.is(v, 0)).toBe(true);
+        }
+        longs.clear();
+        longs.merge(-0, -0, () => -0);
+        expect(Object.is(longs.keySet().iterator().nextValue(), 0)).toBe(true);
+        expect(Object.is(new Long2LongHashMap(-0).missingValue(), 0)).toBe(true);
+    });
+
+    it('theKeySetAndTheValueCollectionOfALong2LongHashMapRemoveAndClearRegression', () => {
+        const map = new Long2LongHashMap(-1);
+        for (let i = 0; i < 50; i++) {
+            map.put(i, i * 10);
+        }
+
+        expect(map.keySet().remove(3)).toBe(true);
+        expect(map.keySet().remove(3)).toBe(false);
+        expect(map.keySet().remove(1000)).toBe(false);
+        expect(map.containsKey(3)).toBe(false);
+        expect(map.values().remove(40)).toBe(true);
+        expect(map.values().remove(40)).toBe(false);
+        expect(map.containsKey(4)).toBe(false);
+        expect(map.size()).toBe(48);
+        for (let i = 0; i < 50; i++) {
+            expect(map.get(i)).toBe(i === 3 || i === 4 ? -1 : i * 10);
+        }
+
+        for (let i = 0; i < 50; i += 2) {
+            map.keySet().remove(i);
+        }
+        expect(map.size()).toBe(25 - 1);
+        for (let i = 0; i < 50; i++) {
+            expect(map.get(i)).toBe(i % 2 === 0 || i === 3 ? -1 : i * 10);
+        }
+
+        map.values().clear();
+        expect(map.size()).toBe(0);
+        expect(map.get(5)).toBe(-1);
+
+        map.put(1, 1);
+        map.put(2, 2);
+        map.keySet().clear();
+        expect(map.isEmpty()).toBe(true);
+    });
+
+    it('theValueCollectionsOfTheObjectMapsRemoveByIterator', () => {
+        const ints = new Int2ObjectHashMap<string>();
+        ints.put(1, 'a');
+        ints.put(2, 'b');
+        expect(ints.values().remove('a')).toBe(true);
+        expect(ints.values().remove('a')).toBe(false);
+        expect(ints.containsKey(1)).toBe(false);
+        expect(ints.size()).toBe(1);
+
+        const objects = new Object2ObjectHashMap<string, string>();
+        objects.put('x', 'a');
+        objects.put('y', 'b');
+        expect(objects.keySet().remove('x')).toBe(true);
+        expect(objects.values().remove('b')).toBe(true);
+        expect(objects.isEmpty()).toBe(true);
+    });
+});
+
 describe('model check', () => {
     // A small key space makes the chains long and the removals compact them.
     const OPERATIONS = 40_000;
@@ -602,8 +792,11 @@ describe('model check', () => {
     const intKey = (n: number): number => (n % 2 === 0 ? n : -n) * 8;
     const longKey = (n: number): number => (n % 2 === 0 ? n * 2 ** 33 : -n * 2 ** 33 + n);
 
+    // A broken compaction loops for ever; the timeout reports it where the run is not stuck in a synchronous loop.
+    const TIMEOUT = { timeout: 10_000 };
+
     for (const seed of [1, 2, 3]) {
-        it(`Int2ObjectHashMapAgreesWithAMap seed ${seed}`, () => {
+        it(`Int2ObjectHashMapAgreesWithAMap seed ${seed}`, TIMEOUT, () => {
             run(
                 () => {
                     const map = new Int2ObjectHashMap<number>();
@@ -623,7 +816,7 @@ describe('model check', () => {
             );
         });
 
-        it(`Long2ObjectHashMapAgreesWithAMap seed ${seed}`, () => {
+        it(`Long2ObjectHashMapAgreesWithAMap seed ${seed}`, TIMEOUT, () => {
             run(
                 () => {
                     const map = new Long2ObjectHashMap<number>();
@@ -643,7 +836,7 @@ describe('model check', () => {
             );
         });
 
-        it(`Long2LongHashMapAgreesWithAMap seed ${seed}`, () => {
+        it(`Long2LongHashMapAgreesWithAMap seed ${seed}`, TIMEOUT, () => {
             run(
                 () => {
                     const map = new Long2LongHashMap(-1);
@@ -666,7 +859,7 @@ describe('model check', () => {
             );
         });
 
-        it(`Object2ObjectHashMapAgreesWithAMap seed ${seed}`, () => {
+        it(`Object2ObjectHashMapAgreesWithAMap seed ${seed}`, TIMEOUT, () => {
             run(
                 () => {
                     const map = new Object2ObjectHashMap<string, number>();

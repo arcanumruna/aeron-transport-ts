@@ -461,7 +461,7 @@ export class Object2ObjectHashMap<K, V> {
         }
 
         let value = this.unmapNullValue(mappedValue);
-        if (value === null && (value = mappingFunction(key)) !== null) {
+        if (value === null && (value = mappingFunction(key) ?? null) !== null) {
             entries[keyIndex + 1] = value;
             if (mappedValue === null) {
                 entries[keyIndex] = key;
@@ -492,7 +492,7 @@ export class Object2ObjectHashMap<K, V> {
 
         let value = this.unmapNullValue(mappedValue);
         if (value !== null) {
-            value = remappingFunction(key, value);
+            value = remappingFunction(key, value) ?? null;
             entries[keyIndex + 1] = value;
             if (value === null) {
                 entries[keyIndex] = null;
@@ -522,7 +522,7 @@ export class Object2ObjectHashMap<K, V> {
         }
 
         const oldValue = this.unmapNullValue(mappedValue);
-        const newValue = remappingFunction(key, oldValue);
+        const newValue = remappingFunction(key, oldValue) ?? null;
         if (newValue !== null) {
             entries[keyIndex + 1] = newValue;
             if (mappedValue === null) {
@@ -643,7 +643,7 @@ export class Object2ObjectHashMapKeySet<K, V> extends AbstractSet<K> {
     /**
      * {@inheritDoc}
      */
-    public clear(): void {
+    public override clear(): void {
         this.map.clear();
     }
 
@@ -772,7 +772,7 @@ export class Object2ObjectHashMapEntrySet<K, V> extends AbstractSet<Entry<K, V |
     /**
      * {@inheritDoc}
      */
-    public clear(): void {
+    public override clear(): void {
         this.map.clear();
     }
 

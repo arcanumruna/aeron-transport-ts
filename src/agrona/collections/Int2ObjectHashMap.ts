@@ -38,6 +38,9 @@ import type { IntObjConsumer } from './IntObjConsumer.js';
 import type { IntObjectToObjectFunction } from './IntObjectToObjectFunction.js';
 import type { IntObjPredicate } from './IntObjPredicate.js';
 
+/** Marks an omitted optional argument, so that `remove` and `replace` need no `...rest` array per call. */
+const NO_ARG = Symbol('NO_ARG');
+
 /**
  * A open addressing with linear probing hash map specialised for primitive key and object value pairs. If a value is
  * null then the map cannot be sure whether it is not there or just a null value, so the null value is not supported
@@ -202,6 +205,7 @@ export class Int2ObjectHashMap<V> {
      * @returns true if the map contains the key.
      */
     public containsKey(key: number): boolean {
+        key |= 0; // Java's (int) cast at the call site
         const keys = this._keys;
         const values = this._values;
         const mask = values.length - 1;
@@ -279,6 +283,7 @@ export class Int2ObjectHashMap<V> {
      * @returns the mapped value or null if there is none.
      */
     protected getMapped(key: number): V | null {
+        key |= 0; // Java's (int) cast at the call site
         const keys = this._keys;
         const values = this._values;
         const mask = values.length - 1;
@@ -300,6 +305,7 @@ export class Int2ObjectHashMap<V> {
      * {@inheritDoc}
      */
     public computeIfAbsent(key: number, mappingFunction: (key: number) => V | null): V | null {
+        key |= 0; // Java's (int) cast at the call site
         requireNonNull(mappingFunction);
 
         const keys = this._keys;
@@ -317,7 +323,7 @@ export class Int2ObjectHashMap<V> {
         }
 
         let value = this.unmapNullValue(mappedValue);
-        if (null === value && null !== (value = mappingFunction(key))) {
+        if (null === value && null !== (value = mappingFunction(key) ?? null)) {
             values[index] = value;
             if (null === mappedValue) {
                 keys[index] = key;
@@ -334,6 +340,7 @@ export class Int2ObjectHashMap<V> {
      * {@inheritDoc}
      */
     public computeIfPresent(key: number, remappingFunction: IntObjectToObjectFunction<V, V | null>): V | null {
+        key |= 0; // Java's (int) cast at the call site
         requireNonNull(remappingFunction);
 
         const keys = this._keys;
@@ -352,7 +359,7 @@ export class Int2ObjectHashMap<V> {
 
         let value = this.unmapNullValue(mappedValue);
         if (null !== value) {
-            value = remappingFunction(key, value);
+            value = remappingFunction(key, value) ?? null;
             values[index] = value;
 
             if (null === value) {
@@ -368,6 +375,7 @@ export class Int2ObjectHashMap<V> {
      * {@inheritDoc}
      */
     public compute(key: number, remappingFunction: IntObjectToObjectFunction<V | null, V | null>): V | null {
+        key |= 0; // Java's (int) cast at the call site
         requireNonNull(remappingFunction);
 
         const keys = this._keys;
@@ -384,7 +392,7 @@ export class Int2ObjectHashMap<V> {
             index = (index + 1) & mask;
         }
 
-        const newValue = remappingFunction(key, this.unmapNullValue(mappedvalue));
+        const newValue = remappingFunction(key, this.unmapNullValue(mappedvalue)) ?? null;
         if (null !== newValue) {
             values[index] = newValue;
             if (null === mappedvalue) {
@@ -406,6 +414,7 @@ export class Int2ObjectHashMap<V> {
      * {@inheritDoc}
      */
     public merge(key: number, value: V | null, remappingFunction: (oldValue: V, newValue: V) => V | null): V | null {
+        key |= 0; // Java's (int) cast at the call site
         const nonNullValue = requireNonNull(value);
         requireNonNull(remappingFunction);
 
@@ -424,7 +433,7 @@ export class Int2ObjectHashMap<V> {
         }
 
         const oldValue = this.unmapNullValue(mappedvalue);
-        const newValue = null === oldValue ? nonNullValue : remappingFunction(oldValue, nonNullValue);
+        const newValue = null === oldValue ? nonNullValue : (remappingFunction(oldValue, nonNullValue) ?? null);
         if (null !== newValue) {
             values[index] = newValue;
             if (null === mappedvalue) {
@@ -451,6 +460,7 @@ export class Int2ObjectHashMap<V> {
      * @throws NullPointerException if value is null
      */
     public put(key: number, value: V | null): V | null {
+        key |= 0; // Java's (int) cast at the call site
         const val = this.mapNullValue(value);
         requireNonNull(val, 'value cannot be null');
 
@@ -497,11 +507,12 @@ export class Int2ObjectHashMap<V> {
      * @returns true if the value was removed.
      */
     public remove(key: number, value: V | null): boolean;
-    public remove(key: number, ...rest: [value?: V | null]): V | null | boolean {
-        return 0 === rest.length ? this.removeKey(key) : this.removeKeyValue(key, rest[0] as V | null);
+    public remove(key: number, value: V | null | typeof NO_ARG = NO_ARG): V | null | boolean {
+        return NO_ARG === value ? this.removeKey(key) : this.removeKeyValue(key, value);
     }
 
     private removeKey(key: number): V | null {
+        key |= 0; // Java's (int) cast at the call site
         const keys = this._keys;
         const values = this._values;
         const mask = values.length - 1;
@@ -524,6 +535,7 @@ export class Int2ObjectHashMap<V> {
     }
 
     private removeKeyValue(key: number, value: V | null): boolean {
+        key |= 0; // Java's (int) cast at the call site
         const val = this.mapNullValue(value);
         if (null !== val) {
             const keys = this._keys;
@@ -602,6 +614,7 @@ export class Int2ObjectHashMap<V> {
      * @throws NullPointerException if value is null
      */
     public putIfAbsent(key: number, value: V | null): V | null {
+        key |= 0; // Java's (int) cast at the call site
         const val = this.mapNullValue(value);
         requireNonNull(val, 'value cannot be null');
 
@@ -796,11 +809,12 @@ export class Int2ObjectHashMap<V> {
      * @throws NullPointerException if newValue is null
      */
     public replace(key: number, oldValue: V | null, newValue: V | null): boolean;
-    public replace(key: number, ...rest: [V | null] | [V | null, V | null]): V | null | boolean {
-        return 1 === rest.length ? this.replaceValue(key, rest[0]) : this.replaceOldNew(key, rest[0], rest[1]!);
+    public replace(key: number, valueOrOld: V | null, newValue: V | null | typeof NO_ARG = NO_ARG): V | null | boolean {
+        return NO_ARG === newValue ? this.replaceValue(key, valueOrOld) : this.replaceOldNew(key, valueOrOld, newValue);
     }
 
     private replaceValue(key: number, value: V | null): V | null {
+        key |= 0; // Java's (int) cast at the call site
         const val = this.mapNullValue(value);
         requireNonNull(val, 'value cannot be null');
 
@@ -823,6 +837,7 @@ export class Int2ObjectHashMap<V> {
     }
 
     private replaceOldNew(key: number, oldValue: V | null, newValue: V | null): boolean {
+        key |= 0; // Java's (int) cast at the call site
         const val = this.mapNullValue(newValue);
         requireNonNull(val, 'value cannot be null');
 
@@ -872,7 +887,7 @@ export class Int2ObjectHashMap<V> {
         for (let index = 0; remaining > 0 && index < length; index++) {
             const oldValue = values[index];
             if (null !== oldValue) {
-                const newVal = this.mapNullValue(function_(keys[index]!, this.unmapNullValue(oldValue) as V));
+                const newVal = this.mapNullValue(function_(keys[index]!, this.unmapNullValue(oldValue) as V) ?? null);
                 requireNonNull(newVal, 'value cannot be null');
 
                 values[index] = newVal;
@@ -994,14 +1009,14 @@ export class Int2ObjectHashMapKeySet<V> extends AbstractSet<number> {
      * @param key to be removed.
      * @returns true if the key was present.
      */
-    public remove(key: number): boolean {
+    public override remove(key: number): boolean {
         return null !== this.map.remove(key);
     }
 
     /**
      * {@inheritDoc}
      */
-    public clear(): void {
+    public override clear(): void {
         this.map.clear();
     }
 
@@ -1066,7 +1081,7 @@ export class Int2ObjectHashMapValueCollection<V> extends AbstractCollection<V | 
         return this.map.containsValue(o);
     }
 
-    public clear(): void {
+    public override clear(): void {
         this.map.clear();
     }
 
@@ -1124,7 +1139,7 @@ export class Int2ObjectHashMapEntrySet<V> extends AbstractSet<Entry<number, V | 
     /**
      * {@inheritDoc}
      */
-    public clear(): void {
+    public override clear(): void {
         this.map.clear();
     }
 
