@@ -21,24 +21,23 @@ Owner rule: 64-bit values keep Aeron's exact layout and true 64-bit semantics (n
 | T2b | True 64-bit atomics on shared buffers via a 1024-stripe lock table (D16); fast path, dead-holder spin cap, kill tests, zero heap numbers at 2^40 | merged (a4abb41) |
 | T6 | Command flyweights, CnC layout, client status (`receiverId`/`groupTag` as `bigint`) | merged (29105c6) |
 | T3 | Bench gate (PASS / FAIL / NO_VERDICT, exit codes 0/1/2/3), `releaseFence` (D21), ring buffers and large-position allocation tests | merged (this merge commit). `bench:gate` not yet run on an idle host |
+| T7a | Driver `status/*` counters, `DutyCycleTracker`, `ThreadingMode`, `DriverManagedResource`, `SessionKey`, full `AeronCounters`, `SystemCounters`, `MediaDriverVersion` | merged after an Opus review (no urgent findings); review fixes in the same push, minors filed as #25–#28 |
 | — | Flaky allocation-test fix (consumer closure hoisted out of the measured loop) | merged (b59d4d9) |
 
 Run all checks after every merge:
 `npm run typecheck && npm run lint && npm run format:check && npm run check:mapping && npx vitest run`
 
-## In flight (not merged): saved on `wip/*` branches
+## In flight
 
-The WIP snapshots were taken while the agents were still working. Treat them as unreviewed.
+Nothing. Every `wip/*` branch is merged or superseded and can be deleted.
 
-| Branch | Task | State | Next step |
-|---|---|---|---|
-| `wip/t7a-done` (90c4f5f; ignore the older `wip/t7a-status` snapshot) | T7a: driver `status/*`, `DutyCycleTracker`, `ThreadingMode`, `DriverManagedResource`, `SessionKey`, full `AeronCounters`, `SystemCounters`, `MediaDriverVersion`; plan split into T7a/T7b | Implemented: all checks green; 29 of 29 mutants killed. Not reviewed yet. Based on e43d6d2, so it compiles only once merged with T6 (now merged) | Opus review, then a fix round, then merge. Keep T7a's full `AeronCounters.ts` on the add/add conflict. Deviations to review: `MediaDriverVersion` fixed values, the placeholder `DriverConductor` type, `setRelease` at 2^40 needing `heapNumbers = 1` (#19)
+Next: T7b (add `ThreadingMode.valueOf`, #27).
 
-Next: T7a (after its review).
+The allocation allowances at 2^40 (#19) are set to the minimum that passes:
+- many-to-one `size`, the positions and the heartbeat measure 3 or 4 heap numbers per iteration depending on the inlining, so the allowance is 4;
+- one-to-one gets 5 on a SharedArrayBuffer.
 
-At the T3 merge, one-to-one `size`, the positions and the heartbeat at 2^40 on a SharedArrayBuffer boxed 5 heap
-numbers per iteration, one more than over an ArrayBuffer. That case gets its own allowance,
-`SHARED_LARGE_POSITION_HEAP_NUMBERS`; driving every allowance to 0 is #19.
+Driving every allowance to 0 is #19.
 
 ## Not started (dependency order)
 
@@ -65,7 +64,7 @@ numbers per iteration, one more than over an ArrayBuffer. That case gets its own
 ## Open issues to know about
 
 - #11–#16 — earlier review findings. #15 (licensing) waits on the owner.
-- #17–#24 — findings from this segment:
+- #17–#28 — findings from this segment:
 
   | Issue | Finding |
   |---|---|
@@ -77,5 +76,9 @@ numbers per iteration, one more than over an ArrayBuffer. That case gets its own
   | #22 | Plain `putLong` tearing |
   | #23 | `correlationId` bigint vs number |
   | #24 | `ReadableCounter` cross-worker test |
+  | #25 | `TimeTrackingNameResolver` still takes `DutyCycleTrackerLike` |
+  | #26 | Driver status allocation tests on a SharedArrayBuffer |
+  | #27 | `ThreadingMode.valueOf` (for T7b) |
+  | #28 | Cosmetic: `SystemCounterDescriptor` order, `AeronCountersTest` count |
 
 - Open question for the owner: whether to add a race checker (a TSan-like tool) for the memory-ordering code.
