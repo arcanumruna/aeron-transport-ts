@@ -234,8 +234,8 @@ The client and the driver talk exactly as in Aeron's embedded `INVOKER` setup, w
 - Client classes (`ExclusivePublication`, `ConcurrentPublication`, `Subscription`, `Image`) are Java's, created by
   `ClientConductor` as in Java, over the same shared log buffers and counters as the driver.
 
-Because every shared structure sits in a `SharedArrayBuffer` with Java's memory ordering (D16), a later phase can
-move the driver agents to `worker_threads` (`DEDICATED` / `SHARED_NETWORK`) without changing the protocol.
+Because every shared structure sits in a `SharedArrayBuffer` with Java's memory ordering (D16), phase 4 can
+move the whole driver into one `worker_thread` (Aeron's `SHARED` mode) without changing the protocol.
 
 ### 4.4 Lifecycles (Aeron's rich-state machines, unchanged)
 - `NetworkPublication.State`: `ACTIVE → DRAINING → LINGER → DONE`.
@@ -309,7 +309,7 @@ Any deviation outside this list is a bug in the port.
 |---|---|---|
 | D1 | Receive: `'message'` events fill a bounded per-transport ring (byte budget = `SO_RCVBUF`, overflow counted in `RECEIVE_RING_DROPS`); `receive()` pops one datagram per poll into the same receive buffer as Java (§4.2). | Node has no synchronous `recvfrom`. |
 | D2 | Send: copy into a per-socket send slot; a non-empty libuv send queue returns 0 (Java's `EAGAIN` / short send); asynchronous send errors are reported at the next duty cycle and count as a lost datagram (§4.2). | `dgram.send` is asynchronous, queues without limit and keeps a reference to the buffer. |
-| D3 | `INVOKER` threading only; `DEDICATED` / `SHARED` / `SHARED_NETWORK` are not offered. | One JS thread. (Worker threads may be added later.) |
+| D3 | `INVOKER` threading (phase 2) and `SHARED` with the driver in one worker (phase 4) only; `DEDICATED` and `SHARED_NETWORK` are not offered. | In `SHARED` the conductor, sender and receiver share one thread, so Java's `Runnable` command queues and the objects they share stay local to the worker, unchanged. The multi-worker modes would need those commands encoded as binary ring records and the shared objects split across workers, a larger deviation for no planned need. |
 | D4 | Log buffers and counters live in memory; no CnC or `.logbuffer` files. | No external driver process. |
 | D5 | Every Java `long` is a JS `number` in ±(2^53 − 1) (positions cap there instead of at Aeron's term-count limit). An operation whose result or stored value falls outside that range throws `RangeError` and writes nothing; it never wraps. This covers get / put / getAndAdd / add / compareAndSet of longs in the buffers, `putLongAscii`, `parseLongAscii`, `parseSize` and the `BitUtil` long helpers. Opaque 64-bit values use `bigint` (`getLongBigInt` / `putLongBigInt`). The one exception is a saturating function: `parseDuration` saturates at `Long.MAX_VALUE` in every branch (bare number, `ns`, `us`, `ms`, `s`) as Java does for a value above it, here at 2^53 − 1. `parseLongAscii` and `parseNaturalLongAscii` throw `LongOverflowError` (a `RangeError`) carrying the exact 64-bit result in `value`. The `Long2*` collections hold `long` keys (and `Long2LongHashMap` values) as `number`: a mutator given an unsafe key or value throws `RangeError`, a lookup never throws, and `-0` is stored as 0. The `Int2*` collections apply Java's `(int)` cast to a key (`key | 0`). A `bigint` written as a `long` (the reserved value of `DataHeaderFlyweight` and `BufferClaim`, the receiver id and group tag of `StatusMessageFlyweight` and `ErrorFlyweight`, `RttMeasurementFlyweight.echoTimestampNs`, `receptionDelta` and `receiverId`, `putLongUnaligned`, the group tag of `ChannelUriStringBuilder` and `taggedFlowControl`, and `LogBufferDescriptor.correlationId`, `entityTag`, `responseCorrelationId`, the `rawTail` and `rawTailVolatile` setters and the update of `casRawTail`) is checked against [-2^63, 2^63 − 1] by `Long.checkInt64`: outside it throws `RangeError`, writing nothing, and never wraps. | JS `number`; `bigint` on the hot path is too slow. |
 | D6 | Socket options Node cannot set (`SO_TIMESTAMP`, `IP_MULTICAST_IF` by index on some platforms, `IP_PMTUDISC`) are ignored with a counter. | Not exposed by `dgram`. |
@@ -408,10 +408,13 @@ file(s) it ports.
    MDC dynamic and manual (both sides), MDS (`MultiRcvDestination`, `ReceiveDestinationTransport`), multicast.
    (The `ext/` loss generators and debug endpoints moved to phase 2, which needs them for its loss tests.) Exit: the
    full §8.3 interop matrix green, plus benches with recorded baselines.
-4. **Worker threading:** `DEDICATED` and `SHARED_NETWORK` with the driver agents in `worker_threads` over the
-   shared CnC and log buffers (D16 applied to counters, positions and the concurrent publication's raw tail),
-   `BackoffIdleStrategy` parking on `Atomics.waitAsync`, and A/B benches against `INVOKER`. Exit: the phase 2 and 3
-   suites green in both modes, plus recorded baselines for each.
+4. **Worker threading:** Aeron's `SHARED` mode, with the driver's `CompositeAgent` (conductor, sender, receiver)
+   in one `worker_thread` over the shared CnC and log buffers (D16 applied to counters, positions and the
+   concurrent publication's raw tail). The ported driver code is unchanged. The worker owns the UDP sockets, so its
+   `BackoffIdleStrategy` parks by returning to the worker's event loop (woken by a socket, by `Atomics.waitAsync` on
+   the command ring, or by a timer), never by a blocking `Atomics.wait`. A/B benches against `INVOKER`. Exit: the
+   phase 2 and 3 suites green in both modes, plus recorded baselines for each. `DEDICATED` and `SHARED_NETWORK` stay
+   out of scope (D3).
 
 ## 10. Licensing
 Aeron and Agrona are Apache-2.0. The port is a derivative work, so the repo is **Apache-2.0**: a `LICENSE` file and a

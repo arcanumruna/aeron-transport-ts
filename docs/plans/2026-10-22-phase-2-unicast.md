@@ -34,8 +34,9 @@ cross-worker stress tests; the message path allocates nothing in the port's own 
    | Worker with back-off, a message every 100 µs | 23 µs | 83 µs |
    | Worker with back-off, a message every 2 ms | 112 µs | 543 µs |
 
-   A worker driver (Aeron's `DEDICATED` / `SHARED_NETWORK`) is therefore a later phase (§9, phase 4), offered next
-   to `INVOKER` and chosen per deployment by benchmark.
+   A worker driver (Aeron's `SHARED` mode, the whole driver in one worker) is therefore a later phase (§9,
+   phase 4), offered next to `INVOKER` and chosen per deployment by benchmark. `DEDICATED` and `SHARED_NETWORK`
+   are out of scope (D3).
 4. **64-bit values in shared memory (D16).** Measured: an `Atomics` operation on a `BigInt64Array` allocates a
    `bigint` per call (a load caused 316 scavenges per 20 million calls, a compare-and-set 1,891), and a
    `Float64Array` has no atomics. So no per-message path uses a 64-bit atomic:
