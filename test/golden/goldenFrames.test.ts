@@ -24,9 +24,15 @@ interface GoldenFrame {
     flags: number;
     type: number;
     typeName: string;
+    /** Names of the set flag bits, from the C header constants copied into the capture script. */
+    flagNames: string[];
     fields: Record<string, number | string>;
-    trailingHex: string;
+    /** Fixed header length of the frame type (C header). */
+    fixedLength: number;
+    /** Bytes of the frame present in the datagram (a PAD is sent as its bare header). */
     presentLength: number;
+    /** Bytes after the fixed header that are present: a DATA payload or an SM's application specific feedback. */
+    trailingLength: number;
 }
 
 interface GoldenDatagram {
@@ -47,7 +53,13 @@ interface Golden {
 
 const golden = JSON.parse(readFileSync(new URL('./frames.json', import.meta.url), 'utf8')) as Golden;
 
+// The coverage block below uses the literals of aeron_udp_protocol.h, not these TS constants, so that a wrong TS
+// constant cannot satisfy its own coverage check; GoldenFramesConstants pins the TS constants to the same literals.
 const { HDR_TYPE_PAD, HDR_TYPE_DATA, HDR_TYPE_NAK, HDR_TYPE_SM, HDR_TYPE_SETUP, HDR_TYPE_RTTM } = HeaderFlyweight;
+
+/** The bytes after the fixed header of `frame` in `datagram`. */
+const trailing = (datagram: Uint8Array, frame: GoldenFrame): Uint8Array =>
+    datagram.subarray(frame.offset + frame.fixedLength, frame.offset + frame.fixedLength + frame.trailingLength);
 
 const fromHex = (hex: string): Uint8Array => new Uint8Array(Buffer.from(hex, 'hex'));
 const toHex = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex');
@@ -236,6 +248,19 @@ describe('GoldenFrames', () => {
                 expect(header.flags()).toBe(frame.flags);
                 expect(header.headerType()).toBe(frame.type);
 
+                // the TS fixed header length is the C one, and a frame of a fixed size type has exactly that length
+                const fixed = FIXED_LENGTH.get(frame.type) as number;
+                expect(fixed).toBe(frame.fixedLength);
+                if (frame.type === HDR_TYPE_SETUP || frame.type === HDR_TYPE_NAK || frame.type === HDR_TYPE_RTTM) {
+                    expect(frame.frameLength).toBe(fixed);
+                    expect(frame.trailingLength).toBe(0);
+                }
+                // DATA and SM carry what follows the fixed header; a heartbeat and a PAD are sent as the bare header
+                if ((frame.type === HDR_TYPE_DATA && frame.frameLength > 0) || frame.type === HDR_TYPE_SM) {
+                    expect(frame.trailingLength).toBe(frame.frameLength - fixed);
+                    expect(frame.presentLength).toBe(frame.frameLength);
+                }
+
                 expect(decode(datagram, frame)).toEqual(frame.fields);
             }
         });
@@ -246,19 +271,24 @@ describe('GoldenFrames', () => {
                 encode(fresh, frame);
                 // the bytes after the fixed header (payload, application specific feedback) are copied as is
                 const fixed = FIXED_LENGTH.get(frame.type) as number;
-                fresh.set(fromHex(frame.trailingHex), frame.offset + fixed);
+                fresh.set(trailing(datagram, frame), frame.offset + fixed);
             }
             expect(toHex(fresh)).toBe(d.hex);
         });
     });
 
     it('shouldUseThePinnedChannelParameters', () => {
+        // pinned in the capture script so that a swapped, truncated or unsigned read shows up: 0x87654321 as an int
+        expect(golden.config.sessionId).toBe(-2023406815);
+        expect(golden.config.streamId).toBe(0x12345678);
         for (const d of golden.datagrams) {
             for (const frame of d.frames) {
                 if (frame.type === HDR_TYPE_SETUP) {
                     expect(frame.fields.sessionId).toBe(golden.config.sessionId);
                     expect(frame.fields.streamId).toBe(golden.config.streamId);
                     expect(frame.fields.initialTermId).toBe(golden.config.initialTermId);
+                    // the publication starts one term after the initial term: the two fields must not be swapped
+                    expect(frame.fields.activeTermId).toBe(golden.config.initialTermId + 1);
                     expect(frame.fields.termLength).toBe(golden.config.termLength);
                     expect(frame.fields.mtuLength).toBe(golden.config.mtu);
                 }
@@ -267,55 +297,92 @@ describe('GoldenFrames', () => {
     });
 });
 
+describe('GoldenFramesConstants', () => {
+    it('shouldPinTheTsConstantsToTheCHeader', () => {
+        expect(HeaderFlyweight.HDR_TYPE_PAD).toBe(0x00);
+        expect(HeaderFlyweight.HDR_TYPE_DATA).toBe(0x01);
+        expect(HeaderFlyweight.HDR_TYPE_NAK).toBe(0x02);
+        expect(HeaderFlyweight.HDR_TYPE_SM).toBe(0x03);
+        expect(HeaderFlyweight.HDR_TYPE_ERR).toBe(0x04);
+        expect(HeaderFlyweight.HDR_TYPE_SETUP).toBe(0x05);
+        expect(HeaderFlyweight.HDR_TYPE_RTTM).toBe(0x06);
+        expect(HeaderFlyweight.HDR_TYPE_RES).toBe(0x07);
+        expect(HeaderFlyweight.HDR_TYPE_RSP_SETUP).toBe(0x0b);
+        expect(DataHeaderFlyweight.BEGIN_FLAG).toBe(0x80);
+        expect(DataHeaderFlyweight.END_FLAG).toBe(0x40);
+        expect(DataHeaderFlyweight.EOS_FLAG).toBe(0x20);
+        expect(DataHeaderFlyweight.REVOKED_FLAG).toBe(0x10);
+        expect(DataHeaderFlyweight.BEGIN_AND_END_FLAGS).toBe(0xc0);
+        expect(StatusMessageFlyweight.SEND_SETUP_FLAG).toBe(0x80);
+        expect(StatusMessageFlyweight.END_OF_STREAM_FLAG).toBe(0x40);
+        expect(RttMeasurementFlyweight.REPLY_FLAG).toBe(0x80);
+    });
+});
+
 describe('GoldenFramesCoverage', () => {
     const all = golden.datagrams.flatMap((d) => d.frames.map((frame) => ({ d, frame })));
     const where = (pred: (frame: GoldenFrame, d: GoldenDatagram) => boolean) =>
         all.filter(({ d, frame }) => pred(frame, d));
-    const isHeartbeat = (f: GoldenFrame): boolean => f.type === HDR_TYPE_DATA && f.frameLength === 0;
-    const { BEGIN_FLAG, END_FLAG, EOS_FLAG, BEGIN_AND_END_FLAGS } = DataHeaderFlyweight;
+    // C header literals (aeron_udp_protocol.h): type PAD 0, DATA 1, NAK 2, SM 3, SETUP 5, RTTM 6.
+    const isHeartbeat = (f: GoldenFrame): boolean => f.type === 0x01 && f.frameLength === 0;
+    const sameFlags = (f: GoldenFrame, bits: number, names: string[]): boolean =>
+        f.flags === bits && f.flagNames.join('+') === names.join('+');
+    const wrapSm = (d: GoldenDatagram, frame: GoldenFrame): StatusMessageFlyweight => {
+        const sm = new StatusMessageFlyweight();
+        sm.wrap(fromHex(d.hex), frame.offset, d.hex.length / 2 - frame.offset);
+        return sm;
+    };
 
     it('shouldCoverSetup', () => {
-        expect(where((f) => f.type === HDR_TYPE_SETUP).length).toBeGreaterThan(0);
+        expect(where((f) => f.type === 0x05).length).toBeGreaterThan(0);
     });
 
     it('shouldCoverStatusMessagePlain', () => {
-        expect(where((f) => f.type === HDR_TYPE_SM && f.flags === 0).length).toBeGreaterThan(0);
+        expect(where((f) => f.type === 0x03 && f.flags === 0 && f.flagNames.length === 0).length).toBeGreaterThan(0);
     });
 
     it('shouldCoverStatusMessageWithSendSetupFlag', () => {
-        const found = where((f) => f.type === HDR_TYPE_SM && (f.flags & StatusMessageFlyweight.SEND_SETUP_FLAG) !== 0);
+        const found = where((f) => f.type === 0x03 && sameFlags(f, 0x80, ['SEND_SETUP']));
         expect(found.length).toBeGreaterThan(0);
         expect(found.every(({ d }) => d.direction === 'sub->pub')).toBe(true);
+        // the flyweight constant selects exactly these status messages
+        for (const { d, frame } of found) {
+            expect(wrapSm(d, frame).flags() & StatusMessageFlyweight.SEND_SETUP_FLAG).not.toBe(0);
+        }
+        for (const { d, frame } of where((f) => f.type === 0x03 && !f.flagNames.includes('SEND_SETUP'))) {
+            expect(wrapSm(d, frame).flags() & StatusMessageFlyweight.SEND_SETUP_FLAG).toBe(0);
+        }
     });
 
     it('shouldCoverStatusMessageWithEndOfStreamFlag', () => {
-        expect(
-            where((f) => f.type === HDR_TYPE_SM && (f.flags & StatusMessageFlyweight.END_OF_STREAM_FLAG) !== 0).length,
-        ).toBeGreaterThan(0);
+        const found = where((f) => f.type === 0x03 && sameFlags(f, 0x40, ['EOS']));
+        expect(found.length).toBeGreaterThan(0);
+        for (const { d, frame } of found) {
+            expect(wrapSm(d, frame).flags() & StatusMessageFlyweight.END_OF_STREAM_FLAG).not.toBe(0);
+        }
+        for (const { d, frame } of where((f) => f.type === 0x03 && !f.flagNames.includes('EOS'))) {
+            expect(wrapSm(d, frame).flags() & StatusMessageFlyweight.END_OF_STREAM_FLAG).toBe(0);
+        }
     });
 
     it('shouldCoverUnfragmentedData', () => {
         expect(
-            where(
-                (f) =>
-                    f.type === HDR_TYPE_DATA &&
-                    f.frameLength > DataHeaderFlyweight.HEADER_LENGTH &&
-                    f.flags === BEGIN_AND_END_FLAGS,
-            ).length,
+            where((f) => f.type === 0x01 && f.frameLength > 32 && sameFlags(f, 0xc0, ['BEGIN', 'END'])).length,
         ).toBeGreaterThan(0);
     });
 
     it('shouldCoverBeginMiddleAndEndFragmentsOfAThreeMtuMessage', () => {
-        const data = where((f) => f.type === HDR_TYPE_DATA && f.frameLength > DataHeaderFlyweight.HEADER_LENGTH);
-        const begin = data.filter(({ frame }) => frame.flags === BEGIN_FLAG);
-        const middle = data.filter(({ frame }) => frame.flags === 0);
-        const end = data.filter(({ frame }) => frame.flags === END_FLAG);
+        const data = where((f) => f.type === 0x01 && f.frameLength > 32);
+        const begin = data.filter(({ frame }) => sameFlags(frame, 0x80, ['BEGIN']));
+        const middle = data.filter(({ frame }) => sameFlags(frame, 0, []));
+        const end = data.filter(({ frame }) => sameFlags(frame, 0x40, ['END']));
         expect(begin.length).toBeGreaterThan(0);
         expect(middle.length).toBeGreaterThan(0);
         expect(end.length).toBeGreaterThan(0);
 
-        // a BEGIN frame, then a MIDDLE frame, then an END frame at consecutive term offsets
-        const found = begin.some(({ frame }) => {
+        // a BEGIN frame, then a MIDDLE frame, then an END frame at consecutive term offsets: the payload lengths
+        // (frame length - 32) of the three captured frames add up to the 3500 byte message
+        const sums = begin.flatMap(({ frame }) => {
             const next = (offset: number, flags: number) =>
                 data.find(
                     (x) =>
@@ -324,21 +391,17 @@ describe('GoldenFramesCoverage', () => {
                         x.frame.flags === flags,
                 );
             const mid = next((frame.fields.termOffset as number) + BitUtil.align(frame.frameLength, 32), 0);
-            return (
-                mid !== undefined &&
-                next((mid.frame.fields.termOffset as number) + BitUtil.align(mid.frame.frameLength, 32), END_FLAG) !==
-                    undefined
-            );
+            if (mid === undefined) return [];
+            const last = next((mid.frame.fields.termOffset as number) + BitUtil.align(mid.frame.frameLength, 32), 0x40);
+            if (last === undefined) return [];
+            return [[frame, mid.frame, last.frame].reduce((sum, f) => sum + (f.frameLength - 32), 0)];
         });
-        expect(found).toBe(true);
-        // the three fragments together carry a 3500 byte message: 3 x (mtu - 32) >= 3500 > 2 x (mtu - 32)
-        const maxPayload = golden.config.mtu - DataHeaderFlyweight.HEADER_LENGTH;
-        expect(3500).toBeGreaterThan(2 * maxPayload);
-        expect(3500).toBeLessThanOrEqual(3 * maxPayload);
+        expect(sums.length).toBeGreaterThan(0);
+        expect(sums.every((sum) => sum === 3500)).toBe(true);
     });
 
     it('shouldCoverPaddingAtTermEnd', () => {
-        const pads = where((f) => f.type === HDR_TYPE_PAD);
+        const pads = where((f) => f.type === 0x00);
         expect(pads.length).toBeGreaterThan(0);
         for (const { frame } of pads) {
             // the pad runs to the end of the term
@@ -347,19 +410,23 @@ describe('GoldenFramesCoverage', () => {
     });
 
     it('shouldCoverHeartbeat', () => {
-        const hb = where((f) => isHeartbeat(f) && f.flags === BEGIN_AND_END_FLAGS);
+        const hb = where((f) => isHeartbeat(f) && sameFlags(f, 0xc0, ['BEGIN', 'END']));
         expect(hb.length).toBeGreaterThan(0);
-        for (const { d } of hb) expect(d.hex.length).toBe(DataHeaderFlyweight.HEADER_LENGTH * 2);
+        for (const { d } of hb) {
+            expect(d.hex.length).toBe(32 * 2);
+            expect(DataHeaderFlyweight.isHeartbeat(new UnsafeBuffer(fromHex(d.hex)), 32)).toBe(true);
+            expect(DataHeaderFlyweight.isHeartbeat(new UnsafeBuffer(fromHex(d.hex)), 33)).toBe(false);
+        }
     });
 
     it('shouldCoverEndOfStream', () => {
-        const eos = where((f) => isHeartbeat(f) && (f.flags & EOS_FLAG) !== 0);
+        const eos = where((f) => isHeartbeat(f) && f.flagNames.includes('EOS'));
         expect(eos.length).toBeGreaterThan(0);
-        for (const { frame } of eos) expect(frame.flags).toBe(BEGIN_AND_END_FLAGS | EOS_FLAG);
+        for (const { frame } of eos) expect(sameFlags(frame, 0xe0, ['BEGIN', 'END', 'EOS'])).toBe(true);
     });
 
     it('shouldCoverNakAndTheRetransmittedData', () => {
-        expect(where((f) => f.type === HDR_TYPE_NAK).length).toBeGreaterThan(0);
+        expect(where((f) => f.type === 0x02).length).toBeGreaterThan(0);
 
         const dropped = golden.datagrams.filter((d) => d.dropped === true);
         expect(dropped.length).toBe(1);
@@ -372,35 +439,56 @@ describe('GoldenFramesCoverage', () => {
             (d) =>
                 d.scenario === lost.scenario &&
                 d.direction === 'sub->pub' &&
-                d.frames[0]?.type === HDR_TYPE_NAK &&
+                d.frames[0]?.type === 0x02 &&
                 d.frames[0]?.fields.termId === lostFrame.fields.termId &&
                 d.frames[0]?.fields.termOffset === lostFrame.fields.termOffset,
         );
         expect(nak).toBeDefined();
         expect(nak?.seq).toBeGreaterThan(lost.seq);
+        // the NAK covers the whole lost frame, rounded up to the frame alignment
+        expect(nak?.frames[0]?.fields.length).toBe(BitUtil.align(lostFrame.frameLength, 32));
         expect((retransmits[0] as GoldenDatagram).hex).toBe(lost.hex);
         expect((retransmits[0] as GoldenDatagram).seq).toBeGreaterThan(nak?.seq ?? Infinity);
     });
 
     it('shouldCoverRttmRequestAndReply', () => {
         // the C receiver's request carries REPLY_FLAG (asks the sender to reply); the sender's reply clears it
-        const requests = where((f, d) => f.type === HDR_TYPE_RTTM && d.direction === 'sub->pub');
-        const replies = where((f, d) => f.type === HDR_TYPE_RTTM && d.direction === 'pub->sub');
+        const requests = where((f, d) => f.type === 0x06 && d.direction === 'sub->pub');
+        const replies = where((f, d) => f.type === 0x06 && d.direction === 'pub->sub');
         expect(requests.length).toBeGreaterThan(0);
         expect(replies.length).toBeGreaterThan(0);
-        for (const { frame } of requests) expect(frame.flags & RttMeasurementFlyweight.REPLY_FLAG).not.toBe(0);
-        for (const { frame } of replies) expect(frame.flags & RttMeasurementFlyweight.REPLY_FLAG).toBe(0);
+        for (const { frame } of requests) expect(sameFlags(frame, 0x80, ['REPLY'])).toBe(true);
+        for (const { frame } of replies) expect(sameFlags(frame, 0, [])).toBe(true);
         // a reply echoes the request timestamp
         const echoes = new Set(requests.map(({ frame }) => frame.fields.echoTimestampNs));
         expect(replies.some(({ frame }) => echoes.has(frame.fields.echoTimestampNs))).toBe(true);
     });
 
+    it('shouldUseOneReceiverIdForTheStatusMessagesAndTheRttmFramesOfTheBasicScenario', () => {
+        const basic = all.filter(({ d }) => d.scenario === 'basic');
+        const sm = new Set(
+            basic.filter(({ frame }) => frame.type === 0x03).map(({ frame }) => frame.fields.receiverId),
+        );
+        const rttm = basic.filter(({ frame }) => frame.type === 0x06);
+        expect(sm.size).toBe(1);
+        expect(rttm.length).toBeGreaterThan(0);
+        for (const { frame } of rttm) expect(sm.has(frame.fields.receiverId)).toBe(true);
+    });
+
     it('shouldCoverAMultiFrameDatagram', () => {
         // a data frame followed by the PAD header in one datagram exercises the FRAME_ALIGNMENT walk
-        expect(golden.datagrams.some((d) => d.frames.length > 1)).toBe(true);
+        const multi = golden.datagrams.filter((d) => d.frames.length > 1);
+        expect(multi.length).toBeGreaterThan(0);
+        const withPad = multi.filter((d) => d.frames[0]?.type === 0x01 && d.frames[1]?.type === 0x00);
+        expect(withPad.length).toBeGreaterThan(0);
+        for (const d of withPad) {
+            const [data, pad] = d.frames as [GoldenFrame, GoldenFrame];
+            expect(pad.offset).toBe(BitUtil.align(data.frameLength, 32));
+        }
     });
 
     it('shouldHaveEveryScenario', () => {
+        expect(golden.scenarios.map((s) => s.name)).toEqual(['basic', 'fragmented', 'pad', 'loss', 'setup-elicit']);
         for (const s of golden.scenarios) {
             expect(golden.datagrams.some((d) => d.scenario === s.name)).toBe(true);
         }

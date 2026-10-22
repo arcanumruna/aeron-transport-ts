@@ -23,16 +23,22 @@ flyweights against it and needs no C driver. To regenerate it:
    tree (about 20 s with Ninja):
 
    ```sh
+   export AERON_C_BUILD="$PWD/.refs/aeron-build"
    cmake -G Ninja -S .refs/aeron -B "$AERON_C_BUILD" -DCMAKE_BUILD_TYPE=Release \
      -DAERON_TESTS=OFF -DAERON_UNIT_TESTS=OFF -DAERON_SYSTEM_TESTS=OFF -DAERON_BUILD_DOCUMENTATION=OFF \
      -DAERON_INSTALL_TARGETS=OFF -DBUILD_AERON_ARCHIVE_API=OFF -DAERON_BUILD_SAMPLES=ON
    ninja -C "$AERON_C_BUILD" aeronmd basic_publisher basic_subscriber streaming_publisher
    ```
 
-2. Run the capture (about 45 s; it starts and stops its own drivers on 127.0.0.1, ports from 41100):
+   The samples build needs hdr_histogram. `.refs/aeron/CMakeLists.txt` takes it from the bundled
+   `cppbuild/HdrHistogram_c-0.11.10.zip` through `FetchContent` (a local `URL`), so no network access is needed once
+   the Aeron sources are fetched (a CMake that is configured differently, or a changed zip, would need the network).
+
+2. Run the capture (about 45 s; it starts and stops its own drivers on 127.0.0.1, ports from 41100; it removes the
+   driver directories when it finishes and keeps only the process logs in the work directory):
 
    ```sh
-   AERON_C_BUILD=/path/to/build node scripts/capture-golden.mjs
+   node scripts/capture-golden.mjs
    ```
 
    Options: `--out`, `--build`, `--work` (scratch directory, default `<tmp>/aeron-golden-work`), `--base-port`,

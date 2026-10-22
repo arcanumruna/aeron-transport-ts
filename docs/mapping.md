@@ -371,8 +371,8 @@ and `FrameDescriptor` alignment against bytes that two real Aeron 1.53.3 **C** d
 | File | What |
 |---|---|
 | `scripts/capture-golden.mjs` | Runs `aeronmd` x2, `basic_publisher`/`streaming_publisher` and `basic_subscriber` in five scenarios (`basic`, `fragmented`, `pad`, `loss`, `setup-elicit`) through a loopback UDP relay that records every datagram, drops one chosen DATA frame in `loss`, and decodes each frame with an independent `DataView` decoder (offsets from `aeron_udp_protocol.h`). It keeps the first 12 datagrams of each frame class per scenario (the RTT measurement alone produces thousands) and always keeps PAD, NAK and SETUP. |
-| `test/golden/frames.json` | The committed capture: 239 datagrams. Frame kinds: SETUP, SM plain, SM with `SEND_SETUP` (0x80), SM with the end-of-stream flag (0x40), DATA unfragmented (0xc0), BEGIN (0x80) / MIDDLE (0x00) / END (0x40) fragments of a 3500 byte message at MTU 1408, PAD at term end (a PAD header follows the last data frame in the same datagram), heartbeat (0xc0, frame length 0), EOS heartbeat (0xe0), NAK, the retransmitted DATA, RTTM request and reply. |
-| `test/golden/goldenFrames.test.ts` | Per datagram: walks the frames with `FrameDescriptor.FRAME_ALIGNMENT`, decodes with the flyweights and compares to the recorded fields, re-encodes into a fresh zeroed buffer and compares the bytes. A coverage block asserts every type and flag above. Needs no C driver. |
+| `test/golden/frames.json` | The committed capture: 263 datagrams. Frame kinds: SETUP, SM plain, SM with `SEND_SETUP` (0x80), SM with the end-of-stream flag (0x40), DATA unfragmented (0xc0), BEGIN (0x80) / MIDDLE (0x00) / END (0x40) fragments of a 3500 byte message at MTU 1408, PAD at term end (a PAD header follows the last data frame in the same datagram), heartbeat (0xc0, frame length 0), EOS heartbeat (0xe0), NAK, the retransmitted DATA, RTTM request and reply. |
+| `test/golden/goldenFrames.test.ts` | Per datagram: walks the frames with `FrameDescriptor.FRAME_ALIGNMENT`, decodes with the flyweights and compares to the recorded fields, re-encodes into a fresh zeroed buffer and compares the bytes. A coverage block asserts every type and flag above against the C header literals (and the per-frame `flagNames` the capture script derives from its own copy of the C flag constants); a constants test pins every TS `HDR_TYPE_*` and flag to those literals. Needs no C driver. |
 
 To re-run the capture, see the README ("Golden wire vectors").
 
@@ -384,6 +384,10 @@ Facts the capture showed about the 1.53.3 C driver, which the flyweight tests di
 - A PAD frame is sent as its 32 byte header only; its `frameLength` covers the whole pad to the end of the term.
 - The C receiver's RTTM **request** carries `REPLY_FLAG` (0x80, "please reply"); the sender's **reply** has the flag clear.
 - The C sender puts the PAD header in the same datagram as the preceding data frame(s).
+
+Fields the stock C samples never vary, so the golden vectors only show one value and the flyweight unit tests alone cover the rest: `reservedValue` (always 0), RTTM `receptionDelta` (always 0), `version` (always 0) and a negative `frameLength`. Also not varied: the pinned session id, stream id and term ids (one value each per capture).
+
+The capture pins `sessionId` to a negative int (0x87654321), `streamId` to 0x12345678 and starts the publication one term after the initial term, so SETUP has `activeTermId` = `initialTermId` + 1. `frames.json` records, per scenario, the NAKs the deliberate drop did not cause (`unintendedNaks`: the relay can drop datagrams under a burst); the NAK checks are scoped to the deliberate drop.
 
 Flyweight disagreements with the real bytes: none found. (No `it.skip` was needed.)
 
