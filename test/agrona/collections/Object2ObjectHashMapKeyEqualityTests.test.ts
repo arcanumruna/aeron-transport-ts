@@ -10,6 +10,7 @@ describe('Object2ObjectHashMapKeyEqualityTests', () => {
     mapKeyEqualityTests<number>(
         () => new Object2ObjectHashMap<unknown, number>(),
         (value) => value,
+        { skipEntrySetContains: true }, // the own entrySetContains below overrides the inherited one
     );
 
     it.each(lookupKeys())('containsValue [%#]', (key, rawValue) => {

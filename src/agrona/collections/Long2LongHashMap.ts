@@ -37,9 +37,6 @@ import type { LongLongConsumer } from './LongLongConsumer.js';
 import type { LongLongFunction } from './LongLongFunction.js';
 import type { LongLongPredicate } from './LongLongPredicate.js';
 
-/** Marks an omitted optional argument, so that `remove` and `replace` need no `...rest` array per call. */
-const NO_ARG = Symbol('NO_ARG');
-
 /**
  * A open addressing with linear probing hash map specialised for primitive key and value pairs.
  * <p>
@@ -602,8 +599,9 @@ export class Long2LongHashMap {
      */
     public remove(key: number): number;
     public remove(key: number, value: number): boolean;
-    public remove(key: number, value: number | typeof NO_ARG = NO_ARG): number | boolean {
-        return NO_ARG === value ? this.removeKey(key) : this.removeKeyValue(key, value);
+    public remove(key: number, value?: number): number | boolean {
+        // `arguments.length`, not `undefined`: an explicit `undefined` value is a (bad) value, not an omitted argument
+        return 1 === arguments.length ? this.removeKey(key) : this.removeKeyValue(key, value as number);
     }
 
     private removeKey(key: number): number {
@@ -813,8 +811,10 @@ export class Long2LongHashMap {
      * @returns true if the value was replaced.
      */
     public replace(key: number, oldValue: number, newValue: number): boolean;
-    public replace(key: number, valueOrOld: number, newValue: number | typeof NO_ARG = NO_ARG): number | boolean {
-        return NO_ARG === newValue ? this.replaceValue(key, valueOrOld) : this.replaceOldNew(key, valueOrOld, newValue);
+    public replace(key: number, valueOrOld: number, newValue?: number): number | boolean {
+        return 2 === arguments.length
+            ? this.replaceValue(key, valueOrOld)
+            : this.replaceOldNew(key, valueOrOld, newValue as number);
     }
 
     private replaceValue(key: number, value: number): number {

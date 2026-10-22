@@ -67,11 +67,13 @@ export function insertKeys(): [unknown, number | null, number][] {
  *
  * @param newMap  the abstract `newMap()`.
  * @param convert the abstract `convert(Integer)`.
+ * @param options `skipEntrySetContains` leaves out the inherited `entrySetContains` for a subclass that overrides it.
  * @returns the accessor of the `map` field.
  */
 export function mapKeyEqualityTests<T extends number>(
     newMap: () => Object2ObjectHashMap<unknown, T>,
     convert: (value: number | null) => T | null,
+    options: { skipEntrySetContains?: boolean } = {},
 ): () => Object2ObjectHashMap<unknown, T> {
     let map: Object2ObjectHashMap<unknown, T>;
 
@@ -107,13 +109,15 @@ export function mapKeyEqualityTests<T extends number>(
         }
     });
 
-    it('entrySetContains', () => {
-        const entrySet = map.entrySet();
-        const entries = entrySet.toArray() as Entry<unknown, T>[];
-        for (const e of entries) {
-            expect(entrySet.contains(e)).toBe(true);
-        }
-    });
+    if (options.skipEntrySetContains !== true) {
+        it('entrySetContains', () => {
+            const entrySet = map.entrySet();
+            const entries = entrySet.toArray() as Entry<unknown, T>[];
+            for (const e of entries) {
+                expect(entrySet.contains(e)).toBe(true);
+            }
+        });
+    }
 
     it('entryEqualAndHashCode', () => {
         for (const e of map.entrySet()) {

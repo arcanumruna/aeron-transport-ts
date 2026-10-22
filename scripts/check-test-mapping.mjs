@@ -167,16 +167,41 @@ export function checkMapping(md, opts) {
         if (b === undefined) return own; // a non-test base class (no row): contributes no tests
         return [...javaAll(b.java, seen), ...own];
     };
+    // The shared suite functions a TS test file calls: `export function x` of a module it imports from `./Y.js` that is
+    // not itself a `.test.ts` file (such as `MapKeyEqualityTests.ts` or `Int2ObjectHashMapTestSuite.ts`).
+    const suitesOf = (cell) => {
+        const src = opts.readTs(cell);
+        const dir = cell.slice(0, cell.lastIndexOf('/') + 1);
+        const out = [];
+        for (const m of src.matchAll(/from '\.\/(\w+)\.js'/g)) {
+            const path = `${dir}${m[1]}.ts`;
+            let text;
+            try {
+                text = opts.readTs(path);
+            } catch {
+                continue; // a source module, not a test module
+            }
+            const fn = /export function (\w+)/.exec(text)?.[1];
+            if (fn && new RegExp(`\\b${fn}\\s*\\(`).test(src.replace(m[0], ''))) out.push({ path, fn });
+        }
+        return out;
+    };
     const tsAll = (cell) => {
         const java = rows.find((r) => r[1] === cell)?.[0];
         let titles = tsTestTitles(opts.readTs(cell));
         const base = java ? javaTestNames(javaPath(java)).base : undefined;
         const b = base ? byBase.get(base) : undefined;
+        // A suite of the Java base class is counted through the base below, not twice.
+        const baseFiles = b ? [b.ts, ...suitesOf(b.ts).map((x) => x.path)] : [];
+        for (const { path } of suitesOf(cell))
+            if (!baseFiles.includes(path)) titles = [...tsTestTitles(opts.readTs(path)), ...titles];
         if (b) {
-            const src = opts.readTs(cell);
             // The TS subclass must call the shared base function; its titles count only if it does.
-            const fn = /export function (\w+)/.exec(opts.readTs(b.ts))?.[1];
-            if (fn && new RegExp(`\\b${fn}\\s*\\(`).test(src)) titles = [...tsAll(b.ts), ...titles];
+            const src = opts.readTs(cell);
+            const fns = [b.ts, ...suitesOf(b.ts).map((x) => x.path)].map(
+                (p) => /export function (\w+)/.exec(opts.readTs(p))?.[1],
+            );
+            if (fns.some((fn) => fn && new RegExp(`\\b${fn}\\s*\\(`).test(src))) titles = [...tsAll(b.ts), ...titles];
         }
         return titles;
     };

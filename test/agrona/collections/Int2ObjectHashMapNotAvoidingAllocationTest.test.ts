@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { Int2ObjectHashMap } from '../../../src/agrona/collections/Int2ObjectHashMap.js';
 import { assertNotEqualsObject } from '../../support/Assertions.js';
-import { int2ObjectHashMapTest } from './Int2ObjectHashMapTest.test.js';
+import { int2ObjectHashMapTest } from './Int2ObjectHashMapTestSuite.js';
 
 describe('Int2ObjectHashMapNotAvoidingAllocationTest', () => {
     const map = int2ObjectHashMapTest(

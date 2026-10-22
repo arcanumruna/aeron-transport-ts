@@ -723,6 +723,34 @@ describe('T4 review fixes', () => {
         expect(objects.values().remove('b')).toBe(true);
         expect(objects.isEmpty()).toBe(true);
     });
+
+    it('explicitUndefinedIsNotAnOmittedArgumentOfRemoveAndReplaceRegression', () => {
+        const ints = new Int2ObjectHashMap<string>();
+        ints.put(1, 'a');
+        expect(ints.remove(1, undefined as unknown as string)).toBe(false);
+        expect(ints.get(1)).toBe('a');
+        expect(() => ints.replace(1, 'a', undefined as unknown as string)).toThrow(NullPointerException);
+        expect(ints.get(1)).toBe('a');
+
+        const longs = new Long2ObjectHashMap<string>();
+        longs.put(1, 'a');
+        expect(longs.remove(1, undefined as unknown as string)).toBe(false);
+        expect(longs.get(1)).toBe('a');
+        expect(() => longs.replace(1, 'a', undefined as unknown as string)).toThrow(NullPointerException);
+        expect(longs.get(1)).toBe('a');
+
+        const primitive = new Long2LongHashMap(-1);
+        primitive.put(1, 2);
+        expect(primitive.remove(1, undefined as unknown as number)).toBe(false);
+        expect(primitive.get(1)).toBe(2);
+        expect(() => primitive.replace(1, 2, undefined as unknown as number)).toThrow(RangeError);
+        expect(primitive.get(1)).toBe(2);
+
+        // the omitted arguments still select the shorter overloads
+        expect(ints.remove(1)).toBe('a');
+        expect(longs.replace(1, 'b')).toBe('a');
+        expect(primitive.replace(1, 3)).toBe(2);
+    });
 });
 
 describe('model check', () => {
@@ -792,11 +820,8 @@ describe('model check', () => {
     const intKey = (n: number): number => (n % 2 === 0 ? n : -n) * 8;
     const longKey = (n: number): number => (n % 2 === 0 ? n * 2 ** 33 : -n * 2 ** 33 + n);
 
-    // A broken compaction loops for ever; the timeout reports it where the run is not stuck in a synchronous loop.
-    const TIMEOUT = { timeout: 10_000 };
-
     for (const seed of [1, 2, 3]) {
-        it(`Int2ObjectHashMapAgreesWithAMap seed ${seed}`, TIMEOUT, () => {
+        it(`Int2ObjectHashMapAgreesWithAMap seed ${seed}`, () => {
             run(
                 () => {
                     const map = new Int2ObjectHashMap<number>();
@@ -816,7 +841,7 @@ describe('model check', () => {
             );
         });
 
-        it(`Long2ObjectHashMapAgreesWithAMap seed ${seed}`, TIMEOUT, () => {
+        it(`Long2ObjectHashMapAgreesWithAMap seed ${seed}`, () => {
             run(
                 () => {
                     const map = new Long2ObjectHashMap<number>();
@@ -836,7 +861,7 @@ describe('model check', () => {
             );
         });
 
-        it(`Long2LongHashMapAgreesWithAMap seed ${seed}`, TIMEOUT, () => {
+        it(`Long2LongHashMapAgreesWithAMap seed ${seed}`, () => {
             run(
                 () => {
                     const map = new Long2LongHashMap(-1);
@@ -859,7 +884,7 @@ describe('model check', () => {
             );
         });
 
-        it(`Object2ObjectHashMapAgreesWithAMap seed ${seed}`, TIMEOUT, () => {
+        it(`Object2ObjectHashMapAgreesWithAMap seed ${seed}`, () => {
             run(
                 () => {
                     const map = new Object2ObjectHashMap<string, number>();
@@ -874,7 +899,8 @@ describe('model check', () => {
                         entries: () => pairs(map.entrySet()).map(([k, v]) => [fromKey(k), v!] as [number, number]),
                         removeWhere: (p) => {
                             const it = map.entrySet().iterator();
-                            while (it.hasNext()) {
+                            for (let n = 0; it.hasNext(); n++) {
+                                if (n > 100_000) throw new Error('iterator does not terminate');
                                 it.next();
                                 if (p(fromKey(it.getKey()), it.getValue()!)) {
                                     it.remove();

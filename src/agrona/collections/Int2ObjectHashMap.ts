@@ -38,9 +38,6 @@ import type { IntObjConsumer } from './IntObjConsumer.js';
 import type { IntObjectToObjectFunction } from './IntObjectToObjectFunction.js';
 import type { IntObjPredicate } from './IntObjPredicate.js';
 
-/** Marks an omitted optional argument, so that `remove` and `replace` need no `...rest` array per call. */
-const NO_ARG = Symbol('NO_ARG');
-
 /**
  * A open addressing with linear probing hash map specialised for primitive key and object value pairs. If a value is
  * null then the map cannot be sure whether it is not there or just a null value, so the null value is not supported
@@ -507,8 +504,9 @@ export class Int2ObjectHashMap<V> {
      * @returns true if the value was removed.
      */
     public remove(key: number, value: V | null): boolean;
-    public remove(key: number, value: V | null | typeof NO_ARG = NO_ARG): V | null | boolean {
-        return NO_ARG === value ? this.removeKey(key) : this.removeKeyValue(key, value);
+    public remove(key: number, value?: V | null): V | null | boolean {
+        // `arguments.length`, not `undefined`: an explicit `undefined` value is a (bad) value, not an omitted argument
+        return 1 === arguments.length ? this.removeKey(key) : this.removeKeyValue(key, value as V | null);
     }
 
     private removeKey(key: number): V | null {
@@ -809,8 +807,10 @@ export class Int2ObjectHashMap<V> {
      * @throws NullPointerException if newValue is null
      */
     public replace(key: number, oldValue: V | null, newValue: V | null): boolean;
-    public replace(key: number, valueOrOld: V | null, newValue: V | null | typeof NO_ARG = NO_ARG): V | null | boolean {
-        return NO_ARG === newValue ? this.replaceValue(key, valueOrOld) : this.replaceOldNew(key, valueOrOld, newValue);
+    public replace(key: number, valueOrOld: V | null, newValue?: V | null): V | null | boolean {
+        return 2 === arguments.length
+            ? this.replaceValue(key, valueOrOld)
+            : this.replaceOldNew(key, valueOrOld, newValue as V | null);
     }
 
     private replaceValue(key: number, value: V | null): V | null {
