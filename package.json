@@ -24,7 +24,9 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "fetch:refs": "sh scripts/fetch-refs.sh",
-    "check:mapping": "node scripts/check-test-mapping.mjs"
+    "check:mapping": "node scripts/check-test-mapping.mjs",
+    "bench:micro": "node --import ./test/support/workerRegister.mjs --no-warnings bench/lib/runMicro.ts",
+    "bench:gate": "node --import ./test/support/workerRegister.mjs --no-warnings bench/lib/gate.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
