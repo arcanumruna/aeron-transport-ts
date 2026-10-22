@@ -7,7 +7,7 @@ deviations D15 and D16 are new with this plan).
 phase 1 is merged.
 **Exit:** every test mapped in this plan is green or a reviewed `it.skip`; the mapping check passes; TS ↔ TS and
 TS ↔ C unicast interop are green with no loss and no duplicates, including under loss; the ring buffers pass their
-cross-worker stress tests; the message path allocates nothing in the port's own code (bench).
+cross-worker stress tests; the message path allocates nothing in the port's own code (bench); `bench:gate` passes against `main`.
 
 ## Decisions taken with this plan (owner, 2026-10-22)
 
@@ -103,6 +103,21 @@ and the mapping check, update `docs/mapping.md`, one commit per task (`phase2(T<
   skipped silently.
 - **Allocation checks.** Every per-message method a task ports gets an `expectNoAllocation` test
   (`test/support/Allocation.ts`) in `test/extra/`.
+- **Performance gates.** Low latency is the requirement, so a slowdown fails like a red test.
+  - *Allocation (hard, in CI).* The `expectNoAllocation` tests run in `npm test`; one allocation per message fails
+    the build.
+  - *Micro benches (from T3 on).* Every task that ports a per-message path adds a bench in `bench/micro/` (ns per
+    operation, warmed up, fixed seed): T3 ring buffer `write` + `read` and `tryClaim` + `commit` (1 and 4 producers),
+    T4 `transmit` + `receiveNext`, T15 `TermAppender` and the sender scan, T16 `TermRebuilder` and `TermReader`, T20
+    `offer`, `tryClaim` and `poll`. The task records its baseline in `bench/README.md`.
+  - *Regression gate (`npm run bench:gate -- --base <ref>`).* It builds `<ref>` (default `origin/main`) in a scratch
+    directory outside the repo and runs base and candidate interleaved, A B A B, at least 5 pairs for latency and 3
+    for throughput. It fails when the median of the per-pair ratios is over 1.10 for p99 or p99.9, over 1.05 for p50
+    or ns per operation, or under 0.95 for throughput. A failure names the bench and the ratios. "Noise" is never a
+    verdict: rerun with 15 pairs, then bisect.
+  - *Where it runs.* Shared CI runners are too noisy for latency, so the gate runs on an idle machine: before
+    every task's commit is merged into the branch when it touches a per-message path, and at the T25 checkpoint
+    against `main`. CI runs the benches once per PR and only reports their numbers.
 
 Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron/` (Aeron) and
 `agrona/src/{main,test}/java/org/agrona/` (Agrona).
@@ -158,6 +173,8 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
   - `unblock` with a producer worker terminated between claim and commit: the consumer gets past it;
   - the consumer heartbeat read from another worker is never torn;
   - no allocation per `write`, `tryClaim`, `commit` and `read` (the consumer's handler excluded).
+- Bench harness: `bench/micro/` runner (`npm run bench:micro`) and its first benches (see Testing, Performance
+  gates); `npm run bench:gate` comes with it, comparing micro benches only until T24.
 
 #### T4 — Agrona broadcast and buffers
 - Sources: `concurrent/broadcast/{BroadcastBufferDescriptor, RecordDescriptor, BroadcastTransmitter,
@@ -308,10 +325,14 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
   term rotation; subscriber leaves and rejoins (EOS, image re-creation). Produced = consumed in every case.
 - A CI job runs it on Linux; locally it is skipped, with a message, when the C build is missing.
 
-#### T24 — Benches and baselines
+#### T24 — Benches, baselines and the gate
 - `bench/`: TS ↔ TS loopback latency (offer → poll, p50 / p99 / p99.9, ≥ 5 runs interleaved) and throughput
   (≥ 3 runs), allocations per message (`--trace-gc` and the allocation sampler), with the `dgram` floor reported
   apart (spec §5.3). Baselines recorded in `bench/README.md`.
+- These end-to-end benches join the micro benches under `npm run bench:gate` (see Testing, Performance gates),
+  and a non-gating CI job runs them and posts the numbers.
+- Tests for the gate itself: a candidate with an injected 20% delay in `TermReader.read` fails it; the same commit
+  as base and candidate passes it.
 
 #### T25 — Phase checkpoint
 - Full suite, typecheck, lint, format, mapping check, interop. Whole-branch review against the Java sources (most
@@ -342,5 +363,7 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
   rename is in `docs/mapping.md` with a reason.
 - **Protocol on the wire:** frames and timings checked against the C driver (T23), not by reading the code.
 - **Allocation:** the port's own code allocates nothing per message (T24 bench and the `expectNoAllocation` tests).
+- **Latency:** `bench:gate` passed against the base for every merged task that touched a per-message path, and
+  against `main` at T25; the ratios are in the review report.
 - **Tests:** none waits on wall time or runs an uncapped loop; no assertion weakened; Mockito verifications kept
   with counts and order.
