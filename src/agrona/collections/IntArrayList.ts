@@ -16,12 +16,8 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of org/agrona/collections/IntArrayList.java @ Agrona 2.6.1
+import { ArrayUtil } from './ArrayUtil.js';
 import { IllegalStateException, IndexOutOfBoundsException, Integer } from '../jdk.js';
-
-/**
- * The maximum capacity of an array: {@code ArrayUtil.MAX_CAPACITY} ({@code Integer.MAX_VALUE - 8}).
- */
-const MAX_CAPACITY = Integer.MAX_VALUE - 8;
 
 /**
  * A {@code java.util.List} of {@code int} that avoids boxing. Only the members that {@link CountersManager} uses are
@@ -183,8 +179,8 @@ export class IntArrayList {
     private ensureCapacityPrivate(requiredCapacity: number): void {
         const currentCapacity = this.elements.length;
         if (requiredCapacity > currentCapacity) {
-            if (requiredCapacity > MAX_CAPACITY) {
-                throw new IllegalStateException('max capacity: ' + MAX_CAPACITY);
+            if (requiredCapacity > ArrayUtil.MAX_CAPACITY) {
+                throw new IllegalStateException('max capacity: ' + ArrayUtil.MAX_CAPACITY);
             }
 
             let newCapacity =
@@ -193,8 +189,8 @@ export class IntArrayList {
             while (newCapacity < requiredCapacity) {
                 newCapacity = newCapacity + (newCapacity >> 1);
 
-                if (newCapacity < 0 || newCapacity >= MAX_CAPACITY) {
-                    newCapacity = MAX_CAPACITY;
+                if (newCapacity < 0 || newCapacity >= ArrayUtil.MAX_CAPACITY) {
+                    newCapacity = ArrayUtil.MAX_CAPACITY;
                 }
             }
 

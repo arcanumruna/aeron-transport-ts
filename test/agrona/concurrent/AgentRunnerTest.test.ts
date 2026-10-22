@@ -168,6 +168,7 @@ describe('AgentRunnerTest', () => {
 
         expect(Thread.interrupted()).toBe(false);
         expect(runnerThread.isAlive()).toBe(false);
+        expect(runnerThread.isInterrupted()).toBe(false);
         expect(finished).toBe(true);
         expect(interrupted).toBe(false);
         expect(failCount).toBe(0);

@@ -452,6 +452,56 @@ describe('AgentRunnerExtra', () => {
         expect(runner.isClosed()).toBe(true);
     });
 
+    it('closeFromAnInterruptedCallerDoesNotCallTheFailActionIfTheRunnerThreadIsAlreadyInterruptedRegression', () => {
+        const runner = newRunner();
+        const failed: Thread[] = [];
+        runner.run();
+        scheduler.runSteps(1);
+
+        runner.thread()!.interrupt();
+        Thread.currentThread().interrupt();
+        runner.close(100, (t) => failed.push(t));
+
+        expect(failed).toEqual([]); // Java: wasInterrupted && !thread.isInterrupted()
+        expect(Thread.interrupted()).toBe(true); // the restore is keyed on wasInterrupted
+        expect(runner.isClosed()).toBe(true);
+    });
+
+    it('closeRestoresTheCallersInterruptFlagWhenOnCloseThrowsAnErrorRegression', () => {
+        const runner = newRunner();
+        const error = new JavaError('close');
+        agent.onClose.mockImplementation(() => {
+            throw error;
+        });
+        runner.run();
+        scheduler.runSteps(1);
+
+        Thread.currentThread().interrupt();
+        let thrown: unknown;
+        try {
+            runner.close(100, () => {});
+        } catch (t) {
+            thrown = t;
+        }
+
+        expect(thrown).toBe(error); // spec D11: reaches the caller, in Java it stays on the runner thread
+        expect(errorHandler.onError).toHaveBeenCalledWith(error);
+        expect(Thread.interrupted()).toBe(true);
+        expect(runner.isClosed()).toBe(true);
+    });
+
+    it('startOnThreadReturnsTheRunnerThreadWhenTheAgentClosesItselfInOnStartRegression', () => {
+        const runner = newRunner();
+        agent.onStart.mockImplementation(() => runner.close());
+
+        const thread = AgentRunner.startOnThread(runner);
+
+        expect(thread).not.toBe(AgentRunner.TOMBSTONE);
+        expect(thread.getName()).toBe('role');
+        expect(thread.isAlive()).toBe(false);
+        expect(runner.isClosed()).toBe(true);
+    });
+
     it('closeFromAnInterruptedCallerWithNoFailActionWritesToStderr', () => {
         const runner = newRunner();
         runner.run();

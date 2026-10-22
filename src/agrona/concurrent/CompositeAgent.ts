@@ -17,7 +17,7 @@
  */
 // Port of org/agrona/concurrent/CompositeAgent.java @ Agrona 2.6.1
 import { IllegalArgumentException, RuntimeException } from '../jdk.js';
-import { requireNonNull } from '../jdkLang.js';
+import { JavaError, requireNonNull } from '../jdkLang.js';
 import type { Agent } from './Agent.js';
 
 /**
@@ -30,6 +30,9 @@ import type { Agent } from './Agent.js';
  * single array.
  */
 export class CompositeAgent implements Agent {
+    /** {@code getClass().getName()} of the Java class, the prefix of the messages of the exceptions it throws. */
+    private static readonly JAVA_NAME = 'org.agrona.concurrent.CompositeAgent';
+
     private readonly agents: Agent[];
     private readonly _roleName: string;
     private agentIndex = 0;
@@ -76,8 +79,12 @@ export class CompositeAgent implements Agent {
             try {
                 agent.onStart();
             } catch (ex) {
+                if (ex instanceof JavaError) {
+                    throw ex; // Java catches Exception only: an Error ends the loop
+                }
+
                 if (null === ce) {
-                    ce = new RuntimeException(this.constructor.name + ': underlying agent error on start');
+                    ce = new RuntimeException(CompositeAgent.JAVA_NAME + ': underlying agent error on start');
                 }
                 ce.addSuppressed(ex as Error);
             }
@@ -108,8 +115,12 @@ export class CompositeAgent implements Agent {
             try {
                 agent.onClose();
             } catch (ex) {
+                if (ex instanceof JavaError) {
+                    throw ex; // Java catches Exception only: an Error ends the loop
+                }
+
                 if (null === ce) {
-                    ce = new RuntimeException(this.constructor.name + ': underlying agent error on close');
+                    ce = new RuntimeException(CompositeAgent.JAVA_NAME + ': underlying agent error on close');
                 }
                 ce.addSuppressed(ex as Error);
             }

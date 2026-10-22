@@ -236,14 +236,60 @@ describe('CompositeAgentExtra', () => {
         const composite = new CompositeAgent(agents);
 
         const onStartError = assertThrows(RuntimeException, () => composite.onStart());
-        expect(onStartError.message).toBe('CompositeAgent: underlying agent error on start');
+        expect(onStartError.message).toBe('org.agrona.concurrent.CompositeAgent: underlying agent error on start');
         expect(onStartError.getSuppressed()).toEqual([errors[0], errors[2]]);
         const onCloseError = assertThrows(RuntimeException, () => composite.onClose());
-        expect(onCloseError.message).toBe('CompositeAgent: underlying agent error on close');
+        expect(onCloseError.message).toBe('org.agrona.concurrent.CompositeAgent: underlying agent error on close');
         expect(onCloseError.getSuppressed()).toEqual([errors[1]]);
         for (const agent of agents) {
             expect(agent.onStart).toHaveBeenCalledTimes(1);
             expect(agent.onClose).toHaveBeenCalledTimes(1);
         }
+    });
+
+    it('anErrorFromOnStartPassesThroughAndSkipsTheRemainingSubAgentsRegression', () => {
+        const agents = [createMockAgent('a'), createMockAgent('b'), createMockAgent('c')];
+        const error = new JavaError('start');
+        agents[1]!.onStart.mockImplementation(() => {
+            throw error;
+        });
+        const composite = new CompositeAgent(agents);
+
+        expect(() => composite.onStart()).toThrow(error);
+        expect(agents[0]!.onStart).toHaveBeenCalledTimes(1);
+        expect(agents[2]!.onStart).not.toHaveBeenCalled();
+    });
+
+    it('anErrorFromOnClosePassesThroughAndSkipsTheRemainingSubAgentsRegression', () => {
+        const agents = [createMockAgent('a'), createMockAgent('b'), createMockAgent('c')];
+        const error = new JavaError('close');
+        agents[0]!.onClose.mockImplementation(() => {
+            throw new RuntimeException('suppressed in Java, but only if it was first');
+        });
+        agents[1]!.onClose.mockImplementation(() => {
+            throw error;
+        });
+        const composite = new CompositeAgent(agents);
+
+        expect(() => composite.onClose()).toThrow(error);
+        expect(agents[2]!.onClose).not.toHaveBeenCalled();
+    });
+
+    it('theExceptionMessagesUseTheJavaClassNameRegression', () => {
+        const agent = createMockAgent('a');
+        agent.onStart.mockImplementation(() => {
+            throw new RuntimeException('x');
+        });
+        agent.onClose.mockImplementation(() => {
+            throw new RuntimeException('y');
+        });
+        const composite = new CompositeAgent(agent);
+
+        expect(assertThrows(RuntimeException, () => composite.onStart()).message).toBe(
+            'org.agrona.concurrent.CompositeAgent: underlying agent error on start',
+        );
+        expect(assertThrows(RuntimeException, () => composite.onClose()).message).toBe(
+            'org.agrona.concurrent.CompositeAgent: underlying agent error on close',
+        );
     });
 });

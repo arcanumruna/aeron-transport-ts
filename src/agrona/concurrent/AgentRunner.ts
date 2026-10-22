@@ -153,7 +153,7 @@ export class AgentRunner implements AutoCloseable {
      */
     public static startOnThread(runner: AgentRunner): Thread {
         runner.run();
-        return runner.thread() ?? AgentRunner.TOMBSTONE;
+        return runner.runnerThread ?? AgentRunner.TOMBSTONE;
     }
 
     /**
@@ -282,16 +282,18 @@ export class AgentRunner implements AutoCloseable {
 
             // Thread.join would throw InterruptedException, clearing the flag, if this thread were interrupted
             const wasInterrupted = Thread.interrupted();
-            if (wasInterrupted) {
-                this.failAction(closeFailAction, thread, 'close interrupted');
-                thread.interrupt();
-            }
+            try {
+                if (wasInterrupted && !thread.isInterrupted()) {
+                    this.failAction(closeFailAction, thread, 'close interrupted');
+                    thread.interrupt();
+                }
 
-            // the join: the loop ends now, as it would after the thread saw isRunning == false
-            this.terminate();
-
-            if (wasInterrupted) {
-                Thread.currentThread().interrupt();
+                // the join: the loop ends now, as it would after the thread saw isRunning == false
+                this.terminate();
+            } finally {
+                if (wasInterrupted) {
+                    Thread.currentThread().interrupt();
+                }
             }
         }
     }
