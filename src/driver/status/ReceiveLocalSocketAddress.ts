@@ -1,0 +1,59 @@
+/*
+ * Copyright 2014-2025 Real Logic Limited.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Modified: ported to TypeScript for aeron-transport-ts.
+ */
+// Port of io/aeron/driver/status/ReceiveLocalSocketAddress.java @ 1.53.3
+import { type MutableDirectBuffer } from '../../agrona/MutableDirectBuffer.js';
+import { type AtomicCounter } from '../../agrona/concurrent/status/AtomicCounter.js';
+import { type CountersManager } from '../../agrona/concurrent/status/CountersManager.js';
+import { LocalSocketAddressStatus } from '../../client/status/LocalSocketAddressStatus.js';
+
+/**
+ * The receiving end of a local socket address, i.e. the destination or endpoint for a subscription.
+ */
+export class ReceiveLocalSocketAddress {
+    /**
+     * The human-readable name for the beginning of a label.
+     */
+    public static readonly NAME = 'rcv-local-sockaddr';
+
+    private constructor() {}
+
+    /**
+     * Allocate a counter to represent a local socket address associated with a receiving channel.
+     *
+     * @param tempBuffer      for building up the key and label.
+     * @param countersManager which will allocate the counter.
+     * @param registrationId  of the action the counter is associated with.
+     * @param channelStatusId with which the new counter is associated.
+     * @return the allocated counter.
+     */
+    public static allocate(
+        tempBuffer: MutableDirectBuffer,
+        countersManager: CountersManager,
+        registrationId: number,
+        channelStatusId: number,
+    ): AtomicCounter {
+        return LocalSocketAddressStatus.allocate(
+            tempBuffer,
+            countersManager,
+            registrationId,
+            channelStatusId,
+            ReceiveLocalSocketAddress.NAME,
+            LocalSocketAddressStatus.LOCAL_SOCKET_ADDRESS_STATUS_TYPE_ID,
+        );
+    }
+}
