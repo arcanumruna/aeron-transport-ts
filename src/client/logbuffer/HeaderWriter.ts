@@ -27,13 +27,18 @@ const { FRAME_LENGTH_FIELD_OFFSET, VERSION_FIELD_OFFSET } = HeaderFlyweight;
 /**
  * Utility for applying a header to a message in a term buffer.
  * <p>
- * Java's version is thread safe, to be used across multiple producers, and makes the header visible in the correct
- * order for consumers. Here there is one thread, and the frame length, the field a consumer reads first, is written
- * last.
+ * Java's version is thread safe, to be used across multiple producers. It stores word 1 (the frame length in the
+ * lower half and version, flags and type in the upper half) with `putLongRelease`, then `storeStoreFence`, then the
+ * other two 8-byte words with plain stores. Here there is one thread: the frame length, the field a consumer reads
+ * first, is stored last of the two halves of word 1 with a release store, and it completes word 1 before the other
+ * fields are written.
  * <p>
  * Java holds three `long` values, each an `int` of the default header shifted into the upper half of a `long` (or
  * the stream id in the lower half) for the three 8-byte stores of its `write`. A `long` that large cannot be a
- * `number` (spec D5), so each field is the `int` itself and `write` stores the two halves of every 8-byte word.
+ * `number` (spec D5), so each field is the `int` itself and `write` stores the two halves of every 8-byte word, the
+ * upper half first. A word that does not fit in the buffer then fails on its first store and writes nothing, as
+ * Java's single bounds-checked `long` store does: the bytes written before the exception are those of the words
+ * before the failing one.
  */
 export class HeaderWriter {
     /** The `int` of the default header at the version offset: version, flags and type. */
@@ -75,12 +80,16 @@ export class HeaderWriter {
      * @param termId     of the current term buffer.
      */
     public write(termBuffer: UnsafeBuffer, offset: number, length: number, termId: number): void {
+        // word 1: version, flags and type (upper half), then the frame length (lower half) as the release store
         termBuffer.putInt(offset + VERSION_FIELD_OFFSET, this.versionFlagsType);
         termBuffer.putIntRelease(offset + FRAME_LENGTH_FIELD_OFFSET, -length);
 
-        termBuffer.putInt(offset + TERM_OFFSET_FIELD_OFFSET, offset);
+        // word 2: session id (upper half), then term offset (lower half)
         termBuffer.putInt(offset + SESSION_ID_FIELD_OFFSET, this.sessionId);
-        termBuffer.putInt(offset + STREAM_ID_FIELD_OFFSET, this.streamId);
+        termBuffer.putInt(offset + TERM_OFFSET_FIELD_OFFSET, offset);
+
+        // word 3: term id (upper half), then stream id (lower half)
         termBuffer.putInt(offset + TERM_ID_FIELD_OFFSET, termId);
+        termBuffer.putInt(offset + STREAM_ID_FIELD_OFFSET, this.streamId);
     }
 }

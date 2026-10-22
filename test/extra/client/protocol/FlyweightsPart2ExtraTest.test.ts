@@ -214,13 +214,31 @@ describe('RttMeasurementFlyweight extra', () => {
         });
     }
 
-    it('a bigint outside 64 bits wraps as a Java long does', () => {
+    it('a bigint outside 64 bits throws RangeError and leaves the slot unchanged (spec D5)', () => {
         const flyweight = new RttMeasurementFlyweight(new Uint8Array(LENGTH));
+        flyweight.receiverId(7n);
 
-        flyweight.receiverId(2n ** 63n);
+        expect(() => flyweight.receiverId(2n ** 63n)).toThrow(RangeError);
 
-        expect(flyweight.receiverId()).toBe(-(2n ** 63n));
+        expect(flyweight.receiverId()).toBe(7n);
     });
+
+    for (const [name, offset, get, set] of LONG_FIELDS) {
+        it.each([2n ** 63n, -(2n ** 63n) - 1n, 2n ** 64n])(
+            `${name}OutsideInt64ThrowsAndWritesNothingRegression %d`,
+            (bad) => {
+                const flyweight = new RttMeasurementFlyweight(new Uint8Array(LENGTH));
+                set(flyweight, 0x0102030405060708n);
+                const before = bytesOf(flyweight, LENGTH);
+
+                expect(() => set(flyweight, bad)).toThrow(RangeError);
+
+                expect(bytesOf(flyweight, LENGTH)).toEqual(before);
+                expect(get(flyweight)).toBe(0x0102030405060708n);
+                expect(offset).toBeGreaterThan(0);
+            },
+        );
+    }
 
     it('the reply flag and each header field are independent of the body', () => {
         const flyweight = new RttMeasurementFlyweight(new Uint8Array(LENGTH));
@@ -338,6 +356,38 @@ describe('ErrorFlyweight extra', () => {
         expected.splice(16, 8, ...longLE(value));
         expect(bytesOf(flyweight, LENGTH)).toEqual(expected);
     });
+
+    it.each([2n ** 63n, -(2n ** 63n) - 1n, 2n ** 64n])(
+        'receiverIdOutsideInt64ThrowsAndWritesNothingRegression %d',
+        (bad) => {
+            const flyweight = new ErrorFlyweight(new Uint8Array(LENGTH));
+            flyweight.receiverId(0x0102030405060708n);
+            const before = bytesOf(flyweight, LENGTH);
+
+            expect(() => flyweight.receiverId(bad)).toThrow(RangeError);
+
+            expect(bytesOf(flyweight, LENGTH)).toEqual(before);
+            expect(flyweight.receiverId()).toBe(0x0102030405060708n);
+        },
+    );
+
+    it.each([2n ** 63n, -(2n ** 63n) - 1n, 2n ** 64n])(
+        'groupTagOutsideInt64ThrowsBeforeAnyWriteRegression %d',
+        (bad) => {
+            const flyweight = new ErrorFlyweight(new Uint8Array(LENGTH));
+            flyweight.groupTag(0x0102030405060708n);
+            flyweight.groupTag(null);
+            const before = bytesOf(flyweight, LENGTH);
+            expect(flyweight.hasGroupTag()).toBe(false);
+
+            expect(() => flyweight.groupTag(bad)).toThrow(RangeError);
+
+            // neither the slot nor the flag changed
+            expect(bytesOf(flyweight, LENGTH)).toEqual(before);
+            expect(flyweight.hasGroupTag()).toBe(false);
+            expect(flyweight.groupTag()).toBe(0x0102030405060708n);
+        },
+    );
 
     it.each(LONGS)('groupTag %d is a little-endian bigint at offset 24 and sets the flag', (value) => {
         const flyweight = new ErrorFlyweight(new Uint8Array(LENGTH));

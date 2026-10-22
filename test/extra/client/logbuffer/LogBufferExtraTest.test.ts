@@ -276,6 +276,102 @@ describe('LogBufferDescriptor extra: positions', () => {
     });
 });
 
+describe('LogBufferDescriptor extra: bigint long setters', () => {
+    const BAD = [2n ** 63n, -(2n ** 63n) - 1n, 2n ** 64n, -(2n ** 64n)];
+    const GOOD = [2n ** 63n - 1n, -(2n ** 63n), 0n, -1n];
+    const SENTINEL = 0x0102030405060708n;
+
+    function metadata(): UnsafeBuffer {
+        return new UnsafeBuffer(new ArrayBuffer(LogBufferDescriptor.LOG_META_DATA_LENGTH));
+    }
+
+    function snapshot(buffer: UnsafeBuffer): number[] {
+        const out: number[] = [];
+        for (let i = 0; i < buffer.capacity(); i++) {
+            out.push(buffer.getByte(i));
+        }
+        return out;
+    }
+
+    const SETTERS: ReadonlyArray<
+        [string, (buffer: UnsafeBuffer, value: bigint) => void, (buffer: UnsafeBuffer) => bigint]
+    > = [
+        [
+            'correlationId',
+            (b, v) => LogBufferDescriptor.correlationId(b, v),
+            (b) => LogBufferDescriptor.correlationId(b),
+        ],
+        ['entityTag', (b, v) => LogBufferDescriptor.entityTag(b, v), (b) => LogBufferDescriptor.entityTag(b)],
+        [
+            'responseCorrelationId',
+            (b, v) => LogBufferDescriptor.responseCorrelationId(b, v),
+            (b) => LogBufferDescriptor.responseCorrelationId(b),
+        ],
+        ['rawTail', (b, v) => LogBufferDescriptor.rawTail(b, 1, v), (b) => LogBufferDescriptor.rawTail(b, 1)],
+        [
+            'rawTailVolatile',
+            (b, v) => LogBufferDescriptor.rawTailVolatile(b, 1, v),
+            (b) => LogBufferDescriptor.rawTailVolatile(b, 1),
+        ],
+        [
+            'casRawTail',
+            (b, v) => {
+                LogBufferDescriptor.casRawTail(b, 1, LogBufferDescriptor.rawTail(b, 1), v);
+            },
+            (b) => LogBufferDescriptor.rawTail(b, 1),
+        ],
+    ];
+
+    for (const [name, set, get] of SETTERS) {
+        it.each(BAD)(`${name}OutsideInt64ThrowsAndLeavesTheSlotUnchangedRegression %d`, (bad) => {
+            const buffer = metadata();
+            set(buffer, SENTINEL);
+            const before = snapshot(buffer);
+
+            expect(() => set(buffer, bad)).toThrow(RangeError);
+
+            expect(snapshot(buffer)).toEqual(before);
+            expect(get(buffer)).toBe(SENTINEL);
+        });
+
+        it.each(GOOD)(`${name} stores the int64 bound %d`, (value) => {
+            const buffer = metadata();
+
+            set(buffer, value);
+
+            expect(get(buffer)).toBe(value);
+        });
+    }
+
+    it('casRawTailChecksTheUpdateBeforeTheCompareRegression', () => {
+        const buffer = metadata();
+        LogBufferDescriptor.rawTail(buffer, 2, SENTINEL);
+        const before = snapshot(buffer);
+
+        for (const bad of BAD) {
+            // matching expected value: still nothing written
+            expect(() => LogBufferDescriptor.casRawTail(buffer, 2, SENTINEL, bad)).toThrow(RangeError);
+            // non-matching expected value: still throws, rather than returning false
+            expect(() => LogBufferDescriptor.casRawTail(buffer, 2, 1n, bad)).toThrow(RangeError);
+        }
+
+        expect(snapshot(buffer)).toEqual(before);
+    });
+
+    it.each(BAD)('BufferClaimReservedValueOutsideInt64ThrowsAndWritesNothingRegression %d', (bad) => {
+        const term = new UnsafeBuffer(new Uint8Array(256).fill(0xa5));
+        const claim = new BufferClaim();
+        claim.wrap(term, 64, 128);
+        claim.reservedValue(SENTINEL);
+        const before = snapshot(term);
+
+        expect(() => claim.reservedValue(bad)).toThrow(RangeError);
+
+        expect(snapshot(term)).toEqual(before);
+        expect(claim.reservedValue()).toBe(SENTINEL);
+    });
+});
+
 describe('LogBufferDescriptor extra: raw tail', () => {
     const TERM_IDS = [0, 1, -1, INT32_MAX, INT32_MIN, 5, -5, 123456789];
     const OFFSETS = [0, 1, 32, 65536, 1024 * 1024 * 1024, INT32_MAX];
@@ -301,6 +397,12 @@ describe('LogBufferDescriptor extra: raw tail', () => {
         expect(LogBufferDescriptor.termOffset(overrun, 65536)).toBe(65536);
         expect(LogBufferDescriptor.termOffset(overrun, 2 ** 30)).toBe(2 ** 30);
         expect(LogBufferDescriptor.termOffset(overrun)).toBe(-16);
+    });
+
+    it('packTail takes Java int arguments: a number beyond 32 bits is cut to an int (Regression)', () => {
+        expect(LogBufferDescriptor.packTail(1, 2 ** 32)).toBe(LogBufferDescriptor.packTail(1, 0));
+        expect(LogBufferDescriptor.packTail(2 ** 32 + 5, 7)).toBe(LogBufferDescriptor.packTail(5, 7));
+        expect(LogBufferDescriptor.packTail(INT32_MAX + 1, 0)).toBe(LogBufferDescriptor.packTail(INT32_MIN, 0));
     });
 
     it('packTail with a negative term offset sign-extends as Java does', () => {
@@ -926,6 +1028,46 @@ describe('HeaderWriter extra', () => {
         expect(FrameDescriptor.frameLength(term, 32)).toBe(INT32_MIN);
         writer.write(term, 32, 0, 7);
         expect(FrameDescriptor.frameLength(term, 32)).toBe(0);
+    });
+
+    it('aHeaderCutByTheBufferEndWritesWhatJavasLongStoresWouldRegression', () => {
+        // Java stores three 8-byte words at [0, 8), [8, 16) and [16, 24) with bounds-checked long stores: a word that
+        // does not fit throws before writing any of its bytes, and the words before it are fully written. The buffer
+        // is cut at every capacity, with the frame at offset 0 and at offset 8, which is not 8-byte aligned in the
+        // term but is word-aligned relative to the frame.
+        const defaultHeader = new UnsafeBuffer(new Uint8Array(32));
+        defaultHeader.putInt(4, 0x01c00000);
+        defaultHeader.putInt(12, -3);
+        defaultHeader.putInt(16, 99);
+        const writer = HeaderWriter.newInstance(defaultHeader);
+
+        for (const offset of [0, 8, 32]) {
+            for (let capacity = 0; capacity <= offset + 28; capacity++) {
+                const full = new UnsafeBuffer(new Uint8Array(offset + 32).fill(0xff));
+                writer.write(full, offset, 64, 7);
+
+                const backing = new Uint8Array(offset + 32).fill(0xff);
+                const cut = new UnsafeBuffer(new Uint8Array(backing.buffer, 0, capacity));
+                const fullWords = Math.max(0, Math.min(3, Math.floor((capacity - offset) / 8)));
+                const fits = fullWords === 3;
+                if (fits) {
+                    writer.write(cut, offset, 64, 7);
+                } else {
+                    expect(
+                        () => writer.write(cut, offset, 64, 7),
+                        'offset ' + offset + ' capacity ' + capacity,
+                    ).toThrow();
+                }
+
+                for (let b = 0; b < backing.length; b++) {
+                    const inWritten = b >= offset && b < offset + 8 * fullWords;
+                    const expected = inWritten ? full.getByte(b) : 0xff;
+                    expect((backing[b] ?? -1) & 0xff, 'offset ' + offset + ' capacity ' + capacity + ' byte ' + b).toBe(
+                        expected & 0xff,
+                    );
+                }
+            }
+        }
     });
 
     it('write at the end of the buffer throws and writes nothing past it', () => {

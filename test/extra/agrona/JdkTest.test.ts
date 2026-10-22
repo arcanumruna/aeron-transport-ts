@@ -259,6 +259,11 @@ describe('newStringAscii', () => {
 describe('TimeUnit', () => {
     it('toNanosSaturates', () => {
         expect(TimeUnit.NANOSECONDS.toNanos(5)).toBe(5);
+        expect(TimeUnit.MINUTES.toNanos(1)).toBe(60e9);
+        expect(TimeUnit.DAYS.toNanos(1)).toBe(86.4e12);
+        expect(TimeUnit.DAYS.toNanos(104)).toBe(8985600000000000);
+        expect(TimeUnit.DAYS.toNanos(105)).toBe(Long.MAX_VALUE);
+        expect(TimeUnit.DAYS.toNanos(106752)).toBe(Long.MAX_VALUE);
         expect(TimeUnit.MICROSECONDS.toNanos(5)).toBe(5000);
         expect(TimeUnit.MILLISECONDS.toNanos(5)).toBe(5_000_000);
         expect(TimeUnit.SECONDS.toNanos(5)).toBe(5_000_000_000);

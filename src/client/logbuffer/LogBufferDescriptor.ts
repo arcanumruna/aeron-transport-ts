@@ -19,7 +19,7 @@
 import { BitUtil } from '../../agrona/BitUtil.js';
 import { UnsafeBuffer } from '../../agrona/concurrent/UnsafeBuffer.js';
 import type { DirectBuffer } from '../../agrona/DirectBuffer.js';
-import { ArithmeticException, IllegalArgumentException, IllegalStateException } from '../../agrona/jdk.js';
+import { ArithmeticException, IllegalArgumentException, IllegalStateException, Long } from '../../agrona/jdk.js';
 import { DataHeaderFlyweight } from '../protocol/DataHeaderFlyweight.js';
 import { FrameDescriptor } from './FrameDescriptor.js';
 
@@ -612,7 +612,7 @@ export class LogBufferDescriptor {
             return metadataBuffer.getLongBigInt(LogBufferDescriptor.LOG_CORRELATION_ID_OFFSET);
         }
 
-        metadataBuffer.putLongBigInt(LogBufferDescriptor.LOG_CORRELATION_ID_OFFSET, value);
+        metadataBuffer.putLongBigInt(LogBufferDescriptor.LOG_CORRELATION_ID_OFFSET, Long.checkInt64(value));
     }
 
     /**
@@ -1048,7 +1048,7 @@ export class LogBufferDescriptor {
      * @return the packed value.
      */
     public static packTail(termId: number, termOffset: number): bigint {
-        return BigInt.asIntN(64, (BigInt(termId) << 32n) | BigInt(termOffset));
+        return BigInt.asIntN(64, (BigInt(termId | 0) << 32n) | BigInt(termOffset | 0));
     }
 
     /**
@@ -1076,7 +1076,7 @@ export class LogBufferDescriptor {
 
         metadataBuffer.putLongBigInt(
             LogBufferDescriptor.TERM_TAIL_COUNTERS_OFFSET + SIZE_OF_LONG * partitionIndex,
-            rawTail,
+            Long.checkInt64(rawTail),
         );
     }
 
@@ -1121,7 +1121,7 @@ export class LogBufferDescriptor {
 
         metadataBuffer.putLongBigInt(
             LogBufferDescriptor.TERM_TAIL_COUNTERS_OFFSET + SIZE_OF_LONG * partitionIndex,
-            rawTail,
+            Long.checkInt64(rawTail),
         );
     }
 
@@ -1143,6 +1143,8 @@ export class LogBufferDescriptor {
         expectedRawTail: bigint,
         updateRawTail: bigint,
     ): boolean {
+        // checked before the compare, so a bad value writes nothing (spec D5)
+        Long.checkInt64(updateRawTail);
         const index = LogBufferDescriptor.TERM_TAIL_COUNTERS_OFFSET + SIZE_OF_LONG * partitionIndex;
         if (metadataBuffer.getLongBigInt(index) === expectedRawTail) {
             metadataBuffer.putLongBigInt(index, updateRawTail);
@@ -1713,7 +1715,7 @@ export class LogBufferDescriptor {
             return metadataBuffer.getLongBigInt(LogBufferDescriptor.LOG_ENTITY_TAG_OFFSET);
         }
 
-        metadataBuffer.putLongBigInt(LogBufferDescriptor.LOG_ENTITY_TAG_OFFSET, value);
+        metadataBuffer.putLongBigInt(LogBufferDescriptor.LOG_ENTITY_TAG_OFFSET, Long.checkInt64(value));
     }
 
     /**
@@ -1735,7 +1737,7 @@ export class LogBufferDescriptor {
             return metadataBuffer.getLongBigInt(LogBufferDescriptor.LOG_RESPONSE_CORRELATION_ID_OFFSET);
         }
 
-        metadataBuffer.putLongBigInt(LogBufferDescriptor.LOG_RESPONSE_CORRELATION_ID_OFFSET, value);
+        metadataBuffer.putLongBigInt(LogBufferDescriptor.LOG_RESPONSE_CORRELATION_ID_OFFSET, Long.checkInt64(value));
     }
 
     /**

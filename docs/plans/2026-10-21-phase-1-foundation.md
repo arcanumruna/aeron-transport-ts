@@ -117,8 +117,10 @@ Paths below are relative to `aeron-client/src/{main,test}/java/io/aeron/` (Aeron
   ControlledFragmentHandler, BlockHandler, RawBlockHandler, BufferClaim}`.
 - `ControlledFragmentHandler.Action` keeps its ordinal order (`ABORT`, `BREAK`, `COMMIT`, `CONTINUE`).
 - Positions use `number`; `computePosition`, `computeTermIdFromPosition`, `rawTail*` keep Java's int wrapping with
-  `| 0` exactly where Java truncates. `rawTail` (term id in the high 32 bits, offset in the low 32) is held as two
-  `int` halves of the 64-bit metadata slot, read/written with the same method names.
+  `| 0` exactly where Java truncates. `rawTail` (term id in the high 32 bits, offset in the low 32) is a `bigint` at the Java method names
+  (`packTail`, `rawTail`, `rawTailVolatile`, `casRawTail`, `termId`, `termOffset`, spec D12); the slot is two
+  little-endian `int` halves, and the per-message paths use `initialiseTailWithTermId`, `rawTailTermId` and
+  `rawTailTermOffset`, which read and write the halves without a `bigint`.
 - Tests: `logbuffer/HeaderTest` (6), `logbuffer/HeaderWriterTest` (2), `logbuffer/LogBufferDescriptorTest` (4).
 - Replace the T7 stand-ins: switch `NakFlyweight` and `StatusMessageFlyweight` from their local `FRAME_ALIGNMENT` to
   `FrameDescriptor.isFrameAligned`, and the two ported tests (`NakFlyweightTest`, `StatusMessageFlyweightTest`) from

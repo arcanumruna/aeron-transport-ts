@@ -18,12 +18,10 @@
 // Port of io/aeron/protocol/NakFlyweight.java @ 1.53.3
 import { UnsafeBuffer } from '../../agrona/concurrent/UnsafeBuffer.js';
 import { ByteOrder } from '../../agrona/jdk.js';
+import { FrameDescriptor } from '../logbuffer/FrameDescriptor.js';
 import { HeaderFlyweight } from './HeaderFlyweight.js';
 
 const { LITTLE_ENDIAN } = ByteOrder;
-
-// FrameDescriptor.FRAME_ALIGNMENT: FrameDescriptor is ported in T9, which replaces this with its isFrameAligned.
-const FRAME_ALIGNMENT = 32;
 
 /**
  * Flyweight for a NAK Message Frame.
@@ -200,7 +198,7 @@ export class NakFlyweight extends HeaderFlyweight {
         return (
             termOffset >= 0 &&
             termOffset < termLength &&
-            0 === (termOffset & (FRAME_ALIGNMENT - 1)) &&
+            FrameDescriptor.isFrameAligned(termOffset) &&
             length >= 0 &&
             termOffset + length <= termLength
         );

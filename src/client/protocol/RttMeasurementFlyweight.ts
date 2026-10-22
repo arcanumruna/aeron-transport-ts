@@ -17,7 +17,7 @@
  */
 // Port of io/aeron/protocol/RttMeasurementFlyweight.java @ 1.53.3
 import { UnsafeBuffer } from '../../agrona/concurrent/UnsafeBuffer.js';
-import { ByteOrder } from '../../agrona/jdk.js';
+import { ByteOrder, Long } from '../../agrona/jdk.js';
 import { HeaderFlyweight } from './HeaderFlyweight.js';
 
 const { LITTLE_ENDIAN } = ByteOrder;
@@ -139,7 +139,11 @@ export class RttMeasurementFlyweight extends HeaderFlyweight {
             return this.getLongBigInt(RttMeasurementFlyweight.ECHO_TIMESTAMP_FIELD_OFFSET, LITTLE_ENDIAN);
         }
 
-        this.putLongBigInt(RttMeasurementFlyweight.ECHO_TIMESTAMP_FIELD_OFFSET, timestampNs, LITTLE_ENDIAN);
+        this.putLongBigInt(
+            RttMeasurementFlyweight.ECHO_TIMESTAMP_FIELD_OFFSET,
+            Long.checkInt64(timestampNs),
+            LITTLE_ENDIAN,
+        );
 
         return this;
     }
@@ -162,7 +166,11 @@ export class RttMeasurementFlyweight extends HeaderFlyweight {
             return this.getLongBigInt(RttMeasurementFlyweight.RECEPTION_DELTA_FIELD_OFFSET, LITTLE_ENDIAN);
         }
 
-        this.putLongBigInt(RttMeasurementFlyweight.RECEPTION_DELTA_FIELD_OFFSET, deltaNs, LITTLE_ENDIAN);
+        this.putLongBigInt(
+            RttMeasurementFlyweight.RECEPTION_DELTA_FIELD_OFFSET,
+            Long.checkInt64(deltaNs),
+            LITTLE_ENDIAN,
+        );
 
         return this;
     }
@@ -185,7 +193,7 @@ export class RttMeasurementFlyweight extends HeaderFlyweight {
             return this.getLongBigInt(RttMeasurementFlyweight.RECEIVER_ID_FIELD_OFFSET, LITTLE_ENDIAN);
         }
 
-        this.putLongBigInt(RttMeasurementFlyweight.RECEIVER_ID_FIELD_OFFSET, id, LITTLE_ENDIAN);
+        this.putLongBigInt(RttMeasurementFlyweight.RECEIVER_ID_FIELD_OFFSET, Long.checkInt64(id), LITTLE_ENDIAN);
 
         return this;
     }

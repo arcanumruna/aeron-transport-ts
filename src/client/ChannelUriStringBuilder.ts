@@ -19,14 +19,9 @@
 import { IllegalArgumentException, Integer, Long, NullPointerException, NumberFormatException } from '../agrona/jdk.js';
 import { SystemUtil } from '../agrona/SystemUtil.js';
 import { ChannelUri } from './ChannelUri.js';
-import {
-    FRAME_ALIGNMENT,
-    TERM_MAX_LENGTH,
-    checkTermLength,
-    computeTermIdFromPosition,
-    positionBitsToShift,
-} from './ChannelUriLogBuffer.js';
 import { CommonContext } from './CommonContext.js';
+import { FrameDescriptor } from './logbuffer/FrameDescriptor.js';
+import { LogBufferDescriptor } from './logbuffer/LogBufferDescriptor.js';
 
 const {
     ALIAS_PARAM_NAME,
@@ -578,7 +573,7 @@ export class ChannelUriStringBuilder {
                 throw new IllegalArgumentException('MTU not in range 32-65504: ' + mtu);
             }
 
-            if ((mtu & (FRAME_ALIGNMENT - 1)) !== 0) {
+            if ((mtu & (FrameDescriptor.FRAME_ALIGNMENT - 1)) !== 0) {
                 throw new IllegalArgumentException('MTU not a multiple of FRAME_ALIGNMENT: mtu=' + mtu);
             }
         }
@@ -611,7 +606,10 @@ export class ChannelUriStringBuilder {
                 const value = SystemUtil.parseSize(TERM_LENGTH_PARAM_NAME, termLengthValue);
                 if (value > Integer.MAX_VALUE) {
                     throw new IllegalArgumentException(
-                        'term length more than max length of ' + TERM_MAX_LENGTH + ': value=' + value,
+                        'term length more than max length of ' +
+                            LogBufferDescriptor.TERM_MAX_LENGTH +
+                            ': value=' +
+                            value,
                     );
                 }
 
@@ -620,7 +618,7 @@ export class ChannelUriStringBuilder {
         }
 
         if (null !== termLength) {
-            checkTermLength(termLength);
+            LogBufferDescriptor.checkTermLength(termLength);
         }
 
         this._termLength = termLength;
@@ -729,11 +727,11 @@ export class ChannelUriStringBuilder {
         }
 
         if (null !== termOffset) {
-            if (termOffset < 0 || termOffset > TERM_MAX_LENGTH) {
+            if (termOffset < 0 || termOffset > LogBufferDescriptor.TERM_MAX_LENGTH) {
                 throw new IllegalArgumentException('term offset not in range 0-1g: ' + termOffset);
             }
 
-            if (0 !== (termOffset & (FRAME_ALIGNMENT - 1))) {
+            if (0 !== (termOffset & (FrameDescriptor.FRAME_ALIGNMENT - 1))) {
                 throw new IllegalArgumentException('term offset not multiple of FRAME_ALIGNMENT: ' + termOffset);
             }
         }
@@ -827,7 +825,7 @@ export class ChannelUriStringBuilder {
             }
         }
 
-        this._linger = ChannelUriStringBuilder.requireNonNegative(lingerNs, LINGER_PARAM_NAME);
+        this._linger = ChannelUriStringBuilder.requireNonNegativeLong(lingerNs, LINGER_PARAM_NAME);
         return this;
     }
 
@@ -1082,6 +1080,10 @@ export class ChannelUriStringBuilder {
     public taggedFlowControl(groupTag: bigint | null, minGroupSize: number | null, timeout: string | null): this {
         let flowControlValue = 'tagged';
 
+        if (null !== groupTag) {
+            Long.checkInt64(groupTag);
+        }
+
         if (null !== groupTag || null !== minGroupSize) {
             flowControlValue += ',g:';
 
@@ -1155,6 +1157,10 @@ export class ChannelUriStringBuilder {
                 // an opaque 64-bit wire value, held as a bigint (spec 5.2)
                 return this.groupTag(value);
             }
+        }
+
+        if (null !== groupTag) {
+            Long.checkInt64(groupTag);
         }
 
         this._groupTag = groupTag;
@@ -1232,16 +1238,16 @@ export class ChannelUriStringBuilder {
             throw new IllegalArgumentException('invalid position=' + position + ' < 0');
         }
 
-        if (0 !== Long.and(position, FRAME_ALIGNMENT - 1)) {
+        if (0 !== Long.and(position, FrameDescriptor.FRAME_ALIGNMENT - 1)) {
             throw new IllegalArgumentException(
-                'invalid position=' + position + ' does not have frame alignment=' + FRAME_ALIGNMENT,
+                'invalid position=' + position + ' does not have frame alignment=' + FrameDescriptor.FRAME_ALIGNMENT,
             );
         }
 
-        const bitsToShift = positionBitsToShift(termLength);
+        const bitsToShift = LogBufferDescriptor.positionBitsToShift(termLength);
 
         this._initialTermId = initialTermId;
-        this._termId = computeTermIdFromPosition(position, bitsToShift, initialTermId);
+        this._termId = LogBufferDescriptor.computeTermIdFromPosition(position, bitsToShift, initialTermId);
         this._termOffset = Long.and(position, termLength - 1) | 0;
         this._termLength = termLength;
 
@@ -1566,7 +1572,7 @@ export class ChannelUriStringBuilder {
         }
 
         if (typeof nakDelay === 'number') {
-            this._nakDelay = ChannelUriStringBuilder.requireNonNegative(nakDelay, NAK_DELAY_PARAM_NAME);
+            this._nakDelay = ChannelUriStringBuilder.requireNonNegativeLong(nakDelay, NAK_DELAY_PARAM_NAME);
             return this;
         }
 
@@ -1607,7 +1613,7 @@ export class ChannelUriStringBuilder {
             return this._untetheredWindowLimitTimeoutNs;
         }
 
-        this._untetheredWindowLimitTimeoutNs = ChannelUriStringBuilder.requireNonNegative(
+        this._untetheredWindowLimitTimeoutNs = ChannelUriStringBuilder.requireNonNegativeLong(
             timeout,
             UNTETHERED_WINDOW_LIMIT_TIMEOUT_PARAM_NAME,
         );
@@ -1646,7 +1652,7 @@ export class ChannelUriStringBuilder {
             return this._untetheredLingerTimeoutNs;
         }
 
-        this._untetheredLingerTimeoutNs = ChannelUriStringBuilder.requireNonNegative(
+        this._untetheredLingerTimeoutNs = ChannelUriStringBuilder.requireNonNegativeLong(
             timeout,
             UNTETHERED_LINGER_TIMEOUT_PARAM_NAME,
         );
@@ -1685,7 +1691,7 @@ export class ChannelUriStringBuilder {
             return this._untetheredRestingTimeoutNs;
         }
 
-        this._untetheredRestingTimeoutNs = ChannelUriStringBuilder.requireNonNegative(
+        this._untetheredRestingTimeoutNs = ChannelUriStringBuilder.requireNonNegativeLong(
             timeout,
             UNTETHERED_RESTING_TIMEOUT_PARAM_NAME,
         );
@@ -1938,15 +1944,19 @@ export class ChannelUriStringBuilder {
     }
 
     private static requireNonNegative(value: number | null, name: string): number | null {
-        if (null !== value) {
-            Long.checkSafe(value);
-        }
-
         if (null !== value && value < 0) {
             throw new IllegalArgumentException('`' + name + '` value cannot be negative: ' + value);
         }
 
         return value;
+    }
+
+    private static requireNonNegativeLong(value: number | null, name: string): number | null {
+        if (null !== value) {
+            Long.checkSafe(value);
+        }
+
+        return ChannelUriStringBuilder.requireNonNegative(value, name);
     }
 
     private static prefixTag(isTagged: boolean, value: number): string {

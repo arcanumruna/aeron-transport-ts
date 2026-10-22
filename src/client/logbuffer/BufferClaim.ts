@@ -19,7 +19,7 @@
 import type { AtomicBuffer } from '../../agrona/concurrent/AtomicBuffer.js';
 import { UnsafeBuffer } from '../../agrona/concurrent/UnsafeBuffer.js';
 import type { DirectBuffer } from '../../agrona/DirectBuffer.js';
-import { ByteOrder } from '../../agrona/jdk.js';
+import { ByteOrder, Long } from '../../agrona/jdk.js';
 import type { MutableDirectBuffer } from '../../agrona/MutableDirectBuffer.js';
 import { DataHeaderFlyweight } from '../protocol/DataHeaderFlyweight.js';
 import { HeaderFlyweight } from '../protocol/HeaderFlyweight.js';
@@ -158,7 +158,7 @@ export class BufferClaim {
             return this._buffer.getLongBigInt(RESERVED_VALUE_OFFSET, LITTLE_ENDIAN);
         }
 
-        this._buffer.putLongBigInt(RESERVED_VALUE_OFFSET, value, LITTLE_ENDIAN);
+        this._buffer.putLongBigInt(RESERVED_VALUE_OFFSET, Long.checkInt64(value), LITTLE_ENDIAN);
         return this;
     }
 
