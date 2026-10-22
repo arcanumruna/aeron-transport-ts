@@ -85,8 +85,10 @@ cross-worker stress tests; the message path allocates nothing in the port's own 
 8. **Counters API is out of scope.** `Aeron.addCounter`, `Counter`, `CounterLink` and the static counter
    commands are not ported (Rune does not use them); their tests are `it.skip`. The driver's own counters
    (`SystemCounters`, stream positions) are ported.
-9. **Built-in sets.** `ObjectHashSet` (the conductor's sets) and `LongHashSet` (`ClientConductor`) are JS `Set`s,
-   control-plane only, recorded in `docs/mapping.md`. `IntHashSet` is ported (the dispatcher uses it per packet).
+9. **Built-in sets.** `ObjectHashSet` (the driver conductor's `activeSessionSet`) is a JS `Set`, control-plane only,
+   recorded in `docs/mapping.md`. `IntHashSet` is ported (the dispatcher uses it per packet). `LongHashSet`
+   (`ClientConductor.asyncCommandIdSet`, `DriverEventsAdapter`) is ported as Agrona's generator writes it from
+   `IntHashSet` (amended in T5: one-to-one call sites at no cost).
 
 ## How every task is done (applies to all tasks)
 
@@ -163,10 +165,11 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
   allocates nothing.
 
 #### T2b — 64-bit counters on the two-slot sequence lock
-- Depends on T2. Implements the counters bullet of decision 4 in `UnsafeBufferPosition`, `AtomicCounter` and
-  `CountersReader` (shared buffers only; plain buffers keep phase 1's accesses).
+- Depends on T2. Implements the counters bullet of decision 4 in `UnsafeBufferPosition`, `AtomicCounter`,
+  `UnsafeBufferStatusIndicator` and `CountersReader` (shared buffers only; plain buffers keep phase 1's accesses).
 - Tests: the counters and position tests doubled over both backings; a cross-worker torn-read test on a position;
-  `expectNoAllocation` on `setRelease` + `getVolatile` and on `increment` over a shared counters buffer.
+  `expectNoAllocation` on `setRelease` + `getVolatile`, on `increment` and on the status indicator's `getVolatile`
+  over a shared counters buffer.
 
 #### T3 — Agrona ring buffers: `OneToOneRingBuffer`, `ManyToOneRingBuffer` (D16)
 - Sources: `concurrent/{MessageHandler, ControlledMessageHandler}`, `concurrent/ringbuffer/{RingBuffer,
@@ -270,6 +273,7 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
   `MultiSndDestination` (inside `SendChannelEndpoint`), `MultiRcvDestination` and `ReceiveDestinationTransport`
   are ported here because the endpoints reference them; their behaviour is tested in phase 3.
 - Tests: `SendChannelEndpointTest` (11), `ReceiveChannelEndpointTest` (2), `SelectorAndTransportTest` (6).
+- Channel timestamps via `EpochNanoClock.nanoTimeHalves` (D17).
 
 #### T14 — `DataPacketDispatcher` and setup handling
 - Sources: `DataPacketDispatcher`, `PendingSetupMessageFromSource`.
@@ -285,6 +289,7 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
 #### T16 — `PublicationImage`, `Receiver`
 - Sources: `PublicationImage`, `ReceiverProxy`, `Receiver`, `SubscriberPosition`.
 - Tests: `PublicationImageTest` (16), `ReceiverTest` (8).
+- Channel timestamps via `EpochNanoClock.nanoTimeHalves` (D17).
 
 #### T17 — Client-facing driver side: `ClientProxy`, `ClientCommandAdapter`, links, proxies
 - Sources: `ClientProxy`, `ClientCommandAdapter`, `CommandProxy`, `DriverConductorProxy`, `AeronClient`,
