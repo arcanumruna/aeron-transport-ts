@@ -71,9 +71,13 @@ export interface AtomicBuffer extends MutableDirectBuffer {
     putShortVolatile(index: number, value: number): void;
     getCharVolatile(index: number): number;
     putCharVolatile(index: number, value: number): void;
+    getByteVolatile(index: number): number;
+    putByteVolatile(index: number, value: number): void;
+
     /**
      * Port-only (spec D16): writes a `long` for readers on other threads that use {@link getLongVolatileSeq}, a
-     * sequence lock for one writer whose sequence `int` is at `seqIndex`. Allocates nothing. On a buffer that is not
+     * two-slot sequence lock for one writer: the 16 bytes at `index` are two slots and the sequence `int` at `seqIndex` names
+     * the published one. Allocates nothing. On a buffer that is not
      * shared it is a plain `putLong`.
      */
     putLongReleaseSeq(index: number, value: number, seqIndex: number): void;
@@ -81,9 +85,6 @@ export interface AtomicBuffer extends MutableDirectBuffer {
      * Port-only (spec D16): reads a `long` written with {@link putLongReleaseSeq}; never torn. Allocates nothing.
      */
     getLongVolatileSeq(index: number, seqIndex: number): number;
-
-    getByteVolatile(index: number): number;
-    putByteVolatile(index: number, value: number): void;
 }
 
 export const AtomicBuffer = {

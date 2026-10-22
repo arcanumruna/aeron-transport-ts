@@ -1,6 +1,6 @@
 // Tests the port adds (spec D16, 8.2): UnsafeBuffer over a SharedArrayBuffer, across worker_threads. The Java tests are
 // single threaded, so nothing else exercises the Atomics paths concurrently.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { BufferUtil } from '../../../../src/agrona/BufferUtil.js';
 import { UnsafeBuffer } from '../../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { IllegalArgumentException, Long, LongOverflowError } from '../../../../src/agrona/jdk.js';
@@ -134,19 +134,20 @@ describe('SharedAtomicsExtraTest', () => {
         let seq = 0;
         for (const value of values) {
             buffer.putLongReleaseSeq(VALUE, value, SEQ);
-            seq += 2;
+            seq += 1;
             expect(buffer.getLongVolatileSeq(VALUE, SEQ)).toBe(value);
             expect(buffer.getIntVolatile(SEQ)).toBe(seq);
         }
     });
 
-    it('sequenceLockWritesTheLittleEndianBytesOfPutLong', () => {
+    it('sequenceLockWritesTheLittleEndianBytesOfPutLongToThePublishedSlot', () => {
         const buffer = new UnsafeBuffer(newShared());
         const reference = new UnsafeBuffer(new Uint8Array(16));
         for (const value of [0, 1, -1, 2 ** 32, 2 ** 32 - 1, -(2 ** 32), 123456789012345, -Long.MAX_VALUE]) {
             buffer.putLongReleaseSeq(8, value, 0);
-            reference.putLong(8, value);
-            expect(buffer.getLong(8)).toBe(reference.getLong(8));
+            reference.putLong(0, value);
+            // the slot is the one the sequence names: slot 0 at 8 when even, slot 1 at 16 when odd
+            expect(buffer.getLong(8 + 8 * (buffer.getIntVolatile(0) & 1))).toBe(reference.getLong(0));
         }
     });
 
@@ -154,11 +155,14 @@ describe('SharedAtomicsExtraTest', () => {
         const buffer = new UnsafeBuffer(newShared());
         buffer.putIntVolatile(SEQ, 0x7ffffffe);
         buffer.putLongReleaseSeq(VALUE, 5, SEQ);
-        expect(buffer.getIntVolatile(SEQ)).toBe(-0x80000000);
+        expect(buffer.getIntVolatile(SEQ)).toBe(0x7fffffff);
         expect(buffer.getLongVolatileSeq(VALUE, SEQ)).toBe(5);
         buffer.putLongReleaseSeq(VALUE, 6, SEQ);
-        expect(buffer.getIntVolatile(SEQ)).toBe(-0x7ffffffe);
+        expect(buffer.getIntVolatile(SEQ)).toBe(-0x80000000);
         expect(buffer.getLongVolatileSeq(VALUE, SEQ)).toBe(6);
+        buffer.putLongReleaseSeq(VALUE, 7, SEQ);
+        expect(buffer.getIntVolatile(SEQ)).toBe(-0x7fffffff);
+        expect(buffer.getLongVolatileSeq(VALUE, SEQ)).toBe(7);
     });
 
     it('sequenceLockChecksTheRangeBeforeWritingAnything', () => {
@@ -166,12 +170,12 @@ describe('SharedAtomicsExtraTest', () => {
         buffer.putLongReleaseSeq(VALUE, 7, SEQ);
         expect(() => buffer.putLongReleaseSeq(VALUE, 2 ** 53, SEQ)).toThrow(RangeError);
         expect(() => buffer.putLongReleaseSeq(VALUE, Number.NaN, SEQ)).toThrow(RangeError);
-        expect(buffer.getIntVolatile(SEQ)).toBe(2);
+        expect(buffer.getIntVolatile(SEQ)).toBe(1);
         expect(buffer.getLongVolatileSeq(VALUE, SEQ)).toBe(7);
     });
 
     it('sequenceLockOnABufferThatIsNotSharedIsAPlainPutLongAndGetLong', () => {
-        const buffer = new UnsafeBuffer(new ArrayBuffer(16));
+        const buffer = new UnsafeBuffer(new ArrayBuffer(24));
         buffer.putLongReleaseSeq(8, 2 ** 40 + 5, 0);
         expect(buffer.getLongVolatileSeq(8, 0)).toBe(2 ** 40 + 5);
         expect(buffer.getLong(8)).toBe(2 ** 40 + 5);
@@ -180,9 +184,10 @@ describe('SharedAtomicsExtraTest', () => {
 
     it('sequenceLockBoundsChecksBothIndexes', () => {
         const buffer = new UnsafeBuffer(newShared());
-        expect(() => buffer.putLongReleaseSeq(CAPACITY - 4, 1, SEQ)).toThrow();
+        expect(() => buffer.putLongReleaseSeq(CAPACITY - 12, 1, SEQ)).toThrow(); // 16 bytes needed
+        expect(() => buffer.putLongReleaseSeq(CAPACITY - 16, 1, SEQ)).not.toThrow();
         expect(() => buffer.putLongReleaseSeq(VALUE, 1, CAPACITY - 2)).toThrow();
-        expect(() => buffer.getLongVolatileSeq(CAPACITY - 4, SEQ)).toThrow();
+        expect(() => buffer.getLongVolatileSeq(CAPACITY - 12, SEQ)).toThrow();
         expect(() => buffer.getLongVolatileSeq(VALUE, CAPACITY)).toThrow();
     });
 
@@ -366,6 +371,20 @@ describe('SharedAtomicsExtraTest', () => {
             }
             sink = acc;
         });
+        // F5: a long above 2^31 is a heap number whenever it crosses a call that is not inlined: the argument of the put and the
+        // result of the get, measured at exactly 2 per iteration
+        await expectNoAllocation(
+            (n) => {
+                let acc = 0;
+                for (let i = 0; i < n; i++) {
+                    buffer.putLongReleaseSeq(VALUE, 1_800_000_000_000 + i, SEQ);
+                    acc = (acc + buffer.getLongVolatileSeq(VALUE, SEQ)) | 0;
+                }
+                sink = acc;
+            },
+            undefined,
+            2,
+        );
         await expectNoAllocation((n) => {
             let acc = 0;
             for (let i = 0; i < n; i++) {
@@ -381,5 +400,121 @@ describe('SharedAtomicsExtraTest', () => {
             sink = acc;
         });
         expect(Number.isInteger(sink)).toBe(true);
+    });
+
+    // the slot that is not published: slot 0 at VALUE when the sequence is even, slot 1 at VALUE + 8 when it is odd
+    function unpublishedSlot(buffer: UnsafeBuffer): number {
+        return VALUE + 8 * ((buffer.getIntVolatile(SEQ) & 1) ^ 1);
+    }
+
+    it('aStalledWriterNeverBlocksTheSequenceLockReader', () => {
+        const buffer = new UnsafeBuffer(newShared());
+        buffer.putLongReleaseSeq(VALUE, 5, SEQ);
+        // a write that stopped after its halves and before its sequence: garbage in both halves of the unpublished slot
+        const slot = unpublishedSlot(buffer);
+        buffer.putInt(slot, 0x7bad7bad);
+        buffer.putInt(slot + 4, 0x7bad7bad);
+        expect(buffer.getLongVolatileSeq(VALUE, SEQ)).toBe(5);
+        expect(buffer.getIntVolatile(SEQ)).toBe(1);
+    });
+
+    it('aReaderReturnsWhileTheWriterIsStoppedMidWrite', async () => {
+        const sab = newShared();
+        const buffer = new UnsafeBuffer(sab);
+        buffer.putLongReleaseSeq(VALUE, 7, SEQ);
+        const slot = unpublishedSlot(buffer);
+        buffer.putInt(slot, -1);
+        buffer.putInt(slot + 4, 0x12345678);
+
+        const results = await runWorkers(
+            SCRIPT,
+            [{ kind: 'seq-read-stalled', buffer: sab, workers: 1, id: 0, iterations: 100_000 }],
+            TIMEOUT_MS,
+        );
+
+        expect((results[0] as number[]).length).toBe(100_000);
+        expect((results[0] as number[]).every((value) => value === 7)).toBe(true);
+    }, 30_000);
+
+    it('aZeroedBufferReadsZero', () => {
+        const buffer = new UnsafeBuffer(newShared());
+        expect(buffer.getLongVolatileSeq(VALUE, SEQ)).toBe(0);
+        expect(new UnsafeBuffer(new ArrayBuffer(CAPACITY)).getLongVolatileSeq(VALUE, SEQ)).toBe(0);
+    });
+
+    it('byteVolatileUsesAtomicsOnASharedBufferAndNotOtherwise', () => {
+        const buffer = new UnsafeBuffer(newShared());
+        buffer.putByteVolatile(20, -3);
+        expect(buffer.getByteVolatile(20)).toBe(-3);
+        expect(buffer.getByte(20)).toBe(-3);
+        buffer.putByteVolatile(21, 0x1ff);
+        expect(buffer.getByteVolatile(21)).toBe(-1);
+
+        const store = vi.spyOn(Atomics, 'store');
+        const load = vi.spyOn(Atomics, 'load');
+        try {
+            buffer.putByteVolatile(22, 1);
+            expect(store).toHaveBeenCalledTimes(1);
+            buffer.getByteVolatile(22);
+            expect(load).toHaveBeenCalledTimes(1);
+
+            store.mockClear();
+            load.mockClear();
+            const plain = new UnsafeBuffer(new ArrayBuffer(32));
+            plain.putByteVolatile(22, 1);
+            expect(plain.getByteVolatile(22)).toBe(1);
+            expect(store).not.toHaveBeenCalled();
+            expect(load).not.toHaveBeenCalled();
+        } finally {
+            store.mockRestore();
+            load.mockRestore();
+        }
+    });
+
+    it('alternatingBetweenTwoBuffersOverOneSharedArrayBufferAllocatesNothing', async () => {
+        const sab = new SharedArrayBuffer(128);
+        const a = new UnsafeBuffer(sab);
+        const b = new UnsafeBuffer(new Uint8Array(sab, 0, 64));
+        const f = new UnsafeBuffer();
+        let sink = 0;
+        await expectNoAllocation((n) => {
+            let acc = 0;
+            for (let i = 0; i < n; i++) {
+                f.wrap(i & 1 ? b : a, 8, 16);
+                acc = (acc + f.getIntVolatile(0)) | 0;
+            }
+            sink = acc;
+        });
+        expect(Number.isInteger(sink)).toBe(true);
+    });
+
+    it('aGrowableSharedArrayBufferIsRejected', () => {
+        const growable = new (
+            SharedArrayBuffer as unknown as new (
+                length: number,
+                options: { maxByteLength: number },
+            ) => SharedArrayBuffer
+        )(16, { maxByteLength: 64 });
+        expect(() => new UnsafeBuffer(growable)).toThrow(IllegalArgumentException);
+        expect(() => new UnsafeBuffer(growable)).toThrow('growable SharedArrayBuffer is not supported');
+    });
+
+    it('sequenceLockRejectsASeqIndexThatOverlapsTheTwoSlots', () => {
+        const buffer = new UnsafeBuffer(newShared());
+        const index = 32;
+        for (const seqIndex of [index - 3, index, index + 12, index + 15]) {
+            expect(() => buffer.putLongReleaseSeq(index, 1, seqIndex), 'put ' + seqIndex).toThrow(
+                'seqIndex overlaps the value: index=' + index + ' seqIndex=' + seqIndex,
+            );
+            expect(() => buffer.getLongVolatileSeq(index, seqIndex), 'get ' + seqIndex).toThrow(
+                IllegalArgumentException,
+            );
+        }
+        const plain = new UnsafeBuffer(new ArrayBuffer(CAPACITY));
+        expect(() => plain.putLongReleaseSeq(index, 1, index + 12)).toThrow(IllegalArgumentException);
+        expect(() => buffer.putLongReleaseSeq(index, 1, index - 4)).not.toThrow();
+        expect(() => buffer.getLongVolatileSeq(index, index + 16)).not.toThrow();
+        expect(() => buffer.putLongReleaseSeq(index, 1, index + 16)).not.toThrow();
+        expect(() => plain.getLongVolatileSeq(index, index - 4)).not.toThrow();
     });
 });

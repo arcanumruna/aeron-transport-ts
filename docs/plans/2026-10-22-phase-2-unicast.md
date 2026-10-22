@@ -46,9 +46,15 @@ cross-worker stress tests; the message path allocates nothing in the port's own 
      Every Java `long` comparison of two positions is written as a difference: `a > b` becomes `((a - b) | 0) > 0`.
      The `long` getters (`producerPosition`, `consumerPosition`, ...) return the wrapped value, a recorded
      difference.
-   - **Single-writer 64-bit values** that are not positions (the consumer heartbeat time) use a sequence lock: a
-     sequence `int` in the slot's cache-line padding, odd while a write is in progress; a reader retries until it
-     reads the same even sequence before and after. No allocation, and never torn.
+   - Single-writer 64-bit values use a two-slot sequence lock: the value's Java slot and the 8 bytes after it are two
+     slots, and a sequence `int` in the padding names the published one. The writer writes the slot that is not
+     published, then increments the sequence; a reader reads the sequence, the slot it names and the sequence again,
+     and retries only if a write completed meanwhile. A writer stopped mid-write never blocks a reader. No
+     allocation, never torn.
+   - **64-bit counter values** (positions, publisher limits, stream and system counters) on a shared counters buffer
+     use the same lock in the counter record's padding (slots at +0 and +8, sequence at +16). `UnsafeBufferPosition`,
+     `AtomicCounter` and `CountersReader` read and write them through it (task T2b). Every counter has one writer in
+     `INVOKER` and `SHARED` modes, so `AtomicCounter`'s add forms on a shared buffer read, add and publish.
    - **Multi-writer 64-bit counters on the control plane** (`nextCorrelationId`, one per command) use
      `Atomics.add` on a `BigInt64Array`. They allocate one `bigint` per command, which is control plane and
      recorded.
@@ -127,19 +133,25 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
 #### T2 — Shared memory in `UnsafeBuffer` / `AtomicBuffer` (D16)
 - `UnsafeBuffer` accepts a `SharedArrayBuffer` everywhere it accepts an `ArrayBuffer`. `BufferUtil
   .allocateDirectAligned` gains the addition `allocateShared(length, alignment)`.
-- When the backing store is shared (decided at `wrap`), the `int` and `short` `*Volatile`, `*Acquire`, `*Ordered`,
+- When the backing store is shared (decided at `wrap`), the `byte`, `short` and `int` `*Volatile`, `*Acquire`, `*Ordered`,
   `*Release`, `*Opaque`, `compareAndSet*`, `getAndAdd*`, `getAndSet*` use `Atomics` on `Int32Array` /
   `Int16Array` views (Agrona's alignment checks apply). The `long` forms on a shared buffer use `BigInt64Array`
   `Atomics` (exact; they allocate, so no per-message caller may use them; decision 4). Plain buffers keep phase
   1's code.
 - Additions for decision 4: `putLongReleaseSeq(index, value, seqIndex)` and `getLongVolatileSeq(index,
-  seqIndex)` (sequence lock).
+  seqIndex)` (two-slot sequence lock).
 - Tests: the phase 1 buffer suites (`MutableDirectBufferTests`, `UnsafeBufferTest`, `AtomicBufferTest`) run a
   second time over a `SharedArrayBuffer` (a factory parameter, no copy of the tests). Cross-worker tests in
   `test/extra/agrona/concurrent/SharedAtomicsExtraTest.test.ts`: 4 workers × 100k `compareAndSetInt` increments
   end exact; 4 workers × 100k `getAndAddInt` end exact; a sequence-lock writer stepping across every 2^32
   boundary in [0, 2^40) while 3 readers check every value they read was written (never torn); the sequence lock
   allocates nothing.
+
+#### T2b — 64-bit counters on the two-slot sequence lock
+- Depends on T2. Implements the counters bullet of decision 4 in `UnsafeBufferPosition`, `AtomicCounter` and
+  `CountersReader` (shared buffers only; plain buffers keep phase 1's accesses).
+- Tests: the counters and position tests doubled over both backings; a cross-worker torn-read test on a position;
+  `expectNoAllocation` on `setRelease` + `getVolatile` and on `increment` over a shared counters buffer.
 
 #### T3 — Agrona ring buffers: `OneToOneRingBuffer`, `ManyToOneRingBuffer` (D16)
 - Sources: `concurrent/{MessageHandler, ControlledMessageHandler}`, `concurrent/ringbuffer/{RingBuffer,

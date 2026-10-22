@@ -34,10 +34,9 @@ import { AtomicBuffer } from './AtomicBuffer.js';
 
 const { SIZE_OF_BYTE, SIZE_OF_CHAR, SIZE_OF_INT, SIZE_OF_LONG, SIZE_OF_SHORT } = BitUtil;
 
-// Atomics read and write in platform byte order, the buffers are little-endian (spec D16)
-if ('LE' !== endianness()) {
-    throw new Error('UnsafeBuffer on a SharedArrayBuffer needs a little-endian platform: ' + endianness());
-}
+// Atomics read and write in platform byte order, the buffers are little-endian (spec D16): checked when a
+// SharedArrayBuffer is first bound, so that a big-endian platform can still use ArrayBuffers
+const LITTLE_ENDIAN = 'LE' === endianness();
 
 const TWO_POW_32 = 4294967296;
 
@@ -79,7 +78,7 @@ function toLong(value: bigint): number {
  * <p>
  * Over an `ArrayBuffer` (one thread) the operations that are volatile, ordered, release, acquire, opaque or atomic in
  * Java are plain reads and writes with the same names and results. Over a `SharedArrayBuffer`, decided once at
- * {@link wrap}, the `int`, `short` and `char` ones and the `long` ones use `Atomics` (spec D16): an atomic access
+ * {@link wrap}, the `byte`, `short`, `char` and `int` ones and the `long` ones use `Atomics` (spec D16): an atomic access
  * needs an address that is a multiple of its size, and the `long` ones allocate a `bigint` per call, so no
  * per-message path uses them. A Java `long` is a `number` that is exact to
  * +/-(2^53 - 1): see {@link DirectBuffer}.
@@ -207,6 +206,17 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     private bindShared(array: Uint8Array): void {
         const backing = array.buffer;
         if (backing instanceof SharedArrayBuffer) {
+            if (!LITTLE_ENDIAN) {
+                throw new IllegalStateException(
+                    'UnsafeBuffer on a SharedArrayBuffer needs a little-endian platform: ' + endianness(),
+                );
+            }
+
+            // `growable` is ES2024; the lib here is ES2022
+            if ((backing as { growable?: boolean }).growable) {
+                throw new IllegalArgumentException('growable SharedArrayBuffer is not supported');
+            }
+
             if (backing.byteLength > MAX_SHARED_LENGTH) {
                 throw new IllegalArgumentException('SharedArrayBuffer is too long: length=' + backing.byteLength);
             }
@@ -657,12 +667,21 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
             this.boundsCheck0(index, SIZE_OF_BYTE);
         }
 
+        if (this._shared) {
+            return (Atomics.load(this._byteArray, this._addressOffset + index) << 24) >> 24;
+        }
+
         return this._dataView.getInt8(this._addressOffset + index);
     }
 
     public putByteVolatile(index: number, value: number): void {
         if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_BYTE);
+        }
+
+        if (this._shared) {
+            Atomics.store(this._byteArray, this._addressOffset + index, value);
+            return;
         }
 
         this._dataView.setInt8(this._addressOffset + index, value);
@@ -733,78 +752,6 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
         }
     }
 
-    /**
-     * Port-only (spec D16): writes a `long` that readers on other threads read with {@link getLongVolatileSeq}, a
-     * sequence lock for one writer. The sequence `int` at `seqIndex` goes odd while the two halves are written, then
-     * even. Allocates nothing. On a buffer that is not shared it is {@link putLong} and `seqIndex` is not used.
-     *
-     * @param index    of the 8 byte value, a multiple of 4 on a shared buffer.
-     * @param value    to write, +/-(2^53 - 1) (D5).
-     * @param seqIndex of the sequence `int`, a multiple of 4 on a shared buffer.
-     */
-    public putLongReleaseSeq(index: number, value: number, seqIndex: number): void {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-            this.boundsCheck0(seqIndex, SIZE_OF_INT);
-        }
-
-        if (this._shared) {
-            Long.checkSafe(value);
-            const view = this._i32!;
-            const element = this.atomicIndex(index, 4, 2);
-            const seq = this.atomicIndex(seqIndex, 4, 2);
-            const s = Atomics.load(view, seq);
-            Atomics.store(view, seq, (s + 1) | 0);
-            Atomics.store(view, element, value | 0);
-            Atomics.store(view, element + 1, Math.floor(value / TWO_POW_32));
-            Atomics.store(view, seq, (s + 2) | 0);
-            return;
-        }
-
-        dataViewSetLong(this._dataView, this._addressOffset + index, value, true);
-    }
-
-    /**
-     * Port-only (spec D16): reads a `long` written with {@link putLongReleaseSeq}, retrying until the sequence is even
-     * and the same before and after the two halves are read, so a value is never torn. Allocates nothing. On a buffer
-     * that is not shared it is {@link getLong}.
-     *
-     * @param index    of the 8 byte value, a multiple of 4 on a shared buffer.
-     * @param seqIndex of the sequence `int`, a multiple of 4 on a shared buffer.
-     * @return the value.
-     */
-    public getLongVolatileSeq(index: number, seqIndex: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-            this.boundsCheck0(seqIndex, SIZE_OF_INT);
-        }
-
-        if (this._shared) {
-            const view = this._i32!;
-            const element = this.atomicIndex(index, 4, 2);
-            const seq = this.atomicIndex(seqIndex, 4, 2);
-            for (;;) {
-                const s1 = Atomics.load(view, seq);
-                if (0 !== (s1 & 1)) {
-                    continue;
-                }
-
-                const lo = Atomics.load(view, element);
-                const hi = Atomics.load(view, element + 1);
-                if (s1 === Atomics.load(view, seq)) {
-                    const value = hi * TWO_POW_32 + (lo >>> 0);
-                    if (!Number.isSafeInteger(value)) {
-                        throw new LongOverflowError((BigInt(hi) << 32n) | BigInt(lo >>> 0));
-                    }
-
-                    return value;
-                }
-            }
-        }
-
-        return dataViewGetLong(this._dataView, this._addressOffset + index, true);
-    }
-
     public override toString(): string {
         return (
             'UnsafeBuffer{' +
@@ -823,6 +770,89 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     protected ensureCapacity(index: number, length: number): void {
         if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, length);
+        }
+    }
+
+    /**
+     * Port-only (spec D16): writes a `long` that readers on other threads read with {@link getLongVolatileSeq}, a
+     * two-slot sequence lock for one writer. The 8 bytes at `index` are slot 0 and the 8 bytes after them are slot 1;
+     * the sequence `int` at `seqIndex` names the published slot (even: 0, odd: 1). The writer writes the slot that is
+     * not published, then increments the sequence. A writer stopped mid-write never blocks a reader, as it only
+     * writes the unpublished slot; a reader retries only when a write completed during its read. Allocates nothing.
+     * On a buffer that is not shared it is {@link putLong} of slot 0 and `seqIndex` is not used.
+     *
+     * @param index    of the slots, 16 bytes, a multiple of 4 on a shared buffer.
+     * @param value    to write, +/-(2^53 - 1) (D5).
+     * @param seqIndex of the sequence `int`, a multiple of 4 on a shared buffer, outside the 16 bytes at `index`.
+     */
+    public putLongReleaseSeq(index: number, value: number, seqIndex: number): void {
+        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+            this.boundsCheck0(index, 2 * SIZE_OF_LONG);
+            this.boundsCheck0(seqIndex, SIZE_OF_INT);
+        }
+
+        UnsafeBuffer.checkSeqIndex(index, seqIndex);
+
+        if (this._shared) {
+            Long.checkSafe(value);
+            const view = this._i32!;
+            const slot0 = this.atomicIndex(index, 4, 2);
+            const seq = this.atomicIndex(seqIndex, 4, 2);
+            const next = (Atomics.load(view, seq) + 1) | 0;
+            const e = slot0 + ((next & 1) << 1);
+            Atomics.store(view, e, value | 0);
+            Atomics.store(view, e + 1, Math.floor(value / TWO_POW_32));
+            Atomics.store(view, seq, next);
+            return;
+        }
+
+        dataViewSetLong(this._dataView, this._addressOffset + index, value, true);
+    }
+
+    /**
+     * Port-only (spec D16): reads a `long` written with {@link putLongReleaseSeq}: reads the sequence, the slot it
+     * names and the sequence again, and retries only if a write completed meanwhile, so a value is never torn and a
+     * writer stopped mid-write never blocks the reader. Allocates nothing. On a buffer that is not shared it is
+     * {@link getLong} of slot 0.
+     *
+     * @param index    of the slots, 16 bytes, a multiple of 4 on a shared buffer.
+     * @param seqIndex of the sequence `int`, a multiple of 4 on a shared buffer, outside the 16 bytes at `index`.
+     * @return the value.
+     */
+    public getLongVolatileSeq(index: number, seqIndex: number): number {
+        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+            this.boundsCheck0(index, 2 * SIZE_OF_LONG);
+            this.boundsCheck0(seqIndex, SIZE_OF_INT);
+        }
+
+        UnsafeBuffer.checkSeqIndex(index, seqIndex);
+
+        if (this._shared) {
+            const view = this._i32!;
+            const slot0 = this.atomicIndex(index, 4, 2);
+            const seq = this.atomicIndex(seqIndex, 4, 2);
+            for (;;) {
+                const s1 = Atomics.load(view, seq);
+                const e = slot0 + ((s1 & 1) << 1);
+                const lo = Atomics.load(view, e);
+                const hi = Atomics.load(view, e + 1);
+                if (s1 === Atomics.load(view, seq)) {
+                    const value = hi * TWO_POW_32 + (lo >>> 0);
+                    if (!Number.isSafeInteger(value)) {
+                        throw new LongOverflowError((BigInt(hi) << 32n) | BigInt(lo >>> 0));
+                    }
+
+                    return value;
+                }
+            }
+        }
+
+        return dataViewGetLong(this._dataView, this._addressOffset + index, true);
+    }
+
+    private static checkSeqIndex(index: number, seqIndex: number): void {
+        if (seqIndex + 4 > index && seqIndex < index + 16) {
+            throw new IllegalArgumentException('seqIndex overlaps the value: index=' + index + ' seqIndex=' + seqIndex);
         }
     }
 }

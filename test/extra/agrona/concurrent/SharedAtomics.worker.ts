@@ -17,7 +17,7 @@ import {
 } from './SharedAtomicsLayout.js';
 
 interface Data {
-    kind: 'cas-int' | 'add-int' | 'short' | 'seq-writer' | 'seq-reader';
+    kind: 'cas-int' | 'add-int' | 'short' | 'seq-writer' | 'seq-reader' | 'seq-read-stalled';
     buffer: SharedArrayBuffer;
     workers: number;
     id: number;
@@ -139,6 +139,15 @@ function seqReader(): ReaderResult {
     return { reads, torn, firstTorn };
 }
 
+/** Reads while the writer is stopped mid-write: the results must all be the published value, with no blocking. */
+function seqReadStalled(): number[] {
+    const values: number[] = new Array<number>(data.iterations);
+    for (let i = 0; i < data.iterations; i++) {
+        values[i] = buffer.getLongVolatileSeq(VALUE, SEQ);
+    }
+    return values;
+}
+
 const result = (() => {
     switch (data.kind) {
         case 'cas-int':
@@ -151,6 +160,8 @@ const result = (() => {
             return seqWriter();
         case 'seq-reader':
             return seqReader();
+        case 'seq-read-stalled':
+            return seqReadStalled();
     }
 })();
 

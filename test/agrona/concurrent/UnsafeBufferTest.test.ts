@@ -117,7 +117,9 @@ describe.each(BACKINGS)('UnsafeBufferTest over $name', (backing) => {
 
     // adapted: the ByteBuffer is the test/support stand-in, which an UnsafeBuffer wraps through its ArrayBuffer
     it('shouldExposePositionAtWhichHeapByteBufferGetsWrapped', () => {
-        const wibbleByteBuffer = ByteBuffer.wrap(backing.arrayBuffer(wibbleBytes.length));
+        const ab = backing.arrayBuffer(wibbleBytes.length);
+        new Uint8Array(ab).set(wibbleBytes);
+        const wibbleByteBuffer = ByteBuffer.wrap(ab);
         shouldExposePositionAtWhichByteBufferGetsWrapped(wibbleByteBuffer);
     });
 
