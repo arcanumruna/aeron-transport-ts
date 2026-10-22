@@ -17,20 +17,18 @@
  */
 // Port of org/agrona/concurrent/UnsafeBufferTest.java @ Agrona 2.6.1
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { BufferUtil } from '../../../src/agrona/BufferUtil.js';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import type { DirectBuffer } from '../../../src/agrona/DirectBuffer.js';
 import { ByteOrder, IllegalStateException, IndexOutOfBoundsException } from '../../../src/agrona/jdk.js';
 import type { MutableDirectBuffer } from '../../../src/agrona/MutableDirectBuffer.js';
+import { BACKINGS } from '../../support/Backing.js';
 import { assertIs, assertIsNot, assertThrowsExactly } from '../../support/Assertions.js';
 import { ByteBuffer } from '../../support/ByteBuffer.js';
 import { mutableDirectBufferTests } from '../MutableDirectBufferTests.js';
 
-const { allocateDirectAligned } = BufferUtil;
-
 const US_ASCII = new TextEncoder();
 
-describe('UnsafeBufferTest', () => {
+describe.each(BACKINGS)('UnsafeBufferTest over $name', (backing) => {
     const VALUE = 42;
     const ADJUSTMENT_OFFSET = 3;
 
@@ -45,9 +43,9 @@ describe('UnsafeBufferTest', () => {
         wibbleBytes2 = US_ASCII.encode('Wibble2');
     });
 
-    const newBuffer = (capacity: number): MutableDirectBuffer => new UnsafeBuffer(new Uint8Array(capacity));
+    const newBuffer = (capacity: number): MutableDirectBuffer => new UnsafeBuffer(backing.bytes(capacity));
 
-    mutableDirectBufferTests(newBuffer);
+    mutableDirectBufferTests(newBuffer, backing);
 
     it('shouldThrowExceptionForAboveCapacity', () => {
         const buffer = newBuffer(3);
@@ -119,18 +117,20 @@ describe('UnsafeBufferTest', () => {
 
     // adapted: the ByteBuffer is the test/support stand-in, which an UnsafeBuffer wraps through its ArrayBuffer
     it('shouldExposePositionAtWhichHeapByteBufferGetsWrapped', () => {
-        const wibbleByteBuffer = ByteBuffer.wrap(new Uint8Array(wibbleBytes).buffer);
+        const ab = backing.arrayBuffer(wibbleBytes.length);
+        new Uint8Array(ab).set(wibbleBytes);
+        const wibbleByteBuffer = ByteBuffer.wrap(ab);
         shouldExposePositionAtWhichByteBufferGetsWrapped(wibbleByteBuffer);
     });
 
     // adapted: as shouldExposePositionAtWhichHeapByteBufferGetsWrapped
     it('shouldExposePositionAtWhichDirectByteBufferGetsWrapped', () => {
-        const wibbleByteBuffer = ByteBuffer.allocateDirect(wibbleBytes.length);
+        const wibbleByteBuffer = ByteBuffer.allocateDirect(wibbleBytes.length, backing.shared);
         shouldExposePositionAtWhichByteBufferGetsWrapped(wibbleByteBuffer);
     });
 
     it('shouldWrapValidRange', () => {
-        const buffer = new UnsafeBuffer(new Uint8Array(8));
+        const buffer = new UnsafeBuffer(backing.bytes(8));
         const slice = new UnsafeBuffer();
 
         slice.wrap(buffer);
@@ -146,7 +146,7 @@ describe('UnsafeBufferTest', () => {
     });
 
     it('shouldNotWrapInValidRange', () => {
-        const buffer = new UnsafeBuffer(new Uint8Array(8));
+        const buffer = new UnsafeBuffer(backing.bytes(8));
         const slice = new UnsafeBuffer();
 
         expect(() => slice.wrap(buffer, -1, 0)).toThrow(IndexOutOfBoundsException);
@@ -161,7 +161,7 @@ describe('UnsafeBufferTest', () => {
         }
 
         const index = 6;
-        const buffer = new UnsafeBuffer(new Uint8Array(8));
+        const buffer = new UnsafeBuffer(backing.bytes(8));
         expect(buffer.getByte(index)).toBe(0);
 
         const exception = assertThrowsExactly(IndexOutOfBoundsException, () => buffer.putIntAscii(index, value));
@@ -176,7 +176,7 @@ describe('UnsafeBufferTest', () => {
         }
 
         const index = 1;
-        const buffer = new UnsafeBuffer(new Uint8Array(10));
+        const buffer = new UnsafeBuffer(backing.bytes(10));
         expect(buffer.getByte(index)).toBe(0);
 
         const exception = assertThrowsExactly(IndexOutOfBoundsException, () => buffer.putLongAscii(index, value));
@@ -189,7 +189,7 @@ describe('UnsafeBufferTest', () => {
     it.each(byteOrders())('parseIntAsciiIsNotDependentOnTheBufferEndianness %s', (byteOrder) => {
         const index = 13;
         const value = 1690021;
-        const buffer = new UnsafeBuffer(ByteBuffer.allocate(32).order(byteOrder).arrayBuffer());
+        const buffer = new UnsafeBuffer(ByteBuffer.allocate(32, backing.shared).order(byteOrder).arrayBuffer());
         const length = buffer.putIntAscii(index, value);
 
         expect(buffer.parseIntAscii(index, length)).toBe(value);
@@ -199,7 +199,7 @@ describe('UnsafeBufferTest', () => {
     it.each(byteOrders())('parseLongAsciiIsNotDependentOnTheBufferEndianness %s', (byteOrder) => {
         const index = 4;
         const value = 16900210032;
-        const buffer = new UnsafeBuffer(ByteBuffer.allocate(64).order(byteOrder).arrayBuffer());
+        const buffer = new UnsafeBuffer(ByteBuffer.allocate(64, backing.shared).order(byteOrder).arrayBuffer());
         const length = buffer.putLongAscii(index, value);
 
         expect(buffer.parseLongAscii(index, length)).toBe(value);
@@ -209,19 +209,19 @@ describe('UnsafeBufferTest', () => {
     it.each([1, 2, 4])(
         'verifyAlignmentThrowsIllegalStateExceptionIfBufferCreatedFromImproperlyAlignedDirectByteBuffer %s',
         (alignment) => {
-            const buffer = new UnsafeBuffer(allocateDirectAligned(99 + alignment, alignment), alignment, 99);
+            const buffer = new UnsafeBuffer(backing.aligned(99 + alignment, alignment), alignment, 99);
             assertThrowsExactly(IllegalStateException, () => buffer.verifyAlignment());
         },
     );
 
     // adapted: the address 1133 is the offset 1133 of a window in an ArrayBuffer
     it('verifyAlignmentThrowsIllegalStateExceptionIfBufferCreatedFromAnUnalignedAddress', () => {
-        const buffer = new UnsafeBuffer(new ArrayBuffer(1133 + 8), 1133, 8);
+        const buffer = new UnsafeBuffer(backing.arrayBuffer(1133 + 8), 1133, 8);
         assertThrowsExactly(IllegalStateException, () => buffer.verifyAlignment());
     });
 
     it.each([8, 16, 64, 512])('verifyAlignmentWorksIfDirectBufferAlignedOnEightByteBoundaries %s', (alignment) => {
-        const buffer = new UnsafeBuffer(allocateDirectAligned(99, alignment));
+        const buffer = new UnsafeBuffer(backing.aligned(99, alignment));
         buffer.verifyAlignment();
     });
 
@@ -272,7 +272,7 @@ describe('UnsafeBufferTest', () => {
             addressOffset: vi.fn(() => 0), // Mockito's default for a long that is not stubbed
         } as unknown as DirectBuffer;
         const mockByteArray = new Uint8Array(5);
-        return [new UnsafeBuffer(new ArrayBuffer(64)), mockBuffer];
+        return [new UnsafeBuffer(backing.arrayBuffer(64)), mockBuffer];
     }
 
     it.skip('wrapForRawMemoryAddressShouldResetWrapAdjustment', () => {

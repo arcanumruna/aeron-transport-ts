@@ -24,8 +24,9 @@ const { SIZE_OF_LONG } = BitUtil;
 /**
  * Abstraction over a range of buffer types that allows type to be accessed with memory ordering semantics.
  * <p>
- * JavaScript runs one thread, so the volatile, ordered, release, acquire and opaque operations and the atomic
- * compare-and-set, get-and-add and get-and-set operations are plain operations with the same names and results.
+ * Over an `ArrayBuffer` (one thread) the volatile, ordered, release, acquire and opaque operations and the atomic
+ * compare-and-set, get-and-add and get-and-set operations are plain operations with the same names and results. Over
+ * a `SharedArrayBuffer` they use `Atomics` (spec D16).
  */
 export interface AtomicBuffer extends MutableDirectBuffer {
     /**
@@ -72,6 +73,18 @@ export interface AtomicBuffer extends MutableDirectBuffer {
     putCharVolatile(index: number, value: number): void;
     getByteVolatile(index: number): number;
     putByteVolatile(index: number, value: number): void;
+
+    /**
+     * Port-only (spec D16): writes a `long` for readers on other threads that use {@link getLongVolatileSeq}, a
+     * two-slot sequence lock for one writer: the 16 bytes at `index` are two slots and the sequence `int` at `seqIndex` names
+     * the published one. Allocates nothing. On a buffer that is not
+     * shared it is a plain `putLong`.
+     */
+    putLongReleaseSeq(index: number, value: number, seqIndex: number): void;
+    /**
+     * Port-only (spec D16): reads a `long` written with {@link putLongReleaseSeq}; never torn. Allocates nothing.
+     */
+    getLongVolatileSeq(index: number, seqIndex: number): number;
 }
 
 export const AtomicBuffer = {
