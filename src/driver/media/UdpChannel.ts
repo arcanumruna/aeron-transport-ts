@@ -1038,7 +1038,7 @@ export class UdpChannel {
 
     private static validateMedia(uri: ChannelUri): void {
         // Java's `uri.isUdp()` on a null uri is a NullPointerException.
-        if (!requireNonNull(uri, 'uri').isUdp()) {
+        if (!requireNonNull(uri, 'Cannot invoke "io.aeron.ChannelUri.isUdp()" because "uri" is null').isUdp()) {
             throw new IllegalArgumentException('UdpChannel only supports UDP media: ' + uri);
         }
     }

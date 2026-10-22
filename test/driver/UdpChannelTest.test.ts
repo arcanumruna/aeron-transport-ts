@@ -16,7 +16,36 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of io/aeron/driver/UdpChannelTest.java @ 1.53.3
-import { beforeEach, describe, expect, it, type TestContext } from 'vitest';
+import { vi } from 'vitest';
+
+// The host loopback with `::1` added when the host has none, so the IPv6 tests run on every host.
+vi.mock('node:os', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('node:os')>();
+    return {
+        ...actual,
+        networkInterfaces: () => {
+            const real = actual.networkInterfaces();
+            for (const entries of Object.values(real)) {
+                if (
+                    entries?.some((e) => e.internal && e.address === '127.0.0.1') &&
+                    !entries.some((e) => e.address === '::1')
+                ) {
+                    entries.push({
+                        address: '::1',
+                        netmask: 'ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff',
+                        family: 'IPv6',
+                        mac: '00:00:00:00:00:00',
+                        internal: true,
+                        cidr: '::1/128',
+                        scopeid: 0,
+                    });
+                }
+            }
+            return real;
+        },
+    };
+});
+import { describe, expect, it } from 'vitest';
 import { Object2ObjectHashMap } from '../../src/agrona/collections/Object2ObjectHashMap.js';
 import { TimeUnit } from '../../src/agrona/jdk.js';
 import { getCause } from '../../src/agrona/jdkThrowable.js';
@@ -34,24 +63,6 @@ import { assertEqualsObject, assertIs, assertThrows, assertThrowsExactly } from 
 
 const { DYNAMIC, MANUAL, RESPONSE } = ControlMode;
 const getByName = (host: string): InetAddress => InetAddress.getByName(host);
-
-/**
- * JUnit's `assumeTrue(System.getProperty("java.net.preferIPv4Stack") == null)`: the tests that use IPv6 run unless the
- * JVM is told to use IPv4 only. There is no such property here, so the assumption is always true, except in the three
- * tests that name the local interface `[::1]`: they find it through the interface list, so they need a host that has
- * `::1` (a host without an IPv6 stack, as with `preferIPv4Stack`, cannot run them and skips them).
- */
-const HOST_HAS_IPV6 = NetworkInterface.getNetworkInterfaces().some((ifc) =>
-    ifc.getInterfaceAddresses().some((ia) => ia.getAddress().equals(InetAddress.getByName('::1'))),
-);
-
-let currentTest: TestContext;
-
-function assumeIpV6Stack(): void {
-    if (!HOST_HAS_IPV6) {
-        currentTest.skip();
-    }
-}
 
 /** Hamcrest `matchesPattern(regex)`: the whole string matches. */
 function matchesPattern(actual: string, pattern: RegExp): void {
@@ -119,10 +130,6 @@ class LookupNameResolver implements NameResolver {
 }
 
 describe('UdpChannelTest', () => {
-    beforeEach((context) => {
-        currentTest = context;
-    });
-
     it('shouldHandleExplicitLocalAddressAndPortFormat', () => {
         const udpChannel = UdpChannel.parse('aeron:udp?interface=localhost:40123|endpoint=localhost:40124');
 
@@ -322,7 +329,7 @@ describe('UdpChannelTest', () => {
     it.each([['endpoint', 'interface']])(
         'shouldHandleIpV6CanonicalFormForUnicastCorrectly %s %s',
         (endpointKey, interfaceKey) => {
-            assumeIpV6Stack();
+            // assumeTrue(System.getProperty("java.net.preferIPv4Stack") == null): there is no such property, always true.
             const udpChannelLocal = UdpChannel.parse(uri(endpointKey, '192.168.0.1:20000', interfaceKey, '[::1]'));
             const udpChannelLocalPort = UdpChannel.parse(
                 uri(endpointKey, '[fe80::5246:5dff:fe73:df06]:20000', interfaceKey, '127.0.0.1:40455'),
@@ -360,7 +367,7 @@ describe('UdpChannelTest', () => {
     });
 
     it('shouldGetProtocolFamilyForIpV6', () => {
-        assumeIpV6Stack();
+        // assumeTrue(System.getProperty("java.net.preferIPv4Stack") == null): there is no such property, always true.
         const udpChannel = UdpChannel.parse('aeron:udp?endpoint=[::1]:12345|interface=[::1]');
         expect(udpChannel.protocolFamily()).toBe(StandardProtocolFamily.INET6);
     });
@@ -441,7 +448,7 @@ describe('UdpChannelTest', () => {
     it.each([['endpoint', 'interface']])(
         'shouldHandleIpV6CanonicalFormForMulticastCorrectly %s %s',
         (endpointKey, interfaceKey) => {
-            assumeIpV6Stack();
+            // assumeTrue(System.getProperty("java.net.preferIPv4Stack") == null): there is no such property, always true.
             const udpChannel = UdpChannel.parse(uri(endpointKey, '[FF01::FD]:20000', interfaceKey, 'localhost'));
             const udpChannelLocal = UdpChannel.parse(
                 uri(endpointKey, '224.0.1.1:20000', interfaceKey, '[::1]:54321/64'),

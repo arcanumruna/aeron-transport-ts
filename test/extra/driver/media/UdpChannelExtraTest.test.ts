@@ -574,6 +574,69 @@ describe('UdpChannelExtraTest', () => {
             );
         });
     });
+
+    // Mutant M2: `ControlMode.RESPONSE !== controlMode` dropped from the "must specify" check.
+    it('responseControlModeAloneIsAccepted', () => {
+        const channel = UdpChannel.parse('aeron:udp?control-mode=response');
+
+        expect(channel.controlMode()).toBe(ControlMode.RESPONSE);
+        expect(channel.canonicalForm()).toMatch(/^UDP-0\.0\.0\.0:0-0\.0\.0\.0:0-[0-9]+$/);
+        expect(channel.hasExplicitEndpoint()).toBe(false);
+        expect(channel.hasExplicitControl()).toBe(false);
+    });
+
+    // Mutant M3: `&& null === tagIdStr` dropped from hasNoDistinguishingCharacteristic.
+    it('tagsAloneAreADistinguishingCharacteristic', () => {
+        const channel = UdpChannel.parse('aeron:udp?tags=1001');
+
+        expect(channel.controlMode()).toBe(ControlMode.NONE);
+        expect(channel.hasTag()).toBe(true);
+        expect(channel.tag()).toBe(1001);
+        expect(channel.canonicalForm()).toBe('UDP-0.0.0.0:0-0.0.0.0:0#1001');
+    });
+
+    // Mutant M4: isWildcard ignores the local port.
+    it('channelWithAnyEndpointButALocalPortIsNotAWildcard', () => {
+        const aUri = 'aeron:udp?endpoint=0.0.0.0:0|interface=0.0.0.0:5555|tags=7';
+        const bUri = 'aeron:udp?endpoint=127.0.0.1:9999|tags=7';
+        const a = UdpChannel.parse(aUri);
+        const b = UdpChannel.parse(bUri);
+
+        const ex = assertThrowsExactly(IllegalArgumentException, () => a.matchesTag(b, null, null));
+        expect(ex.message).toBe('matching tag=7 has mismatched endpoint or control: ' + aUri + ' <> ' + bUri);
+    });
+
+    // Mutant M5: isWildcard ignores the local address.
+    it('channelWithAnyEndpointButALocalAddressIsNotAWildcard', () => {
+        const a = UdpChannel.parse('aeron:udp?endpoint=0.0.0.0:0|interface=127.0.0.1|tags=7');
+        const b = UdpChannel.parse('aeron:udp?endpoint=127.0.0.1:9999|tags=7');
+
+        assertThrowsExactly(IllegalArgumentException, () => a.matchesTag(b, null, null));
+    });
+
+    // Mutant M26: equals drops the class test (Java: getClass() != o.getClass()).
+    it('equalsIsFalseForAnotherClassWithTheSameCanonicalForm', () => {
+        const a = UdpChannel.parse('aeron:udp?endpoint=localhost:40124');
+
+        expect(a.equals({ _canonicalForm: a.canonicalForm() })).toBe(false);
+    });
+
+    // Mutants M29 / M30: isMulticastDestinationAddress / destinationAddress check only for null, not the media.
+    it('destinationOfANonUdpUriWithAnEndpointIsRejected', () => {
+        const ipcMulticast = ChannelUri.parse('aeron:ipc?endpoint=224.0.1.1:40124');
+        const ex = assertThrowsExactly(InvalidChannelException, () =>
+            UdpChannel.isMulticastDestinationAddress(ipcMulticast),
+        );
+        const cause = getCause(ex) as Error;
+        expect(cause).toBeInstanceOf(IllegalArgumentException);
+        expect(cause.message).toBe('UdpChannel only supports UDP media: aeron:ipc?endpoint=224.0.1.1:40124');
+
+        const ipcUnicast = ChannelUri.parse('aeron:ipc?endpoint=127.0.0.1:9999');
+        const ex2 = assertThrowsExactly(InvalidChannelException, () =>
+            UdpChannel.destinationAddress(ipcUnicast, DefaultNameResolver.INSTANCE),
+        );
+        expect(getCause(ex2)).toBeInstanceOf(IllegalArgumentException);
+    });
 });
 
 /** The size in bytes that `SystemUtil.parseSize` gives the value, as the message prints it. */

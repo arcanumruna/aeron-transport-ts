@@ -274,7 +274,7 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
 
 #### T13 — Endpoints and pollers
 - Sources: `media/{ControlTransportPoller, DataTransportPoller, SendChannelEndpoint, ReceiveChannelEndpoint,
-  ReceiveChannelEndpointThreadLocals, ImageConnection, ControlMode}`, `SendChannelEndpointSupplier`,
+  ReceiveChannelEndpointThreadLocals, ImageConnection, ControlMode (ported in T9)}`, `SendChannelEndpointSupplier`,
   `ReceiveChannelEndpointSupplier`, `DefaultSendChannelEndpointSupplier`, `DefaultReceiveChannelEndpointSupplier`.
   `MultiSndDestination` (inside `SendChannelEndpoint`), `MultiRcvDestination` and `ReceiveDestinationTransport`
   are ported here because the endpoints reference them; their behaviour is tested in phase 3.
