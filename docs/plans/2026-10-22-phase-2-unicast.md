@@ -239,6 +239,7 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
 - `NetworkInterfaceShim` reads `os.networkInterfaces()`; tests inject a fake shim as the Java tests do.
 - Tests: `SocketAddressParserTest` (16), `NetworkUtilTest` (13), `NamedInterfaceTest` (2),
   `UnresolvedInterfaceTest` (2), `DefaultNameResolverTest` (2), `TimeTrackingNameResolverTest` (11).
+- The `java.net` stand-ins are in `src/driver/jdkNet.ts` (spec D20).
 
 #### T9 — `UdpChannel`
 - Source: `media/UdpChannel` (every parameter, including the multicast, MDC and tag parts phase 3 uses).
@@ -265,6 +266,11 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
   spec §4.2, and `test/support/Udp.ts`.
 - Tests: `UdpChannelTransportTest` (9), `WildcardPortManagerTest` (10), and every `UdpChannelTransport` test listed
   in spec §4.2 (`test/extra/driver/media/UdpChannelTransportExtraTest.test.ts`).
+- Receive (from the T8 review): Java passes an `InetSocketAddress` per datagram and the JDK reuses the last
+  sender's. Each transport keeps `lastSrcHost`, `lastSrcPort` and `lastSrcAddress` and builds a new address only
+  when `rinfo.address` or `rinfo.port` changes. Never call `getByName` per datagram. `expectNoAllocation` on a
+  repeated sender.
+- Send: `InetAddress.getHostAddress()` is memoized (T8); `dgram.send` reuses it.
 
 #### T13 — Endpoints and pollers
 - Sources: `media/{ControlTransportPoller, DataTransportPoller, SendChannelEndpoint, ReceiveChannelEndpoint,
@@ -302,6 +308,8 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
 - Tests: `DriverConductorTest` (105: the 29 IPC and spy tests, the counter tests and the response-channel tests
   are `it.skip` with their reasons; every other test is ported and green), `UntetheredSubscriptionTest` (1),
   `MediaDriverTest` (4; the config-print and file tests are `it.skip`).
+- Also port `NativeResourceAgent` for re-resolution: `onReResolveAddress` starts `dns.lookup`, refreshes the
+  `DefaultNameResolver` cache and completes the `CommandResult` in the callback (D7; issue #12).
 
 ### Stage C — client, end to end, interop
 
@@ -311,6 +319,8 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
   directory), the rest of `CommonContext`, `AvailableImageHandler`, `UnavailableImageHandler`.
 - Tests: `ClientConductorTest` (37), `DriverProxyTest` (3), `LogBuffersTest` (3), `CommonContextTest` (13),
   `AeronContextTest` (4).
+- Host names are resolved with `dns.lookup(name, { order: 'ipv4first' })` (Java's order) before a command
+  reaches the conductor, including the hosts in `interface=` and `control=` and for `addDestination`.
 
 #### T20 — Publications, images, subscriptions
 - Sources: `Publication`, `ConcurrentPublication` (raw tail via decision 5), `ExclusivePublication`, `Image`,
