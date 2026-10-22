@@ -196,9 +196,11 @@ describe('LongHalves2ObjectHashMap', () => {
         const random = mulberry32(5);
         const halves = new LongHalves2ObjectHashMap<number>();
         const longs = new Long2ObjectHashMap<number>();
+        const putKeys: [number, number][] = [];
         for (let i = 0; i < 2000; i++) {
             const hi = (randomInt(random) >> 11) | 0;
             const lo = randomInt(random);
+            putKeys.push([hi, lo]);
             const value = hi * 4294967296 + (lo >>> 0);
             if (random() < 0.3) {
                 halves.remove(hi, lo);
@@ -234,6 +236,83 @@ describe('LongHalves2ObjectHashMap', () => {
             remaining.push(value);
         });
         expect(remaining.length).toBe(halves.size());
+        for (const [hi, lo] of putKeys) {
+            expect(halves.get(hi, lo), `${hi},${lo}`).toBe(longs.get(hi * 4294967296 + (lo >>> 0)));
+        }
+    });
+
+    it('iteratorRemoveEverySecondKeyKeepsLookupsCorrect', () => {
+        const random = mulberry32(21);
+        const halves = new LongHalves2ObjectHashMap<number>();
+        const model = new Map<bigint, number>();
+        const keys: [number, number][] = [];
+        for (let i = 0; i < 200; i++) {
+            const [hi, lo] =
+                i % 3 === 0 ? [randomInt(random) & 3, randomInt(random) & 15] : [randomInt(random), randomInt(random)];
+            halves.put(hi, lo, i);
+            model.set(keyOf(hi, lo), i);
+            keys.push([hi, lo]);
+        }
+        expect(halves.size()).toBe(model.size);
+
+        const iterator = halves.keySet().iterator();
+        let n = 0;
+        while (iterator.hasNext()) {
+            iterator.nextKey();
+            if (n++ % 2 === 1) {
+                model.delete(keyOf(iterator.getKeyHigh(), iterator.getKeyLow()));
+                iterator.remove();
+            }
+        }
+        expect(n).toBeGreaterThan(100);
+        expect(halves.size()).toBe(model.size);
+        for (const [hi, lo] of keys) {
+            expect(halves.get(hi, lo), `${hi},${lo}`).toBe(model.get(keyOf(hi, lo)) ?? null);
+        }
+    });
+
+    it('iteratesKeysWhenLastSlotIsOccupied', () => {
+        const random = mulberry32(22);
+        const slot = (hi: number, lo: number) => Hashing.hashLongHalves(hi, lo, 7);
+        const pick = (wanted: number | null, taken: [number, number][]): [number, number] => {
+            for (let i = 0; i < 100_000; i++) {
+                const hi = (randomInt(random) >> 11) | 0;
+                const lo = randomInt(random);
+                if ((wanted === null || slot(hi, lo) === wanted) && !taken.some(([h, l]) => h === hi && l === lo)) {
+                    return [hi, lo];
+                }
+            }
+            throw new Error('no key');
+        };
+        const keys: [number, number][] = [];
+        keys.push(pick(7, keys));
+        keys.push(pick(0, keys));
+        keys.push(pick(null, keys));
+
+        const halves = new LongHalves2ObjectHashMap<number>(8);
+        const longs = new Long2ObjectHashMap<number>(8);
+        keys.forEach(([hi, lo], i) => {
+            halves.put(hi, lo, i);
+            longs.put(hi * 4294967296 + (lo >>> 0), i);
+        });
+        expect(halves.capacity()).toBe(8);
+        expect(longs.capacity()).toBe(8);
+
+        const orderHalves: number[] = [];
+        const keyIterator = halves.keySet().iterator();
+        while (keyIterator.hasNext()) {
+            keyIterator.nextKey();
+            orderHalves.push(keyIterator.getKeyHigh() * 4294967296 + (keyIterator.getKeyLow() >>> 0));
+        }
+        const orderLongs: number[] = [];
+        const longIterator = longs.keySet().iterator();
+        while (longIterator.hasNext()) {
+            orderLongs.push(longIterator.nextLong());
+        }
+        expect(orderHalves).toEqual(orderLongs);
+        expect([...orderHalves].sort((a, b) => a - b)).toEqual(
+            keys.map(([hi, lo]) => hi * 4294967296 + (lo >>> 0)).sort((a, b) => a - b),
+        );
     });
 
     it('computeIfPresent, compute, merge, putIfAbsent and replace follow Long2ObjectHashMap', () => {
@@ -396,9 +475,11 @@ describe('LongHalves2LongHashMap', () => {
         const random = mulberry32(8);
         const halves = new LongHalves2LongHashMap(MISSING);
         const longs = new Long2LongHashMap(MISSING);
+        const putKeys: [number, number][] = [];
         for (let i = 0; i < 2000; i++) {
             const hi = (randomInt(random) >> 11) | 0;
             const lo = randomInt(random);
+            putKeys.push([hi, lo]);
             const value = hi * 4294967296 + (lo >>> 0);
             if (random() < 0.3) {
                 halves.remove(hi, lo);
@@ -443,6 +524,83 @@ describe('LongHalves2LongHashMap', () => {
             expect(v % 3).not.toBe(0);
             expect(longs.get(hi * 4294967296 + (lo >>> 0))).toBe(v);
         });
+        for (const [hi, lo] of putKeys) {
+            expect(halves.get(hi, lo), `${hi},${lo}`).toBe(longs.get(hi * 4294967296 + (lo >>> 0)));
+        }
+    });
+
+    it('iteratorRemoveEverySecondKeyKeepsLookupsCorrect', () => {
+        const random = mulberry32(23);
+        const halves = new LongHalves2LongHashMap(MISSING);
+        const model = new Map<bigint, number>();
+        const keys: [number, number][] = [];
+        for (let i = 0; i < 200; i++) {
+            const [hi, lo] =
+                i % 3 === 0 ? [randomInt(random) & 3, randomInt(random) & 15] : [randomInt(random), randomInt(random)];
+            halves.put(hi, lo, i);
+            model.set(keyOf(hi, lo), i);
+            keys.push([hi, lo]);
+        }
+        expect(halves.size()).toBe(model.size);
+
+        const iterator = halves.keySet().iterator();
+        let n = 0;
+        while (iterator.hasNext()) {
+            iterator.nextKey();
+            if (n++ % 2 === 1) {
+                model.delete(keyOf(iterator.getKeyHigh(), iterator.getKeyLow()));
+                iterator.remove();
+            }
+        }
+        expect(n).toBeGreaterThan(100);
+        expect(halves.size()).toBe(model.size);
+        for (const [hi, lo] of keys) {
+            expect(halves.get(hi, lo), `${hi},${lo}`).toBe(model.get(keyOf(hi, lo)) ?? MISSING);
+        }
+    });
+
+    it('iteratesKeysWhenLastSlotIsOccupied', () => {
+        const random = mulberry32(24);
+        const slot = (hi: number, lo: number) => Hashing.evenHashLongHalves(hi, lo, 15) >> 1;
+        const pick = (wanted: number | null, taken: [number, number][]): [number, number] => {
+            for (let i = 0; i < 100_000; i++) {
+                const hi = (randomInt(random) >> 11) | 0;
+                const lo = randomInt(random);
+                if ((wanted === null || slot(hi, lo) === wanted) && !taken.some(([h, l]) => h === hi && l === lo)) {
+                    return [hi, lo];
+                }
+            }
+            throw new Error('no key');
+        };
+        const keys: [number, number][] = [];
+        keys.push(pick(7, keys));
+        keys.push(pick(0, keys));
+        keys.push(pick(null, keys));
+
+        const halves = new LongHalves2LongHashMap(8, Hashing.DEFAULT_LOAD_FACTOR, MISSING);
+        const longs = new Long2LongHashMap(8, Hashing.DEFAULT_LOAD_FACTOR, MISSING);
+        keys.forEach(([hi, lo], i) => {
+            halves.put(hi, lo, i);
+            longs.put(hi * 4294967296 + (lo >>> 0), i);
+        });
+        expect(halves.capacity()).toBe(8);
+        expect(longs.capacity()).toBe(8);
+
+        const orderHalves: number[] = [];
+        const keyIterator = halves.keySet().iterator();
+        while (keyIterator.hasNext()) {
+            keyIterator.nextKey();
+            orderHalves.push(keyIterator.getKeyHigh() * 4294967296 + (keyIterator.getKeyLow() >>> 0));
+        }
+        const orderLongs: number[] = [];
+        const longIterator = longs.keySet().iterator();
+        while (longIterator.hasNext()) {
+            orderLongs.push(longIterator.nextValue());
+        }
+        expect(orderHalves).toEqual(orderLongs);
+        expect([...orderHalves].sort((a, b) => a - b)).toEqual(
+            keys.map(([hi, lo]) => hi * 4294967296 + (lo >>> 0)).sort((a, b) => a - b),
+        );
     });
 
     it('computeIfPresent, compute, merge, putIfAbsent and replace follow Long2LongHashMap', () => {

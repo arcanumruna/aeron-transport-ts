@@ -34,6 +34,7 @@ const POW2 = new Float64Array(64).map((_, i) => 2 ** i);
 
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
 const TWO_POW_31 = 2147483648;
+const TWO_POW_53 = 9007199254740992;
 const TWO_POW_32 = 4294967296;
 
 const PARTITION_COUNT = 3;
@@ -126,8 +127,10 @@ export class LogBufferDescriptor {
     public static readonly MAX_POSITION = Long.MAX_VALUE;
 
     /**
-     * The position cap of a term length: `min(termLength * 2^31, MAX_POSITION)`. Java's `Publication` computes
-     * `termBufferLength * (1L << 31)` inline, the limit above which `indexByTermCount` goes negative.
+     * The position cap of a term length: Java's `termBufferLength * (1L << 31)` (computed inline in `Publication`, the
+     * limit above which `indexByTermCount` goes negative) for terms of 2 MiB or less. From 4 MiB up it is
+     * `2^53 - termLength`, the last term boundary that leaves a whole term below 2^53, so every position, including
+     * the cap plus a maximum message plus a header, stays below {@link MAX_POSITION}.
      * <p>
      * Not in Java (spec D13, phase 2 decision 5).
      *
@@ -135,7 +138,7 @@ export class LogBufferDescriptor {
      * @return the largest position a publication or image of the term length can have.
      */
     public static maxPossiblePosition(termLength: number): number {
-        return Math.min(termLength * TWO_POW_31, LogBufferDescriptor.MAX_POSITION);
+        return Math.min(termLength * TWO_POW_31, TWO_POW_53 - termLength);
     }
 
     /**
@@ -1069,9 +1072,14 @@ export class LogBufferDescriptor {
      * `termOffset(rawTail)` and `termId(rawTail)`, without a `bigint`.
      * <p>
      * Not in Java (spec D12, phase 2 decision 5). The slot holds the term offset in the low half and the term id in the
-     * high half, and the halves are updated by two atomic `int` operations. This is exact on one thread. A concurrent
-     * reader could see the carry half applied only when the low half wraps 2^32, which a term offset never reaches
-     * (a term is at most 1 GiB); cross-thread use is phase 4.
+     * high half, and the halves are updated by two atomic `int` operations. This is exact on one thread. Two
+     * producers on one slot get distinct offsets (the low add is atomic), but the term id is read separately, so a
+     * concurrent whole-slot write (`rotateLog`'s `casRawTail`, `initialiseTailWithTermId`) between the read and the
+     * add yields a (termId, offset) pair that never existed. Phase 4 must replace this before any cross-thread
+     * publication.
+     * <p>
+     * The returned low half is unsigned and can exceed 2^31; callers apply `Math.min(oldLow, termLength)` before any
+     * `| 0`.
      *
      * @param metaDataBuffer    containing the tail counters.
      * @param tailCounterOffset of the tail counter in the buffer.

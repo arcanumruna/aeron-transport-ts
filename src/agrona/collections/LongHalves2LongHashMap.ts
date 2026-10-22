@@ -217,7 +217,7 @@ export class LongHalves2LongHashMap {
                 break;
             }
 
-            index = (index + 1) & mask;
+            index = LongHalves2LongHashMap.next(index, mask);
         }
 
         return value;
@@ -252,7 +252,7 @@ export class LongHalves2LongHashMap {
                 break;
             }
 
-            index = (index + 1) & mask;
+            index = LongHalves2LongHashMap.next(index, mask);
         }
 
         if (missingValue === oldValue) {
@@ -297,7 +297,7 @@ export class LongHalves2LongHashMap {
                 return oldValue;
             }
 
-            index = (index + 1) & mask;
+            index = LongHalves2LongHashMap.next(index, mask);
         }
 
         ++this._size;
@@ -455,7 +455,7 @@ export class LongHalves2LongHashMap {
                 break;
             }
 
-            index = (index + 1) & mask;
+            index = LongHalves2LongHashMap.next(index, mask);
         }
 
         if (missingValue === value && missingValue !== (value = Long.checkSafe(mappingFunction(hi, lo)) + 0)) {
@@ -493,7 +493,7 @@ export class LongHalves2LongHashMap {
                 break;
             }
 
-            index = (index + 1) & mask;
+            index = LongHalves2LongHashMap.next(index, mask);
         }
 
         if (missingValue !== value) {
@@ -532,7 +532,7 @@ export class LongHalves2LongHashMap {
                 break;
             }
 
-            index = (index + 1) & mask;
+            index = LongHalves2LongHashMap.next(index, mask);
         }
 
         const newValue = Long.checkSafe(remappingFunction(hi, lo, oldValue)) + 0;
@@ -636,7 +636,7 @@ export class LongHalves2LongHashMap {
                 break;
             }
 
-            index = (index + 1) & mask;
+            index = LongHalves2LongHashMap.next(index, mask);
         }
 
         return oldValue;
@@ -664,7 +664,7 @@ export class LongHalves2LongHashMap {
                 break;
             }
 
-            index = (index + 1) & mask;
+            index = LongHalves2LongHashMap.next(index, mask);
         }
 
         return false;
@@ -705,7 +705,7 @@ export class LongHalves2LongHashMap {
                 break;
             }
 
-            index = (index + 1) & mask;
+            index = LongHalves2LongHashMap.next(index, mask);
         }
 
         const newValue = missingValue === oldValue ? value : Long.checkSafe(remappingFunction(oldValue, value)) + 0;
@@ -735,7 +735,7 @@ export class LongHalves2LongHashMap {
         let index = deleteIndex;
 
         for (;;) {
-            index = (index + 1) & mask;
+            index = LongHalves2LongHashMap.next(index, mask);
             const value = values[index]!;
             if (missingValue === value) {
                 break;
@@ -877,7 +877,7 @@ export class LongHalves2LongHashMap {
                 break;
             }
 
-            index = (index + 1) & mask;
+            index = LongHalves2LongHashMap.next(index, mask);
         }
 
         return oldValue;
@@ -907,7 +907,7 @@ export class LongHalves2LongHashMap {
                 break;
             }
 
-            index = (index + 1) & mask;
+            index = LongHalves2LongHashMap.next(index, mask);
         }
 
         return false;
@@ -938,6 +938,10 @@ export class LongHalves2LongHashMap {
                 --remaining;
             }
         }
+    }
+
+    private static next(index: number, mask: number): number {
+        return (index + 1) & mask;
     }
 
     private setCapacity(newCapacity: number): void {

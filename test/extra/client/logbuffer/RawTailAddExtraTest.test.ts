@@ -110,16 +110,18 @@ describe('getAndAddRawTailOffset', () => {
         const rawBuffer = new UnsafeBuffer(new Uint8Array(LogBufferDescriptor.LOG_META_DATA_LENGTH));
         const termIdHolder = new Int32Array(1);
         LogBufferDescriptor.rawTail(rawBuffer, 0, raw(9, 0));
+        const lowOffset = LogBufferDescriptor.TERM_TAIL_COUNTERS_OFFSET;
+        const nearCarry = 0xffffff00 | 0;
         let sink = 0;
 
         await expectNoAllocation((n) => {
             let sum = 0;
             for (let i = 0; i < n; i++) {
-                // 32 bytes at a time: the term offset reaches 2^31 and then the carry is never hit, so also reset
+                // 32 bytes at a time: the low half would run on past the carry, so reset it now and then
                 if ((i & 0xffff) === 0) {
-                    LogBufferDescriptor.rawTail(rawBuffer, 0, raw(9, 0xffffff00));
+                    rawBuffer.putInt(lowOffset, nearCarry);
                 }
-                sum += LogBufferDescriptor.getAndAddRawTailOffset(rawBuffer, 0, 32, termIdHolder) & 0xff;
+                sum += LogBufferDescriptor.getAndAddRawTailOffset(rawBuffer, lowOffset, 32, termIdHolder) & 0xff;
                 sum += termIdHolder[0]! & 1;
             }
             sink = sum;
@@ -139,27 +141,45 @@ describe('maxPossiblePosition', () => {
         expect(LogBufferDescriptor.maxPossiblePosition(2 ** 21)).toBe(2 ** 52);
     });
 
-    it('is MAX_POSITION from the term length where termLength * 2^31 passes 2^53 - 1', () => {
-        expect(LogBufferDescriptor.maxPossiblePosition(2 ** 22)).toBe(LogBufferDescriptor.MAX_POSITION);
+    it('is 2^53 - termLength from the term length where termLength * 2^31 passes 2^53', () => {
+        expect(LogBufferDescriptor.maxPossiblePosition(2 ** 22)).toBe(2 ** 53 - 2 ** 22);
         expect(LogBufferDescriptor.maxPossiblePosition(2 ** 21 + 65536)).toBe(2 ** 52 + 65536 * 2 ** 31);
         expect(LogBufferDescriptor.maxPossiblePosition(2 ** 22 - 65536)).toBe(2 ** 53 - 65536 * 2 ** 31);
-        expect(LogBufferDescriptor.maxPossiblePosition(1024 * 1024 * 1024)).toBe(LogBufferDescriptor.MAX_POSITION);
+        expect(LogBufferDescriptor.maxPossiblePosition(1024 * 1024 * 1024)).toBe(2 ** 53 - 2 ** 30);
         expect(LogBufferDescriptor.maxPossiblePosition(LogBufferDescriptor.TERM_MAX_LENGTH)).toBe(
-            LogBufferDescriptor.MAX_POSITION,
+            2 ** 53 - LogBufferDescriptor.TERM_MAX_LENGTH,
         );
     });
 
-    it('equals min(termLength * 2^31, 2^53 - 1) for every valid term length', () => {
+    it('equals min(termLength * 2^31, 2^53 - termLength) for every valid term length', () => {
         for (
             let termLength = LogBufferDescriptor.TERM_MIN_LENGTH;
             termLength <= LogBufferDescriptor.TERM_MAX_LENGTH;
             termLength *= 2
         ) {
             const expected = BigInt(termLength) << 31n;
-            const cap = BigInt(Number.MAX_SAFE_INTEGER);
+            const cap = (1n << 53n) - BigInt(termLength);
             expect(BigInt(LogBufferDescriptor.maxPossiblePosition(termLength)), `${termLength}`).toBe(
                 expected < cap ? expected : cap,
             );
+        }
+    });
+
+    it('maxPossiblePositionIsATermBoundaryAndLastTermStaysBelowMaxPosition', () => {
+        for (
+            let termLength = LogBufferDescriptor.TERM_MIN_LENGTH;
+            termLength <= LogBufferDescriptor.TERM_MAX_LENGTH;
+            termLength *= 2
+        ) {
+            const cap = LogBufferDescriptor.maxPossiblePosition(termLength);
+            expect(cap % termLength, `${termLength}`).toBe(0);
+            const termCount = cap / termLength - 1;
+            const bits = LogBufferDescriptor.positionBitsToShift(termLength);
+            let position = -1;
+            expect(() => {
+                position = LogBufferDescriptor.computePosition(termCount, termLength + termLength / 8 + 32, bits, 0);
+            }, `${termLength}`).not.toThrow();
+            expect(position, `${termLength}`).toBeLessThan(LogBufferDescriptor.MAX_POSITION);
         }
     });
 });

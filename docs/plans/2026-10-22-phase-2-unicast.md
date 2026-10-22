@@ -65,7 +65,7 @@ cross-worker stress tests; the message path allocates nothing in the port's own 
    - D13: `LossDetector.pack(rebuildOffset, lossFound)` is `rebuildOffset * 2 + (lossFound ? 1 : 0)` (Java:
      `((long)rebuildOffset << 32) | (lossFound ? 1 : 0)`), a small integer for any term offset; the accessors
      `rebuildOffset(x)` and `lossFound(x)` invert it, and `PublicationImage` uses them.
-   - Positions are capped at `min(termLength * 2^31, 2^53 − 1)`. `Publication` reports `MAX_POSITION_EXCEEDED` at
+   - Positions are capped at `min(termLength * 2^31, 2^53 − termLength)`, a term boundary. `Publication` reports `MAX_POSITION_EXCEEDED` at
      the cap, as Aeron does at its own limit.
    - D14: as specified, `(hi, lo)` keyed maps and `receiverIdHigh` / `receiverIdLow` on the flyweights.
 6. **Name resolution (D7, refined).** The driver keeps Java's synchronous `NameResolver.resolve` call. The default
