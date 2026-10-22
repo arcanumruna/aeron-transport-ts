@@ -28,6 +28,12 @@ const { SIZE_OF_LONG } = BitUtil;
  * compare-and-set, get-and-add and get-and-set operations are plain operations with the same names and results. Over
  * a `SharedArrayBuffer` the `byte` to `int` ones use `Atomics` and the `long` ones are 64-bit atomics on Java's word
  * through the striped lock table `LongStripes`, allocating nothing (spec D16).
+ * <p>
+ * Rule of D16: a thread that uses shared buffers must never be `worker.terminate()`d while it can be inside a buffer
+ * operation, because a thread killed while it holds a stripe leaves it locked for ever. Agents stop cooperatively
+ * (`AgentRunner.close`); a dying producer is modelled by the worker exiting itself between operations. After 2^28 spins
+ * on a held stripe an operation throws `IllegalStateException`: a failure detector, not a timeout that anything
+ * depends on.
  */
 export interface AtomicBuffer extends MutableDirectBuffer {
     /**

@@ -234,4 +234,41 @@ describe('SharedLongAtomicsExtraTest', () => {
         });
         expect(Number.isInteger(sink)).toBe(true);
     });
+
+    // a stripe is an int that grows by 2 per write: after 2^30 writes it passes INT32_MAX and wraps to INT32_MIN, which
+    // must change nothing (the lock tests the low bit, the readers compare for equality)
+    it('stripeWrapsFromInt32MaxToInt32MinWithoutChangingTheBehaviour', () => {
+        const { buffer, view } = shared();
+        const table = LongStripes.table()!;
+        const stripe = LongStripes.stripe(INDEX);
+        const saved = Atomics.load(table, stripe);
+        try {
+            Atomics.store(table, stripe, 0x7ffffffe);
+            const seen: number[] = [];
+            buffer.putLongRelease(INDEX, 2 ** 33 + 5);
+            seen.push(Atomics.load(table, stripe));
+            expect(buffer.getLongVolatile(INDEX)).toBe(2 ** 33 + 5);
+            expect(buffer.getAndAddLong(INDEX, 1)).toBe(2 ** 33 + 5);
+            seen.push(Atomics.load(table, stripe));
+            // a miss writes nothing and restores the stripe as it was
+            expect(buffer.compareAndSetLong(INDEX, 7, 9)).toBe(false);
+            seen.push(Atomics.load(table, stripe));
+            expect(buffer.compareAndSetLong(INDEX, 2 ** 33 + 6, -3)).toBe(true);
+            seen.push(Atomics.load(table, stripe));
+            expect(buffer.getLongVolatile(INDEX)).toBe(-3);
+            buffer.putLongVolatileHalves(INDEX, 0x80000000 | 0, 0x7fffffff);
+            seen.push(Atomics.load(table, stripe));
+            const out = new Int32Array(2);
+            buffer.getAndAddLongHalves(INDEX, 32, out);
+            seen.push(Atomics.load(table, stripe));
+            expect(Array.from(out)).toEqual([0x80000000 | 0, 0x7fffffff]);
+            expect(view.getBigInt64(INDEX, true)).toBe(BigInt.asIntN(64, 0x7fffffff80000020n));
+
+            // the first write left 0x7ffffffe for 0x80000000 = INT32_MIN, and every later one is even too
+            expect(seen).toEqual([-2147483648, -2147483646, -2147483646, -2147483644, -2147483642, -2147483640]);
+            expect(seen.every((q) => 0 === (q & 1))).toBe(true);
+        } finally {
+            Atomics.store(table, stripe, saved);
+        }
+    });
 });

@@ -24,7 +24,8 @@ interface Data {
 }
 
 const MAX_SPINS = 400_000_000;
-const MAX_READS = 5_000_000;
+const MAX_READS = 400_000_000;
+const MAX_SCANS = 5_000_000;
 const TWO_POW_32 = 4294967296;
 
 const data = workerData as Data;
@@ -73,7 +74,9 @@ function patternReader(): ReaderResult {
         finalSeen = 0;
         for (let i = 0; i < count; i++) {
             const v = buffer.getLongVolatile(indexes[i]!);
-            if (0 !== v % multipliers[i]! || v < previous[i]!) {
+            // v is k * m for a whole k: no fmod here, so that the reader spends its time in the read
+            const m = multipliers[i]!;
+            if (Math.round(v / m) * m !== v || v < previous[i]!) {
                 if (++violations === 1) {
                     first = 'long ' + i + ' read ' + v + ' after ' + previous[i];
                 }
@@ -169,7 +172,6 @@ function lowReader(): LowResult {
 
 const FRAME_LENGTH = 64;
 const FRAMES = 4096;
-const PASSES = 40;
 
 /** Inserts DATA frames with TermRebuilder.insert into a shared term, then clears their lengths and does it again. */
 function frameWriter(): number {
@@ -179,7 +181,7 @@ function frameWriter(): number {
     FrameDescriptor.frameFlags(packet, 0, 0xc0 - 256);
     FrameDescriptor.frameType(packet, 0, HeaderFlyweight.HDR_TYPE_DATA);
     let inserted = 0;
-    for (let pass = 0; pass < PASSES; pass++) {
+    for (let pass = 0; pass < data.count; pass++) {
         for (let f = 0; f < FRAMES; f++) {
             buffer.putIntVolatile(f * FRAME_LENGTH, 0);
         }
@@ -199,18 +201,29 @@ interface FrameResult {
     first: string;
 }
 
-/** Scans the term: a frame with a positive length must have the type DATA, never 0 (padding). */
+/** Spins on one frame, for at most this many reads, waiting for the writer to publish its length. */
+const FRAME_WAIT_SPINS = 5000;
+
+/**
+ * Follows the writer through the term: for each frame it spins on the length until the writer publishes it, and reads
+ * the type at once. A frame with a positive length must have the type DATA, never 0 (padding). Spinning on the frame
+ * that is being written (the length and the type share a cache line) is what makes a type stored after the length
+ * visible to the reader almost every time, where a scan that merely passes by would catch it rarely.
+ */
 function frameReader(): FrameResult {
     barrier();
     let violations = 0;
     let frames = 0;
     let first = '';
     let scans = 0;
-    for (; scans < MAX_READS; scans++) {
-        const done = buffer.getIntVolatile(FRAMES * FRAME_LENGTH) === PASSES;
+    for (; scans < MAX_SCANS; scans++) {
+        const done = buffer.getIntVolatile(FRAMES * FRAME_LENGTH) === data.count;
         for (let f = 0; f < FRAMES; f++) {
             const offset = f * FRAME_LENGTH;
-            const length = FrameDescriptor.frameLengthVolatile(buffer, offset);
+            let length = FrameDescriptor.frameLengthVolatile(buffer, offset);
+            for (let spins = 0; 0 === length && spins < FRAME_WAIT_SPINS && !done; spins++) {
+                length = FrameDescriptor.frameLengthVolatile(buffer, offset);
+            }
             if (length > 0) {
                 frames++;
                 const type = FrameDescriptor.frameType(buffer, offset);

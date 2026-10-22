@@ -41,6 +41,72 @@ const LITTLE_ENDIAN = 'LE' === endianness();
 
 const TWO_POW_32 = 4294967296;
 
+const SHOULD_BOUNDS_CHECK = DirectBuffer.SHOULD_BOUNDS_CHECK;
+
+/** Spins after which a held stripe is declared dead (spec D16): lowered only by the tests, see {@link lockSlow}. */
+let STRIPE_SPIN_CAP = 1 << 28;
+
+// The cold paths of the striped operations are module functions, so that the hot bodies stay small enough (V8 inlines
+// a callee of at most 460 bytecode bytes) and a throw costs the fast path a call only when it is taken.
+
+/**
+ * The slow path of the stripe lock, entered only when the test-and-set found the stripe held: waits (reading, so that
+ * the cache line is not hammered) while it is odd, then retries the test-and-set. Returns the even value the stripe
+ * had, which the caller unlocks with (`q + 2` after a write, `q` after none).
+ * <p>
+ * Dead-holder rule (spec D16): a thread that was killed while it held a stripe (`worker.terminate()` inside a buffer
+ * operation) leaves it odd for ever. After 2^28 spins this throws, so that the survivors fail loudly instead of
+ * hanging. It is a failure detector, not a timeout that anything depends on: a write holds a stripe for a few stores.
+ */
+function lockSlow(table: Int32Array, s: number): number {
+    let spins = 0;
+    for (;;) {
+        while (0 !== (Atomics.load(table, s) & 1)) {
+            if (++spins >= STRIPE_SPIN_CAP) {
+                throw deadHolder(s);
+            }
+        }
+
+        const q = Atomics.or(table, s, 1);
+        if (0 === (q & 1)) {
+            return q;
+        }
+    }
+}
+
+function deadHolder(s: number): IllegalStateException {
+    return new IllegalStateException(
+        'LongStripes stripe ' +
+            (s >> 4) +
+            ' held for 2^28 spins: a writer died holding it (worker terminated mid-write?)',
+    );
+}
+
+/** Throws the `RangeError` of {@link Long.checkSafe} for the first of `a` and `b` that is not a safe integer. */
+function requireSafe(a: number, b: number): void {
+    Long.checkSafe(a);
+    Long.checkSafe(b);
+}
+
+function badDelta(delta: number): IllegalArgumentException {
+    return new IllegalArgumentException('delta must be in [0, 2^31 - 1]: ' + delta);
+}
+
+/** The error (D5) for a stored word outside +/-(2^53 - 1): the exact 64-bit value Java would have returned. */
+function overflow(lo: number, hi: number): LongOverflowError {
+    return new LongOverflowError((BigInt(hi) << 32n) | BigInt(lo >>> 0));
+}
+
+/** The error (D5) of a get-and-add whose old value or sum is outside +/-(2^53 - 1). */
+function addOverflow(lo: number, hi: number, delta: number): LongOverflowError {
+    const oldValue = hi * TWO_POW_32 + (lo >>> 0);
+    if (!Number.isSafeInteger(oldValue)) {
+        return overflow(lo, hi);
+    }
+
+    return new LongOverflowError(BigInt.asIntN(64, BigInt(oldValue) + BigInt(delta)));
+}
+
 /**
  * The Atomics views of a SharedArrayBuffer, over all of it. A view is as long as the whole elements that fit, so an
  * odd sized SharedArrayBuffer can be wrapped.
@@ -88,7 +154,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     /**
      * Should bounds checks be done or not.
      */
-    public static readonly SHOULD_BOUNDS_CHECK = DirectBuffer.SHOULD_BOUNDS_CHECK;
+    public static readonly SHOULD_BOUNDS_CHECK = SHOULD_BOUNDS_CHECK;
 
     private _wrapAdjustment = 0;
 
@@ -103,10 +169,6 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
 
     /** The LongStripes table (spec D16), cached while the backing store is shared. */
     private _stripes: Int32Array | null = null;
-
-    /** The halves that {@link readHalves} last read: scratch, so that a read allocates nothing. */
-    private _lo = 0;
-    private _hi = 0;
 
     /**
      * Empty constructor for a later {@link wrap}, or attach a view to a byte array, an `ArrayBuffer`, a `SharedArrayBuffer` or another
@@ -154,7 +216,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
                 this._addressOffset = 0;
                 this._wrapAdjustment = 0;
             } else {
-                if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+                if (SHOULD_BOUNDS_CHECK) {
                     Objects.checkFromIndexSize(offset, length!, buffer.length);
                 }
 
@@ -174,7 +236,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
                 this._addressOffset = buffer.addressOffset();
                 this._wrapAdjustment = buffer.wrapAdjustment();
             } else {
-                if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+                if (SHOULD_BOUNDS_CHECK) {
                     Objects.checkFromIndexSize(offset, length!, buffer.capacity());
                 }
 
@@ -276,41 +338,24 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
         }
     }
 
+    // The `long` methods are tiny dispatchers on the backing, decided at wrap: V8 inlines a small function whatever its
+    // callers have already inlined, and the cumulative inlining budget (920 bytecode bytes) then goes to the compact
+    // body of the backing in use, so that a value above 2^31 is not boxed across a call (spec 5.3).
+
     public getLongVolatile(index: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-        }
-
-        if (this._shared) {
-            return this.getLongStriped(index);
-        }
-
-        return dataViewGetLong(this._dataView, this._addressOffset + index, true);
+        return this._shared ? this.getLongShared(index) : this.getLongPlain(index);
     }
 
     public putLongVolatile(index: number, value: number): void {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-        }
-
         if (this._shared) {
-            this.putLongStriped(index, value);
-            return;
+            this.putLongShared(index, value);
+        } else {
+            this.putLongPlain(index, value);
         }
-
-        dataViewSetLong(this._dataView, this._addressOffset + index, value, true);
     }
 
     public getLongAcquire(index: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-        }
-
-        if (this._shared) {
-            return this.getLongStriped(index);
-        }
-
-        return dataViewGetLong(this._dataView, this._addressOffset + index, true);
+        return this._shared ? this.getLongShared(index) : this.getLongPlain(index);
     }
 
     public putLongOrdered(index: number, value: number): void {
@@ -318,16 +363,11 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public putLongRelease(index: number, value: number): void {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-        }
-
         if (this._shared) {
-            this.putLongStriped(index, value);
-            return;
+            this.putLongShared(index, value);
+        } else {
+            this.putLongPlain(index, value);
         }
-
-        dataViewSetLong(this._dataView, this._addressOffset + index, value, true);
     }
 
     public addLongOrdered(index: number, increment: number): number {
@@ -335,169 +375,43 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public addLongRelease(index: number, increment: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-        }
-
-        if (this._shared) {
-            return this.getAndAddLongStriped(index, increment);
-        }
-
-        const offset = this._addressOffset + index;
-        const oldValue = dataViewGetLong(this._dataView, offset, true);
-        dataViewSetLong(this._dataView, offset, oldValue + increment, true);
-        return oldValue;
+        return this._shared ? this.getAndAddLongShared(index, increment) : this.getAndAddLongPlain(index, increment);
     }
 
     public putLongOpaque(index: number, value: number): void {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-        }
-
         if (this._shared) {
-            this.putLongStriped(index, value);
-            return;
+            this.putLongShared(index, value);
+        } else {
+            this.putLongPlain(index, value);
         }
-
-        dataViewSetLong(this._dataView, this._addressOffset + index, value, true);
     }
 
     public getLongOpaque(index: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-        }
-
-        if (this._shared) {
-            return this.getLongStriped(index);
-        }
-
-        return dataViewGetLong(this._dataView, this._addressOffset + index, true);
+        return this._shared ? this.getLongShared(index) : this.getLongPlain(index);
     }
 
     public addLongOpaque(index: number, increment: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-        }
-
-        if (this._shared) {
-            return this.getAndAddLongStriped(index, increment);
-        }
-
-        const oldValue = dataViewGetLong(this._dataView, this._addressOffset + index, true);
-        const newValue = oldValue + increment;
-        dataViewSetLong(this._dataView, this._addressOffset + index, newValue, true);
-        return oldValue;
+        return this._shared ? this.getAndAddLongShared(index, increment) : this.getAndAddLongPlain(index, increment);
     }
 
     public compareAndSetLong(index: number, expectedValue: number, updateValue: number): boolean {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-        }
-
-        if (this._shared) {
-            Long.checkSafe(expectedValue);
-            Long.checkSafe(updateValue);
-            const element = this.atomicIndex(index, 8, 3) << 1;
-            const table = this._stripes!;
-            const view = this._i32!;
-            const stripe = LongStripes.stripe(this._base + index);
-            const sequence = UnsafeBuffer.lockStripe(table, stripe);
-            const hit =
-                Atomics.load(view, element) === (expectedValue | 0) &&
-                Atomics.load(view, element + 1) === Math.floor(expectedValue / TWO_POW_32);
-            if (hit) {
-                UnsafeBuffer.storeHalves(view, element, updateValue);
-            }
-
-            UnsafeBuffer.unlockStripe(table, stripe, sequence);
-            return hit;
-        }
-
-        const offset = this._addressOffset + index;
-        if (dataViewGetLong(this._dataView, offset, true) === expectedValue) {
-            dataViewSetLong(this._dataView, offset, updateValue, true);
-            return true;
-        }
-
-        return false;
+        return this._shared
+            ? this.compareAndSetLongShared(index, expectedValue, updateValue)
+            : this.compareAndSetLongPlain(index, expectedValue, updateValue);
     }
 
     public compareAndExchangeLong(index: number, expectedValue: number, updateValue: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-        }
-
-        if (this._shared) {
-            Long.checkSafe(expectedValue);
-            Long.checkSafe(updateValue);
-            const element = this.atomicIndex(index, 8, 3) << 1;
-            const table = this._stripes!;
-            const view = this._i32!;
-            const stripe = LongStripes.stripe(this._base + index);
-            const sequence = UnsafeBuffer.lockStripe(table, stripe);
-            const lo = Atomics.load(view, element);
-            const hi = Atomics.load(view, element + 1);
-            if (lo === (expectedValue | 0) && hi === Math.floor(expectedValue / TWO_POW_32)) {
-                UnsafeBuffer.storeHalves(view, element, updateValue);
-            }
-
-            UnsafeBuffer.unlockStripe(table, stripe, sequence);
-            return UnsafeBuffer.halvesToLong(lo, hi);
-        }
-
-        const offset = this._addressOffset + index;
-        const witness = dataViewGetLong(this._dataView, offset, true);
-        if (witness === expectedValue) {
-            dataViewSetLong(this._dataView, offset, updateValue, true);
-        }
-
-        return witness;
+        return this._shared
+            ? this.compareAndExchangeLongShared(index, expectedValue, updateValue)
+            : this.compareAndExchangeLongPlain(index, expectedValue, updateValue);
     }
 
     public getAndSetLong(index: number, value: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-        }
-
-        if (this._shared) {
-            Long.checkSafe(value);
-            const element = this.atomicIndex(index, 8, 3) << 1;
-            const table = this._stripes!;
-            const view = this._i32!;
-            const stripe = LongStripes.stripe(this._base + index);
-            const sequence = UnsafeBuffer.lockStripe(table, stripe);
-            const lo = Atomics.load(view, element);
-            const hi = Atomics.load(view, element + 1);
-            const oldValue = hi * TWO_POW_32 + (lo >>> 0);
-            if (!Number.isSafeInteger(oldValue)) {
-                UnsafeBuffer.unlockStripe(table, stripe, sequence);
-                throw new LongOverflowError((BigInt(hi) << 32n) | BigInt(lo >>> 0));
-            }
-
-            UnsafeBuffer.storeHalves(view, element, value);
-            UnsafeBuffer.unlockStripe(table, stripe, sequence);
-            return oldValue;
-        }
-
-        const offset = this._addressOffset + index;
-        const oldValue = dataViewGetLong(this._dataView, offset, true);
-        dataViewSetLong(this._dataView, offset, value, true);
-        return oldValue;
+        return this._shared ? this.getAndSetLongShared(index, value) : this.getAndSetLongPlain(index, value);
     }
 
     public getAndAddLong(index: number, delta: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-        }
-
-        if (this._shared) {
-            return this.getAndAddLongStriped(index, delta);
-        }
-
-        const offset = this._addressOffset + index;
-        const oldValue = dataViewGetLong(this._dataView, offset, true);
-        dataViewSetLong(this._dataView, offset, oldValue + delta, true);
-        return oldValue;
+        return this._shared ? this.getAndAddLongShared(index, delta) : this.getAndAddLongPlain(index, delta);
     }
 
     /**
@@ -508,20 +422,11 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
      * @param out   receives the low half at 0 and the high half at 1.
      */
     public getLongVolatileHalves(index: number, out: Int32Array): void {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-        }
-
         if (this._shared) {
-            this.readHalves(index);
-            out[0] = this._lo;
-            out[1] = this._hi;
-            return;
+            this.getLongHalvesShared(index, out);
+        } else {
+            this.getLongHalvesPlain(index, out);
         }
-
-        const offset = this._addressOffset + index;
-        out[0] = this._dataView.getInt32(offset, true);
-        out[1] = this._dataView.getInt32(offset + 4, true);
     }
 
     /**
@@ -532,25 +437,11 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
      * @param hi    the high 32 bits.
      */
     public putLongVolatileHalves(index: number, lo: number, hi: number): void {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-        }
-
         if (this._shared) {
-            const element = this.atomicIndex(index, 8, 3) << 1;
-            const table = this._stripes!;
-            const view = this._i32!;
-            const stripe = LongStripes.stripe(this._base + index);
-            const sequence = UnsafeBuffer.lockStripe(table, stripe);
-            Atomics.store(view, element + 1, hi | 0);
-            Atomics.store(view, element, lo | 0);
-            UnsafeBuffer.unlockStripe(table, stripe, sequence);
-            return;
+            this.putLongHalvesShared(index, lo, hi);
+        } else {
+            this.putLongHalvesPlain(index, lo, hi);
         }
-
-        const offset = this._addressOffset + index;
-        this._dataView.setInt32(offset, lo, true);
-        this._dataView.setInt32(offset + 4, hi, true);
     }
 
     /**
@@ -570,39 +461,9 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
         updateLo: number,
         updateHi: number,
     ): boolean {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-        }
-
-        if (this._shared) {
-            const element = this.atomicIndex(index, 8, 3) << 1;
-            const table = this._stripes!;
-            const view = this._i32!;
-            const stripe = LongStripes.stripe(this._base + index);
-            const sequence = UnsafeBuffer.lockStripe(table, stripe);
-            const hit =
-                Atomics.load(view, element) === (expectedLo | 0) &&
-                Atomics.load(view, element + 1) === (expectedHi | 0);
-            if (hit) {
-                Atomics.store(view, element + 1, updateHi | 0);
-                Atomics.store(view, element, updateLo | 0);
-            }
-
-            UnsafeBuffer.unlockStripe(table, stripe, sequence);
-            return hit;
-        }
-
-        const offset = this._addressOffset + index;
-        if (
-            this._dataView.getInt32(offset, true) === (expectedLo | 0) &&
-            this._dataView.getInt32(offset + 4, true) === (expectedHi | 0)
-        ) {
-            this._dataView.setInt32(offset, updateLo, true);
-            this._dataView.setInt32(offset + 4, updateHi, true);
-            return true;
-        }
-
-        return false;
+        return this._shared
+            ? this.compareAndSetLongHalvesShared(index, expectedLo, expectedHi, updateLo, updateHi)
+            : this.compareAndSetLongHalvesPlain(index, expectedLo, expectedHi, updateLo, updateHi);
     }
 
     /**
@@ -615,43 +476,15 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
      * @throws IllegalArgumentException if `delta` is out of range; nothing is locked or written.
      */
     public getAndAddLongHalves(index: number, delta: number, out: Int32Array): void {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
-            this.boundsCheck0(index, SIZE_OF_LONG);
-        }
-
-        if (!(Number.isInteger(delta) && delta >= 0 && delta <= 0x7fffffff)) {
-            throw new IllegalArgumentException('delta must be in [0, 2^31 - 1]: ' + delta);
-        }
-
         if (this._shared) {
-            const element = this.atomicIndex(index, 8, 3) << 1;
-            const table = this._stripes!;
-            const view = this._i32!;
-            const stripe = LongStripes.stripe(this._base + index);
-            const sequence = UnsafeBuffer.lockStripe(table, stripe);
-            const lo = Atomics.load(view, element);
-            const hi = Atomics.load(view, element + 1);
-            const sum = (lo >>> 0) + delta;
-            Atomics.store(view, element + 1, sum >= TWO_POW_32 ? (hi + 1) | 0 : hi);
-            Atomics.store(view, element, sum | 0);
-            UnsafeBuffer.unlockStripe(table, stripe, sequence);
-            out[0] = lo;
-            out[1] = hi;
-            return;
+            this.getAndAddLongHalvesShared(index, delta, out);
+        } else {
+            this.getAndAddLongHalvesPlain(index, delta, out);
         }
-
-        const offset = this._addressOffset + index;
-        const lo = this._dataView.getInt32(offset, true);
-        const hi = this._dataView.getInt32(offset + 4, true);
-        const sum = (lo >>> 0) + delta;
-        this._dataView.setInt32(offset + 4, sum >= TWO_POW_32 ? (hi + 1) | 0 : hi, true);
-        this._dataView.setInt32(offset, sum | 0, true);
-        out[0] = lo;
-        out[1] = hi;
     }
 
     public getIntVolatile(index: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_INT);
         }
 
@@ -663,7 +496,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public putIntVolatile(index: number, value: number): void {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_INT);
         }
 
@@ -676,7 +509,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public getIntAcquire(index: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_INT);
         }
 
@@ -692,7 +525,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public putIntRelease(index: number, value: number): void {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_INT);
         }
 
@@ -709,7 +542,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public addIntRelease(index: number, increment: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_INT);
         }
 
@@ -724,7 +557,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public putIntOpaque(index: number, value: number): void {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_INT);
         }
 
@@ -737,7 +570,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public getIntOpaque(index: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_INT);
         }
 
@@ -749,7 +582,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public addIntOpaque(index: number, increment: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_INT);
         }
 
@@ -764,7 +597,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public compareAndSetInt(index: number, expectedValue: number, updateValue: number): boolean {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_INT);
         }
 
@@ -785,7 +618,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public compareAndExchangeInt(index: number, expectedValue: number, updateValue: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_INT);
         }
 
@@ -803,7 +636,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public getAndSetInt(index: number, value: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_INT);
         }
 
@@ -818,7 +651,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public getAndAddInt(index: number, delta: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_INT);
         }
 
@@ -833,7 +666,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public getShortVolatile(index: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_SHORT);
         }
 
@@ -845,7 +678,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public putShortVolatile(index: number, value: number): void {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_SHORT);
         }
 
@@ -858,7 +691,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public getByteVolatile(index: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_BYTE);
         }
 
@@ -870,7 +703,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public putByteVolatile(index: number, value: number): void {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_BYTE);
         }
 
@@ -883,7 +716,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public getCharVolatile(index: number): number {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_CHAR);
         }
 
@@ -895,7 +728,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     public putCharVolatile(index: number, value: number): void {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_CHAR);
         }
 
@@ -922,114 +755,506 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
         return address >>> shift;
     }
 
-    /**
-     * Takes the stripe (spec D16): compare-and-sets it from even to odd.
-     *
-     * @return the even value the stripe had, to pass to {@link unlockStripe}.
-     */
-    private static lockStripe(table: Int32Array, stripe: number): number {
-        for (;;) {
-            const sequence = Atomics.load(table, stripe);
-            if (
-                0 === (sequence & 1) &&
-                sequence === Atomics.compareExchange(table, stripe, sequence, (sequence + 1) | 0)
-            ) {
-                return sequence;
+    // The `long` operations over an ArrayBuffer (one thread): plain accesses with the same names and results.
+
+    private getLongPlain(index: number): number {
+        if (SHOULD_BOUNDS_CHECK) {
+            this.boundsCheck0(index, SIZE_OF_LONG);
+        }
+
+        return dataViewGetLong(this._dataView, this._addressOffset + index, true);
+    }
+
+    private putLongPlain(index: number, value: number): void {
+        if (SHOULD_BOUNDS_CHECK) {
+            this.boundsCheck0(index, SIZE_OF_LONG);
+        }
+
+        dataViewSetLong(this._dataView, this._addressOffset + index, value, true);
+    }
+
+    private getAndAddLongPlain(index: number, delta: number): number {
+        if (SHOULD_BOUNDS_CHECK) {
+            this.boundsCheck0(index, SIZE_OF_LONG);
+        }
+
+        const offset = this._addressOffset + index;
+        const oldValue = dataViewGetLong(this._dataView, offset, true);
+        dataViewSetLong(this._dataView, offset, oldValue + delta, true);
+        return oldValue;
+    }
+
+    private compareAndSetLongPlain(index: number, expectedValue: number, updateValue: number): boolean {
+        if (SHOULD_BOUNDS_CHECK) {
+            this.boundsCheck0(index, SIZE_OF_LONG);
+        }
+
+        const offset = this._addressOffset + index;
+        if (dataViewGetLong(this._dataView, offset, true) === expectedValue) {
+            dataViewSetLong(this._dataView, offset, updateValue, true);
+            return true;
+        }
+
+        return false;
+    }
+
+    private compareAndExchangeLongPlain(index: number, expectedValue: number, updateValue: number): number {
+        if (SHOULD_BOUNDS_CHECK) {
+            this.boundsCheck0(index, SIZE_OF_LONG);
+        }
+
+        const offset = this._addressOffset + index;
+        const witness = dataViewGetLong(this._dataView, offset, true);
+        if (witness === expectedValue) {
+            dataViewSetLong(this._dataView, offset, updateValue, true);
+        }
+
+        return witness;
+    }
+
+    private getAndSetLongPlain(index: number, value: number): number {
+        if (SHOULD_BOUNDS_CHECK) {
+            this.boundsCheck0(index, SIZE_OF_LONG);
+        }
+
+        const offset = this._addressOffset + index;
+        const oldValue = dataViewGetLong(this._dataView, offset, true);
+        dataViewSetLong(this._dataView, offset, value, true);
+        return oldValue;
+    }
+
+    private getLongHalvesPlain(index: number, out: Int32Array): void {
+        if (SHOULD_BOUNDS_CHECK) {
+            this.boundsCheck0(index, SIZE_OF_LONG);
+        }
+
+        const offset = this._addressOffset + index;
+        out[0] = this._dataView.getInt32(offset, true);
+        out[1] = this._dataView.getInt32(offset + 4, true);
+    }
+
+    private putLongHalvesPlain(index: number, lo: number, hi: number): void {
+        if (SHOULD_BOUNDS_CHECK) {
+            this.boundsCheck0(index, SIZE_OF_LONG);
+        }
+
+        const offset = this._addressOffset + index;
+        this._dataView.setInt32(offset, lo, true);
+        this._dataView.setInt32(offset + 4, hi, true);
+    }
+
+    private compareAndSetLongHalvesPlain(
+        index: number,
+        expectedLo: number,
+        expectedHi: number,
+        updateLo: number,
+        updateHi: number,
+    ): boolean {
+        if (SHOULD_BOUNDS_CHECK) {
+            this.boundsCheck0(index, SIZE_OF_LONG);
+        }
+
+        const offset = this._addressOffset + index;
+        if (
+            this._dataView.getInt32(offset, true) === (expectedLo | 0) &&
+            this._dataView.getInt32(offset + 4, true) === (expectedHi | 0)
+        ) {
+            this._dataView.setInt32(offset, updateLo, true);
+            this._dataView.setInt32(offset + 4, updateHi, true);
+            return true;
+        }
+
+        return false;
+    }
+
+    private getAndAddLongHalvesPlain(index: number, delta: number, out: Int32Array): void {
+        if (SHOULD_BOUNDS_CHECK) {
+            this.boundsCheck0(index, SIZE_OF_LONG);
+        }
+
+        if (!(Number.isInteger(delta) && delta >= 0 && delta <= 0x7fffffff)) {
+            throw badDelta(delta);
+        }
+
+        const offset = this._addressOffset + index;
+        const lo = this._dataView.getInt32(offset, true);
+        const hi = this._dataView.getInt32(offset + 4, true);
+        const sum = (lo >>> 0) + delta;
+        this._dataView.setInt32(offset + 4, sum >= TWO_POW_32 ? (hi + 1) | 0 : hi, true);
+        this._dataView.setInt32(offset, sum | 0, true);
+        out[0] = lo;
+        out[1] = hi;
+    }
+
+    // The striped 64-bit operations of a shared buffer (spec D16). Each is ONE compact body with everything inlined (the
+    // range check, the alignment check, the safe integer check and the stripe hash), so that TurboFan inlines it into
+    // the caller (a body must stay under V8's 460 bytecode bytes for that) and a value above 2^31 is not boxed in a heap
+    // number across a call. The common shape:
+    //
+    //   1. every check that can throw runs BEFORE the stripe is taken;
+    //   2. the writer takes the stripe with a test-and-set, `Atomics.or(table, s, 1)`: if the old value was even, the
+    //      stripe is ours, and `q` is that even value; otherwise `lockSlow` waits for the holder;
+    //   3. inside the lock the payload READS are plain element reads. The sequentially consistent `Atomics.or` read the
+    //      unlock store of the previous holder, so it synchronizes-with it (ECMA-262 section 29.4) and those reads are
+    //      race free. The payload WRITES stay `Atomics.store`: a plain store is not ordered for the readers, which do
+    //      not take the lock (a plain payload store is incorrect, see the T2b review);
+    //   4. the HIGH half is stored first and only when it changed, the LOW half is ALWAYS stored LAST. Aeron readers that
+    //      read only the low `int` of a 64-bit word without the stripe (for example `frameLengthVolatile` after
+    //      `TermRebuilder`'s `putLongRelease` of the first header word, where the high half holds the version, flags and
+    //      type) must see the high half once the low half is visible, otherwise a frame reads as type 0, padding;
+    //   5. a write unlocks with `q + 2`, so that a reader can tell that a write happened between its two loads. A path
+    //      that wrote nothing (a compare-and-set miss, an overflow thrown after the lock) restores `q`: no reader can
+    //      have seen anything change, and every throw after the lock unlocks first.
+    //
+    // A reader never writes the stripe: it loads the stripe, the two halves and the stripe again, and retries while the
+    // stripe is odd or changed. Retries are counted, and a stripe held for 2^28 spins throws (see lockSlow).
+
+    private getLongShared(index: number): number {
+        const address = this._base + index;
+        if (0 !== (address & 7) || (SHOULD_BOUNDS_CHECK && (index < 0 || index > this._capacity - 8))) {
+            throw this.accessError(index);
+        }
+
+        const s = (Math.imul(address >>> 3, 0x9e3779b1 | 0) >>> 22) << 4;
+        const e = address >>> 2;
+        const table = this._stripes!;
+        const view = this._i32!;
+        for (let spins = 0; ;) {
+            const q = Atomics.load(table, s);
+            const lo = Atomics.load(view, e);
+            const hi = Atomics.load(view, e + 1);
+            if (0 === (q & 1) && q === Atomics.load(table, s)) {
+                const value = hi * TWO_POW_32 + (lo >>> 0);
+                if (!Number.isSafeInteger(value)) {
+                    throw overflow(lo, hi);
+                }
+
+                return value;
+            }
+
+            if (++spins >= STRIPE_SPIN_CAP) {
+                throw deadHolder(s);
             }
         }
     }
 
-    /** Releases the stripe, with a value that differs from the one a reader may have seen before the write. */
-    private static unlockStripe(table: Int32Array, stripe: number, sequence: number): void {
-        Atomics.store(table, stripe, (sequence + 2) | 0);
-    }
+    private putLongShared(index: number, value: number): void {
+        const address = this._base + index;
+        if (0 !== (address & 7) || (SHOULD_BOUNDS_CHECK && (index < 0 || index > this._capacity - 8))) {
+            throw this.accessError(index);
+        }
 
-    /**
-     * Stores a `long` as two `int` halves, HIGH HALF FIRST and LOW HALF LAST, under the stripe. The order is a rule for
-     * every striped write: Aeron readers that read only the low `int` of a 64-bit word without the stripe (for example
-     * `frameLengthVolatile` after `TermRebuilder`'s `putLongRelease` of the first header word, where the high half holds
-     * the version, flags and type) must see the high half once the low half is visible. Otherwise a frame reads as
-     * type 0, padding.
-     */
-    private static storeHalves(view: Int32Array, element: number, value: number): void {
-        Atomics.store(view, element + 1, Math.floor(value / TWO_POW_32));
-        Atomics.store(view, element, value | 0);
-    }
-
-    /** The `number` of two halves, or a {@link LongOverflowError} (D5) when it is not a safe integer. */
-    private static halvesToLong(lo: number, hi: number): number {
-        const value = hi * TWO_POW_32 + (lo >>> 0);
         if (!Number.isSafeInteger(value)) {
-            throw new LongOverflowError((BigInt(hi) << 32n) | BigInt(lo >>> 0));
+            requireSafe(value, 0);
         }
 
-        return value;
-    }
-
-    /**
-     * Reads the halves of the `long` at `index` into `_lo` and `_hi`: the stripe, the halves and the stripe again, until
-     * the stripe is even and unchanged. There is no iteration cap: a write holds a stripe for a few stores.
-     */
-    private readHalves(index: number): void {
-        const element = this.atomicIndex(index, 8, 3) << 1;
+        const s = (Math.imul(address >>> 3, 0x9e3779b1 | 0) >>> 22) << 4;
+        const e = address >>> 2;
         const table = this._stripes!;
         const view = this._i32!;
-        const stripe = LongStripes.stripe(this._base + index);
-        for (;;) {
-            const sequence = Atomics.load(table, stripe);
-            const lo = Atomics.load(view, element);
-            const hi = Atomics.load(view, element + 1);
-            if (0 === (sequence & 1) && sequence === Atomics.load(table, stripe)) {
-                this._lo = lo;
-                this._hi = hi;
-                return;
+        let q = Atomics.or(table, s, 1);
+        if (0 !== (q & 1)) {
+            q = lockSlow(table, s);
+        }
+
+        const hi = Math.floor(value / TWO_POW_32);
+        if (hi !== view[e + 1]) {
+            Atomics.store(view, e + 1, hi);
+        }
+
+        Atomics.store(view, e, value | 0);
+        Atomics.store(table, s, (q + 2) | 0);
+    }
+
+    /** Java's `getAndAddLong`; the sum is range checked (D5), with nothing written and the stripe restored when outside. */
+    private getAndAddLongShared(index: number, delta: number): number {
+        const address = this._base + index;
+        if (0 !== (address & 7) || (SHOULD_BOUNDS_CHECK && (index < 0 || index > this._capacity - 8))) {
+            throw this.accessError(index);
+        }
+
+        if (!Number.isSafeInteger(delta)) {
+            requireSafe(delta, 0);
+        }
+
+        const s = (Math.imul(address >>> 3, 0x9e3779b1 | 0) >>> 22) << 4;
+        const e = address >>> 2;
+        const table = this._stripes!;
+        const view = this._i32!;
+        let q = Atomics.or(table, s, 1);
+        if (0 !== (q & 1)) {
+            q = lockSlow(table, s);
+        }
+
+        const lo = view[e]!;
+        const hi = view[e + 1]!;
+        const oldValue = hi * TWO_POW_32 + (lo >>> 0);
+        const newValue = oldValue + delta;
+        if (!Number.isSafeInteger(oldValue) || !Number.isSafeInteger(newValue)) {
+            Atomics.store(table, s, q);
+            throw addOverflow(lo, hi, delta);
+        }
+
+        const newHi = Math.floor(newValue / TWO_POW_32);
+        if (newHi !== hi) {
+            Atomics.store(view, e + 1, newHi);
+        }
+
+        Atomics.store(view, e, newValue | 0);
+        Atomics.store(table, s, (q + 2) | 0);
+        return oldValue;
+    }
+
+    private compareAndSetLongShared(index: number, expectedValue: number, updateValue: number): boolean {
+        const address = this._base + index;
+        if (0 !== (address & 7) || (SHOULD_BOUNDS_CHECK && (index < 0 || index > this._capacity - 8))) {
+            throw this.accessError(index);
+        }
+
+        if (!Number.isSafeInteger(expectedValue) || !Number.isSafeInteger(updateValue)) {
+            requireSafe(expectedValue, updateValue);
+        }
+
+        const s = (Math.imul(address >>> 3, 0x9e3779b1 | 0) >>> 22) << 4;
+        const e = address >>> 2;
+        const table = this._stripes!;
+        const view = this._i32!;
+        let q = Atomics.or(table, s, 1);
+        if (0 !== (q & 1)) {
+            q = lockSlow(table, s);
+        }
+
+        // the halves are compared, so that a stored value outside +/-(2^53 - 1) is a miss and not a throw
+        const hi = view[e + 1]!;
+        const hit = view[e] === (expectedValue | 0) && hi === Math.floor(expectedValue / TWO_POW_32);
+        if (hit) {
+            const newHi = Math.floor(updateValue / TWO_POW_32);
+            if (newHi !== hi) {
+                Atomics.store(view, e + 1, newHi);
             }
+
+            Atomics.store(view, e, updateValue | 0);
+            q = (q + 2) | 0;
         }
+
+        Atomics.store(table, s, q);
+        return hit;
     }
 
-    private getLongStriped(index: number): number {
-        this.readHalves(index);
-        return UnsafeBuffer.halvesToLong(this._lo, this._hi);
-    }
+    private compareAndExchangeLongShared(index: number, expectedValue: number, updateValue: number): number {
+        const address = this._base + index;
+        if (0 !== (address & 7) || (SHOULD_BOUNDS_CHECK && (index < 0 || index > this._capacity - 8))) {
+            throw this.accessError(index);
+        }
 
-    private putLongStriped(index: number, value: number): void {
-        Long.checkSafe(value);
-        const element = this.atomicIndex(index, 8, 3) << 1;
-        const table = this._stripes!;
-        const stripe = LongStripes.stripe(this._base + index);
-        const sequence = UnsafeBuffer.lockStripe(table, stripe);
-        UnsafeBuffer.storeHalves(this._i32!, element, value);
-        UnsafeBuffer.unlockStripe(table, stripe, sequence);
-    }
+        if (!Number.isSafeInteger(expectedValue) || !Number.isSafeInteger(updateValue)) {
+            requireSafe(expectedValue, updateValue);
+        }
 
-    /**
-     * Java's `getAndAddLong` on a shared buffer, under the stripe. The sum is range checked (D5), with nothing written
-     * and the stripe released when it is outside.
-     */
-    private getAndAddLongStriped(index: number, delta: number): number {
-        Long.checkSafe(delta);
-        const element = this.atomicIndex(index, 8, 3) << 1;
+        const s = (Math.imul(address >>> 3, 0x9e3779b1 | 0) >>> 22) << 4;
+        const e = address >>> 2;
         const table = this._stripes!;
         const view = this._i32!;
-        const stripe = LongStripes.stripe(this._base + index);
-        const sequence = UnsafeBuffer.lockStripe(table, stripe);
-        const lo = Atomics.load(view, element);
-        const hi = Atomics.load(view, element + 1);
+        let q = Atomics.or(table, s, 1);
+        if (0 !== (q & 1)) {
+            q = lockSlow(table, s);
+        }
+
+        const lo = view[e]!;
+        const hi = view[e + 1]!;
+        const witness = hi * TWO_POW_32 + (lo >>> 0);
+        if (!Number.isSafeInteger(witness)) {
+            Atomics.store(table, s, q);
+            throw overflow(lo, hi);
+        }
+
+        if (witness === expectedValue) {
+            const newHi = Math.floor(updateValue / TWO_POW_32);
+            if (newHi !== hi) {
+                Atomics.store(view, e + 1, newHi);
+            }
+
+            Atomics.store(view, e, updateValue | 0);
+            q = (q + 2) | 0;
+        }
+
+        Atomics.store(table, s, q);
+        return witness;
+    }
+
+    private getAndSetLongShared(index: number, value: number): number {
+        const address = this._base + index;
+        if (0 !== (address & 7) || (SHOULD_BOUNDS_CHECK && (index < 0 || index > this._capacity - 8))) {
+            throw this.accessError(index);
+        }
+
+        if (!Number.isSafeInteger(value)) {
+            requireSafe(value, 0);
+        }
+
+        const s = (Math.imul(address >>> 3, 0x9e3779b1 | 0) >>> 22) << 4;
+        const e = address >>> 2;
+        const table = this._stripes!;
+        const view = this._i32!;
+        let q = Atomics.or(table, s, 1);
+        if (0 !== (q & 1)) {
+            q = lockSlow(table, s);
+        }
+
+        const lo = view[e]!;
+        const hi = view[e + 1]!;
         const oldValue = hi * TWO_POW_32 + (lo >>> 0);
         if (!Number.isSafeInteger(oldValue)) {
-            UnsafeBuffer.unlockStripe(table, stripe, sequence);
-            throw new LongOverflowError((BigInt(hi) << 32n) | BigInt(lo >>> 0));
+            Atomics.store(table, s, q);
+            throw overflow(lo, hi);
         }
 
-        const newValue = oldValue + delta;
-        if (!Number.isSafeInteger(newValue)) {
-            UnsafeBuffer.unlockStripe(table, stripe, sequence);
-            throw new LongOverflowError(BigInt.asIntN(64, BigInt(oldValue) + BigInt(delta)));
+        const newHi = Math.floor(value / TWO_POW_32);
+        if (newHi !== hi) {
+            Atomics.store(view, e + 1, newHi);
         }
 
-        UnsafeBuffer.storeHalves(view, element, newValue);
-        UnsafeBuffer.unlockStripe(table, stripe, sequence);
+        Atomics.store(view, e, value | 0);
+        Atomics.store(table, s, (q + 2) | 0);
         return oldValue;
+    }
+
+    private getLongHalvesShared(index: number, out: Int32Array): void {
+        const address = this._base + index;
+        if (0 !== (address & 7) || (SHOULD_BOUNDS_CHECK && (index < 0 || index > this._capacity - 8))) {
+            throw this.accessError(index);
+        }
+
+        const s = (Math.imul(address >>> 3, 0x9e3779b1 | 0) >>> 22) << 4;
+        const e = address >>> 2;
+        const table = this._stripes!;
+        const view = this._i32!;
+        for (let spins = 0; ;) {
+            const q = Atomics.load(table, s);
+            const lo = Atomics.load(view, e);
+            const hi = Atomics.load(view, e + 1);
+            if (0 === (q & 1) && q === Atomics.load(table, s)) {
+                out[0] = lo;
+                out[1] = hi;
+                return;
+            }
+
+            if (++spins >= STRIPE_SPIN_CAP) {
+                throw deadHolder(s);
+            }
+        }
+    }
+
+    private putLongHalvesShared(index: number, lo: number, hi: number): void {
+        const address = this._base + index;
+        if (0 !== (address & 7) || (SHOULD_BOUNDS_CHECK && (index < 0 || index > this._capacity - 8))) {
+            throw this.accessError(index);
+        }
+
+        const s = (Math.imul(address >>> 3, 0x9e3779b1 | 0) >>> 22) << 4;
+        const e = address >>> 2;
+        const table = this._stripes!;
+        const view = this._i32!;
+        let q = Atomics.or(table, s, 1);
+        if (0 !== (q & 1)) {
+            q = lockSlow(table, s);
+        }
+
+        if (view[e + 1] !== (hi | 0)) {
+            Atomics.store(view, e + 1, hi | 0);
+        }
+
+        Atomics.store(view, e, lo | 0);
+        Atomics.store(table, s, (q + 2) | 0);
+    }
+
+    private compareAndSetLongHalvesShared(
+        index: number,
+        expectedLo: number,
+        expectedHi: number,
+        updateLo: number,
+        updateHi: number,
+    ): boolean {
+        const address = this._base + index;
+        if (0 !== (address & 7) || (SHOULD_BOUNDS_CHECK && (index < 0 || index > this._capacity - 8))) {
+            throw this.accessError(index);
+        }
+
+        const s = (Math.imul(address >>> 3, 0x9e3779b1 | 0) >>> 22) << 4;
+        const e = address >>> 2;
+        const table = this._stripes!;
+        const view = this._i32!;
+        let q = Atomics.or(table, s, 1);
+        if (0 !== (q & 1)) {
+            q = lockSlow(table, s);
+        }
+
+        const hi = view[e + 1]!;
+        const hit = view[e] === (expectedLo | 0) && hi === (expectedHi | 0);
+        if (hit) {
+            if (hi !== (updateHi | 0)) {
+                Atomics.store(view, e + 1, updateHi | 0);
+            }
+
+            Atomics.store(view, e, updateLo | 0);
+            q = (q + 2) | 0;
+        }
+
+        Atomics.store(table, s, q);
+        return hit;
+    }
+
+    private getAndAddLongHalvesShared(index: number, delta: number, out: Int32Array): void {
+        const address = this._base + index;
+        if (0 !== (address & 7) || (SHOULD_BOUNDS_CHECK && (index < 0 || index > this._capacity - 8))) {
+            throw this.accessError(index);
+        }
+
+        if (!(delta >= 0 && delta <= 0x7fffffff && (delta | 0) === delta)) {
+            throw badDelta(delta);
+        }
+
+        const s = (Math.imul(address >>> 3, 0x9e3779b1 | 0) >>> 22) << 4;
+        const e = address >>> 2;
+        const table = this._stripes!;
+        const view = this._i32!;
+        let q = Atomics.or(table, s, 1);
+        if (0 !== (q & 1)) {
+            q = lockSlow(table, s);
+        }
+
+        const lo = view[e]!;
+        const hi = view[e + 1]!;
+        const sum = (lo >>> 0) + delta;
+        if (sum >= TWO_POW_32) {
+            // the carry: INT32_MAX plus one wraps to INT32_MIN, as the Java 64-bit add does
+            Atomics.store(view, e + 1, (hi + 1) | 0);
+        }
+
+        Atomics.store(view, e, sum | 0);
+        Atomics.store(table, s, (q + 2) | 0);
+        out[0] = lo;
+        out[1] = hi;
+    }
+
+    /**
+     * Port-only (spec D16): sets the number of spins after which a stripe that stays held is declared dead (default
+     * 2^28). For the tests of the dead-holder rule, which lower it and restore it.
+     */
+    public static setStripeSpinCapForTests(spins: number): void {
+        STRIPE_SPIN_CAP = spins;
+    }
+
+    /**
+     * The error of an access that failed the inline checks of a shared `long` operation: an out of range index
+     * (thrown by the bounds check, as for every other method) or an address that is not a multiple of 8.
+     */
+    private accessError(index: number): IllegalArgumentException {
+        if (SHOULD_BOUNDS_CHECK) {
+            this.boundsCheck0(index, SIZE_OF_LONG);
+        }
+
+        return new IllegalArgumentException('Unaligned atomic access: index=' + index + ' size=8');
     }
 
     public override toString(): string {
@@ -1048,7 +1273,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
     }
 
     protected ensureCapacity(index: number, length: number): void {
-        if (UnsafeBuffer.SHOULD_BOUNDS_CHECK) {
+        if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, length);
         }
     }

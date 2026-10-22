@@ -163,8 +163,13 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
   stripes, one `int` per 64-byte line, created by the main thread at module load and handed to workers through
   `worker_threads` environment data; wrapping a `SharedArrayBuffer` in a worker with no table throws
   `IllegalStateException`). `UnsafeBuffer`'s shared `long` methods use it: writer lock by compare-and-set from even to
-  odd, the two halves stored with `Atomics.store` (the D16 rule: HIGH half first, LOW half last), release with stripe
-  plus two; reader loads stripe, halves, stripe and retries while odd or changed. The `BigInt64Array` view, `toLong`
+  odd by a test-and-set (`Atomics.or`), plain payload reads inside the lock, the two halves stored with
+  `Atomics.store` (the D16 rule: HIGH half first and only when it changed, LOW half always last), release with stripe
+  plus two, or the old value back when nothing was written; reader loads stripe, halves, stripe and retries while odd
+  or changed, and never writes the stripe. Every striped body is one compact, inlined method (under V8's 460 byte
+  limit) behind a tiny dispatcher. Dead-holder rule: a thread is never `worker.terminate()`d while it can be inside a
+  buffer operation; after 2^28 spins on a held stripe an operation throws `IllegalStateException` (a failure detector,
+  lowered in the kill test by the port-only `UnsafeBuffer.setStripeSpinCapForTests`). The `BigInt64Array` view, `toLong`
   and the `*Seq` methods are deleted. Port-only `getLongVolatileHalves`, `putLongVolatileHalves`,
   `compareAndSetLongHalves`, `getAndAddLongHalves` (on `AtomicBuffer` too) cover the full 64-bit range for the raw
   tails.
@@ -177,10 +182,17 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
   `long` atomic, carry, stripe released on every exit, halves methods over both backings, no allocation);
   `SharedLongAtomicsWorkersExtraTest` (readers never see a torn long; 4 workers × 200k `getAndAddLong` exact across
   2^32; 4 × 100k CAS increments exact; two words on one stripe; the low half is written last so an `int` reader sees
-  the high half; `TermRebuilder` frames never read as padding); `RawTailAtomicityExtraTest` (carry into the term id,
-  the (termId, offset) pair is never torn while another thread rotates, no allocation);
-  `SharedCountersExtraTest` (value at Java's offset, torn-read test with 3 readers across 2^32, reuse, the
-  `AtomicCounter` / position / `forEach` gaps over both backings). `SharedAtomicsExtraTest` loses its `*Seq` tests.
+  the high half; `TermRebuilder` frames never read as padding, which guards its own int order); the stripe wraps from
+  `INT32_MAX` to `INT32_MIN`; `RawTailAtomicityExtraTest` (carry into the term id, the (termId, offset) pair is never
+  torn while another thread rotates, no allocation); `SharedCountersExtraTest` (value at Java's offset, torn-read tests
+  with 3 readers across 2^32 and across many boundaries, reuse, the `AtomicCounter` / position / `forEach` gaps over
+  both backings). `SharedAtomicsExtraTest` loses its `*Seq` tests and its two stalled-writer tests, which the
+  dead-holder rule and the kill test supersede.
+- Review fixes: `SharedLongAtomicsAllocationExtraTest` and `PlainLongAtomicsAllocationExtraTest` (no heap number for
+  values around 2^40 on each backing, one backing per file); `StripeKillAdversarialRegression`
+  (`aStripeLeftOddByATerminatedWriterFailsLoudlyInsteadOfHangingAdversarialRegression`: a terminated worker leaves a
+  stripe odd and every operation on it throws `IllegalStateException` instead of hanging;
+  `halvesWritesStoreTheLowHalfLastAdversarialRegression`).
 
 #### T3 — Agrona ring buffers: `OneToOneRingBuffer`, `ManyToOneRingBuffer` (D16)
 - Sources: `concurrent/{MessageHandler, ControlledMessageHandler}`, `concurrent/ringbuffer/{RingBuffer,
@@ -195,7 +207,8 @@ Paths below are relative to `aeron-{client,driver}/src/{main,test}/java/io/aeron
     every message arrives once, in per-producer order, with its bytes intact; repeated with the positions
     started 64 KiB below 2^32 so they cross it during the run; repeated with `tryClaim` / `commit` and `abort`;
   - one-to-one: the same with one producer;
-  - `unblock` with a producer worker terminated between claim and commit: the consumer gets past it;
+  - `unblock` with a producer worker that exits itself right after `tryClaim`: the consumer gets past it (a worker is
+    never `terminate()`d inside a buffer operation, T2b's dead-holder rule);
   - the consumer heartbeat read from another worker is never torn;
   - no allocation per `write`, `tryClaim`, `commit` and `read` (the consumer's handler excluded).
 - Bench harness: `bench/micro/` runner (`npm run bench:micro`) and its first benches (see Testing, Performance

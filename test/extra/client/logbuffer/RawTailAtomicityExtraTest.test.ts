@@ -59,7 +59,8 @@ describe.each(BACKINGS)('RawTailAtomicityExtraTest over $name', (backing) => {
 
 describe('RawTailAtomicityExtraTest', () => {
     // issue #10: a producer's (term id, term offset) pair was read and added as two int operations, so a rotation
-    // between them gave a pair that never existed
+    // between them gave a pair that never existed. The adder runs until the rotator is done, so that the two overlap
+    // for as long as the rotations take, and counts the torn pairs inline.
     it('rawTailPairIsNeverTornAcrossThreadsRegression', async () => {
         const sab = new SharedArrayBuffer(4096);
         const buffer = new UnsafeBuffer(sab);
@@ -68,24 +69,15 @@ describe('RawTailAtomicityExtraTest', () => {
         const results = (await runWorkers(
             SCRIPT,
             [
-                { kind: 'add', buffer: sab, partition: PARTITION, count: 30_000 },
+                { kind: 'add', buffer: sab, partition: PARTITION, count: 0 },
                 { kind: 'rotate', buffer: sab, partition: PARTITION, count: 4000 },
             ],
             25_000,
-        )) as [{ termIds: Int32Array; offsets: Float64Array }, number];
+        )) as [{ adds: number; torn: number; first: string }, number];
 
-        const { termIds, offsets } = results[0];
-        expect(termIds.length).toBe(30_000);
-        let torn = 0;
-        let first = '';
-        for (let i = 0; i < termIds.length; i++) {
-            if (offsets[i]! >>> 20 !== termIds[i]) {
-                if (++torn === 1) {
-                    first = 'termId ' + termIds[i] + ' offset ' + offsets[i];
-                }
-            }
-        }
-        expect(torn, first).toBe(0);
+        // the adder ran during the rotations, and every pair it got was a pair that existed
+        expect(results[0].adds).toBeGreaterThan(4000);
+        expect(results[0].torn, results[0].first).toBe(0);
         expect(LogBufferDescriptor.rawTailTermId(buffer, PARTITION)).toBe(4001);
     }, 30_000);
 

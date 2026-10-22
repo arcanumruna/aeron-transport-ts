@@ -11,3 +11,10 @@ export const CAPACITY = 2 * CountersReader.COUNTER_LENGTH + 64;
 export const WRITES = 1_000_000;
 export const START = 2 ** 32 - 500_000;
 export const READERS = 3;
+
+/**
+ * The stepping writer sets the counter to k * STEP for k = 1 .. STEPS: both halves change on every write, and the low
+ * half crosses a 2^32 boundary each time. A read is whole only if its high half equals its low half.
+ */
+export const STEP = 2 ** 32 + 1;
+export const STEPS = 1_000_000;

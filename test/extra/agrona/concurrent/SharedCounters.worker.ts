@@ -5,11 +5,13 @@ import { AtomicCounter } from '../../../../src/agrona/concurrent/status/AtomicCo
 import { CountersReader } from '../../../../src/agrona/concurrent/status/CountersReader.js';
 import { UnsafeBufferPosition } from '../../../../src/agrona/concurrent/status/UnsafeBufferPosition.js';
 import { UnsafeBuffer } from '../../../../src/agrona/concurrent/UnsafeBuffer.js';
-import { BARRIER, COUNTER_ID, DONE, READERS, START, WRITES } from './SharedCountersLayout.js';
+import { BARRIER, COUNTER_ID, DONE, READERS, START, STEP, STEPS, WRITES } from './SharedCountersLayout.js';
 
 interface Data {
     kind: 'writer' | 'position' | 'reader' | 'counter';
     buffer: SharedArrayBuffer;
+    /** the stepping writer (k * STEP) and readers that check hi === lo, instead of the incrementing counter */
+    stepped?: boolean;
 }
 
 const MAX_SPINS = 400_000_000;
@@ -31,6 +33,14 @@ function barrier(): void {
 function writer(): number {
     const counter = new AtomicCounter(buffer, COUNTER_ID);
     barrier();
+    if (data.stepped) {
+        for (let k = 1; k <= STEPS; k++) {
+            counter.set(k * STEP);
+        }
+        buffer.putIntVolatile(DONE, 1);
+        return STEPS;
+    }
+
     for (let i = 0; i < WRITES; i++) {
         counter.increment();
     }
@@ -45,8 +55,15 @@ interface ReaderResult {
     last: number;
 }
 
-/** Reads until the final value is seen: never torn (inside [START, START + WRITES]) and never decreasing. */
+/**
+ * Reads until the final value is seen: never torn (inside [START, START + WRITES]) and never decreasing. The stepped
+ * form reads k * STEP until STEPS * STEP: every read has its high half equal to its low half, and never decreases.
+ */
 function reader(read: () => number): ReaderResult {
+    if (data.stepped) {
+        return steppedReader(read);
+    }
+
     barrier();
     let reads = 0;
     let bad = 0;
@@ -62,6 +79,28 @@ function reader(read: () => number): ReaderResult {
         }
         previous = value;
         if (START + WRITES === value) {
+            break;
+        }
+    }
+    return { reads, bad, firstBad, last: previous };
+}
+
+function steppedReader(read: () => number): ReaderResult {
+    barrier();
+    let reads = 0;
+    let bad = 0;
+    let firstBad = '';
+    let previous = 0;
+    for (let spins = 0; spins < MAX_SPINS; spins++) {
+        const value = read();
+        reads++;
+        if (value < previous || Math.floor(value / 2 ** 32) !== value >>> 0) {
+            if (++bad === 1) {
+                firstBad = value + ' after ' + previous;
+            }
+        }
+        previous = value;
+        if (STEPS * STEP === value) {
             break;
         }
     }
