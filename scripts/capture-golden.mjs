@@ -331,6 +331,7 @@ function start(name, cmd, cmdArgs, env, logFile) {
     child.once('error', (err) => {
         console.error(`capture-golden: cannot start ${name} (${cmd}): ${err.message}`);
         killAll();
+        removeDriverDirs();
         process.exit(1);
     });
     const exited = new Promise((r) => child.once('exit', r));

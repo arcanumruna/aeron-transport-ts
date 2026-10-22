@@ -2,8 +2,8 @@
 // `TermReader.read` (with a position and the packed form), `TermScanner.scanForAvailability`,
 // `TermBlockScanner.scan`, `TermRebuilder.insert`, `TermGapScanner.scanForGap` and `TermGapFiller.tryFillGap`.
 // The packed outcomes (spec D13) of these loops are small integers (a typical read has few fragments, a scan of an
-// ordinary frame no padding), so no heap number is made either; a value above 2^31 would be boxed when a call is not
-// inlined, and is not exercised here.
+// ordinary frame no padding), so no heap number is made either. The TermScanner loop does exercise a packed value
+// above 2^31 (with padding), and V8 did not box it there.
 import { describe, it } from 'vitest';
 import { UnsafeBuffer } from '../../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { Position } from '../../../../src/agrona/concurrent/status/Position.js';

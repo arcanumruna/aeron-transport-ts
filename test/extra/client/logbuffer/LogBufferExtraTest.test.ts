@@ -402,7 +402,8 @@ describe('LogBufferDescriptor extra: raw tail', () => {
     it('packTail takes Java int arguments: a number beyond 32 bits is cut to an int (Regression)', () => {
         expect(LogBufferDescriptor.packTail(1, 2 ** 32)).toBe(LogBufferDescriptor.packTail(1, 0));
         expect(LogBufferDescriptor.packTail(2 ** 32 + 5, 7)).toBe(LogBufferDescriptor.packTail(5, 7));
-        expect(LogBufferDescriptor.packTail(INT32_MAX + 1, 0)).toBe(LogBufferDescriptor.packTail(INT32_MIN, 0)); // the term offset is cut to an int before it is OR-ed in, so it cannot reach the term id half (the rows above
+        expect(LogBufferDescriptor.packTail(INT32_MAX + 1, 0)).toBe(LogBufferDescriptor.packTail(INT32_MIN, 0));
+        // the term offset is cut to an int before it is OR-ed in, so it cannot reach the term id half (the rows above
         // pass with or without the cut, as 2^32 ORs into the term id half to the same value)
         expect(LogBufferDescriptor.packTail(0, 2 ** 32)).toBe(0n);
         expect(LogBufferDescriptor.packTail(0, 2 ** 32 + 7)).toBe(7n);
@@ -1013,13 +1014,10 @@ describe('HeaderWriter extra', () => {
             flyweight.wrap(expected, offset, 24);
             flyweight.frameLength(-length).version(dh.version()).flags(dh.flags()).headerType(dh.headerType());
             flyweight.termOffset(offset).sessionId(dh.sessionId()).streamId(dh.streamId()).termId(termId);
-            for (let b = 0; b < 1024; b++) {
-                expect(term.getByte(b)).toBe(expected.getByte(b));
-            }
+            expect(term.byteArray()).toEqual(expected.byteArray());
             // bytes 24..31 of the frame (the reserved value) are not written
-            for (let b = offset + 24; b < offset + 32 && b < 1024; b++) {
-                expect(term.getByte(b) & 0xff).toBe(0xa5);
-            }
+            const untouched = term.byteArray().subarray(offset + 24, Math.min(offset + 32, 1024));
+            expect(untouched).toEqual(new Uint8Array(untouched.length).fill(0xa5));
         }
     });
 

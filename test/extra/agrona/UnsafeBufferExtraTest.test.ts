@@ -782,3 +782,82 @@ describe('BufferUtilExtra', () => {
         expect(() => BufferUtil.allocateDirectAligned(8, 12)).toThrow(IllegalArgumentException);
     });
 });
+
+describe('UnsafeBufferCopyMemoryRegression', () => {
+    function ramp(length: number): Uint8Array {
+        const bytes = new Uint8Array(length);
+        for (let i = 0; i < length; i++) {
+            bytes[i] = i + 1;
+        }
+        return bytes;
+    }
+
+    it('putBytes copies a part of a byte array between two different ArrayBuffers', () => {
+        const src = new Uint8Array(new ArrayBuffer(16));
+        src.set(ramp(16));
+        const dstArray = new Uint8Array(new ArrayBuffer(16));
+        new UnsafeBuffer(dstArray).putBytes(5, src, 3, 6);
+        expect(Array.from(dstArray)).toEqual([0, 0, 0, 0, 0, 4, 5, 6, 7, 8, 9, 0, 0, 0, 0, 0]);
+    });
+
+    it('getBytes copies a part of a buffer into a part of another ArrayBuffer', () => {
+        const buffer = new UnsafeBuffer(new Uint8Array(ramp(16)));
+        const dst = new Uint8Array(new ArrayBuffer(10));
+        buffer.getBytes(10, dst, 2, 5);
+        expect(Array.from(dst)).toEqual([0, 0, 11, 12, 13, 14, 15, 0, 0, 0]);
+    });
+
+    it('putBytes between two buffers copies a window of the source only', () => {
+        const source = new UnsafeBuffer(new ArrayBuffer(16));
+        source.putBytes(0, ramp(16));
+        const target = new UnsafeBuffer(new ArrayBuffer(16));
+        target.putBytes(2, source, 4, 7);
+        expect(bytesOf(target, 0, 16)).toEqual([0, 0, 5, 6, 7, 8, 9, 10, 11, 0, 0, 0, 0, 0, 0, 0]);
+    });
+
+    it('an overlapping copy forward within one array moves the bytes as memmove does', () => {
+        const array = ramp(10);
+        const buffer = new UnsafeBuffer(array);
+        buffer.putBytes(2, buffer, 0, 6);
+        expect(Array.from(array)).toEqual([1, 2, 1, 2, 3, 4, 5, 6, 9, 10]);
+    });
+
+    it('an overlapping copy backward within one array moves the bytes as memmove does', () => {
+        const array = ramp(10);
+        const buffer = new UnsafeBuffer(array);
+        buffer.putBytes(0, buffer, 3, 6);
+        expect(Array.from(array)).toEqual([4, 5, 6, 7, 8, 9, 7, 8, 9, 10]);
+    });
+
+    it('overlapping views of one ArrayBuffer at different byteOffsets copy forward', () => {
+        const arrayBuffer = new ArrayBuffer(16);
+        new Uint8Array(arrayBuffer).set(ramp(16));
+        const lower = new UnsafeBuffer(new Uint8Array(arrayBuffer, 2, 10));
+        const upper = new UnsafeBuffer(new Uint8Array(arrayBuffer, 5, 10));
+        // lower[0..7) is arrayBuffer[2..9), written to upper[0..7) = arrayBuffer[5..12)
+        upper.putBytes(0, lower, 0, 7);
+        expect(Array.from(new Uint8Array(arrayBuffer))).toEqual([1, 2, 3, 4, 5, 3, 4, 5, 6, 7, 8, 9, 13, 14, 15, 16]);
+    });
+
+    it('overlapping views of one ArrayBuffer at different byteOffsets copy backward', () => {
+        const arrayBuffer = new ArrayBuffer(16);
+        new Uint8Array(arrayBuffer).set(ramp(16));
+        const lower = new UnsafeBuffer(new Uint8Array(arrayBuffer, 2, 10));
+        const upper = new UnsafeBuffer(new Uint8Array(arrayBuffer, 5, 10));
+        // upper[0..7) is arrayBuffer[5..12), written to lower[0..7) = arrayBuffer[2..9)
+        lower.putBytes(0, upper, 0, 7);
+        expect(Array.from(new Uint8Array(arrayBuffer))).toEqual([
+            1, 2, 6, 7, 8, 9, 10, 11, 12, 10, 11, 12, 13, 14, 15, 16,
+        ]);
+    });
+
+    it('a length of 0 copies nothing', () => {
+        const dst = new Uint8Array(ramp(8));
+        const buffer = new UnsafeBuffer(dst);
+        buffer.putBytes(3, new Uint8Array(new ArrayBuffer(8)), 2, 0);
+        buffer.putBytes(8, ramp(4), 4, 0);
+        buffer.getBytes(8, new Uint8Array(4), 4, 0);
+        buffer.putBytes(1, buffer, 5, 0);
+        expect(Array.from(dst)).toEqual(Array.from(ramp(8)));
+    });
+});

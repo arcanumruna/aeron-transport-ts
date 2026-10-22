@@ -1,12 +1,10 @@
 // Not in Agrona: the duty cycle, the counters and the command queue allocate nothing per call (spec 5.3). A minor
 // garbage collection happens only after something is allocated, so the test counts the collections over a long loop
-// (see HotPathAllocationTest). Values are int-sized: a long above 2^31 boxes in V8 whatever the code does.
+// (see test/support/Allocation.ts, which also sets the test timeout). Values are int-sized: a long above 2^31 boxes in
+// V8 whatever the code does.
 //
 // Node itself allocates one Immediate for each setImmediate; the runner's own code allocates nothing, which the test
 // shows with a scheduler that only stores the task.
-import { PerformanceObserver, constants } from 'node:perf_hooks';
-import v8 from 'node:v8';
-import vm from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { AgentInvoker } from '../../../src/agrona/concurrent/AgentInvoker.js';
 import { AgentRunner } from '../../../src/agrona/concurrent/AgentRunner.js';
@@ -22,39 +20,8 @@ import { CountersReader } from '../../../src/agrona/concurrent/status/CountersRe
 import { UnsafeBufferPosition } from '../../../src/agrona/concurrent/status/UnsafeBufferPosition.js';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import type { Agent } from '../../../src/agrona/concurrent/Agent.js';
+import { ITERATIONS, expectNoAllocation, measure } from '../../support/Allocation.js';
 import { mockErrorHandler } from '../../support/MockAgent.js';
-
-v8.setFlagsFromString('--expose-gc');
-const gc = vm.runInNewContext('gc') as () => void;
-
-const ITERATIONS = 2_000_000;
-const WARM_UP = 100_000;
-
-type Collection = { detail?: { kind: number } };
-
-async function minorCollections(run: (iterations: number) => void, iterations: number): Promise<number> {
-    run(WARM_UP);
-    run(WARM_UP);
-
-    const observer = new PerformanceObserver(() => {});
-    observer.observe({ entryTypes: ['gc'] });
-    gc();
-    await new Promise((resolve) => setImmediate(resolve));
-    observer.takeRecords();
-
-    run(iterations);
-
-    await new Promise((resolve) => setImmediate(resolve));
-    const collections = observer
-        .takeRecords()
-        .filter((e) => (e as unknown as Collection).detail?.kind === constants.NODE_PERFORMANCE_GC_MINOR).length;
-    observer.disconnect();
-    return collections;
-}
-
-async function expectNoAllocation(run: (iterations: number) => void): Promise<void> {
-    expect(await minorCollections(run, ITERATIONS), 'minor collections').toBeLessThanOrEqual(1);
-}
 
 /** A scheduler that holds the one pending task, to run it without a queue or a timer of its own. */
 class SingleSlotScheduler implements AgentRunnerScheduler {
@@ -77,7 +44,7 @@ class SingleSlotScheduler implements AgentRunnerScheduler {
 describe('AgentAllocation', () => {
     it('theHarnessSeesAnAllocatingLoop', async () => {
         const sink: object[] = [];
-        const collections = await minorCollections((n) => {
+        const { collections } = await measure((n) => {
             for (let i = 0; i < n; i++) {
                 sink[i & 7] = { i, a: new Array(8).fill(i) };
             }

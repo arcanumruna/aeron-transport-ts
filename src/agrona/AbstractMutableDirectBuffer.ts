@@ -16,6 +16,7 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of org/agrona/AbstractMutableDirectBuffer.java @ Agrona 2.6.1
+import { Buffer } from 'node:buffer';
 import { AsciiEncoding } from './AsciiEncoding.js';
 import { AsciiNumberFormatException } from './AsciiNumberFormatException.js';
 import { BitUtil } from './BitUtil.js';
@@ -62,42 +63,17 @@ const UTF_8_ENCODER = new TextEncoder();
 // ignoreBOM: a leading U+FEFF is kept, as `new String(bytes, UTF_8)` does
 const UTF_8_DECODER = new TextDecoder('utf-8', { ignoreBOM: true });
 
-/**
- * The array if it is a view of the whole of its ArrayBuffer, which can address any byte of it.
- */
-function wholeView(array: Uint8Array): Uint8Array | null {
-    return 0 === array.byteOffset && array.byteLength === array.buffer.byteLength ? array : null;
-}
+// Unsafe.copyMemory: a native memmove between any two byte arrays (also when they overlap); allocates nothing
+const BUFFER_COPY = Buffer.prototype.copy as (
+    this: Uint8Array,
+    target: Uint8Array,
+    targetStart: number,
+    sourceStart: number,
+    sourceEnd: number,
+) => number;
 
-/**
- * `Unsafe.copyMemory` between two byte arrays, which moves bytes as memmove does when they overlap, and allocates
- * nothing: no `subarray` is made.
- */
 function copyMemory(src: Uint8Array, srcOffset: number, dst: Uint8Array, dstOffset: number, length: number): void {
-    if (src === dst) {
-        dst.copyWithin(dstOffset, srcOffset, srcOffset + length);
-    } else if (src.buffer === dst.buffer) {
-        const from = src.byteOffset + srcOffset;
-        const to = dst.byteOffset + dstOffset;
-        const whole = wholeView(dst) ?? wholeView(src);
-        if (null !== whole) {
-            whole.copyWithin(to, from, from + length);
-        } else if (to <= from) {
-            for (let i = 0; i < length; i++) {
-                dst[dstOffset + i] = src[srcOffset + i]!;
-            }
-        } else {
-            for (let i = length - 1; i >= 0; i--) {
-                dst[dstOffset + i] = src[srcOffset + i]!;
-            }
-        }
-    } else if (0 === srcOffset && length === src.length) {
-        dst.set(src, dstOffset);
-    } else {
-        for (let i = 0; i < length; i++) {
-            dst[dstOffset + i] = src[srcOffset + i]!;
-        }
-    }
+    BUFFER_COPY.call(src, dst, dstOffset, srcOffset, srcOffset + length);
 }
 
 /**

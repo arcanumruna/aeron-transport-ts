@@ -145,7 +145,7 @@ export class TermReader {
     }
 
     /**
-     * The number of fragments read from the packed outcome.
+     * The number of fragments that have been read.
      *
      * @param readOutcome into which the fragments read value has been packed.
      * @return the number of fragments that have been read.
@@ -155,10 +155,10 @@ export class TermReader {
     }
 
     /**
-     * The offset up to which the term was read from the packed outcome.
+     * The offset up to which the term has progressed.
      *
      * @param readOutcome into which the offset value has been packed.
-     * @return the offset up to which the term has been read.
+     * @return the offset up to which the term has progressed.
      */
     public static offset(readOutcome: number): number {
         return (readOutcome % OFFSET_RANGE) * FRAME_ALIGNMENT;

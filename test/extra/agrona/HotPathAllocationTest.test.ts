@@ -15,12 +15,13 @@ import { ITERATIONS, expectNoAllocation, measure } from '../../support/Allocatio
 describe('HotPathAllocationTest', () => {
     it('theHarnessSeesAnAllocatingLoop', async () => {
         const sink: object[] = [];
-        const { collections, heapGrowth } = await measure((n) => {
+        const { collections } = await measure((n) => {
             for (let i = 0; i < n; i++) {
                 sink[i & 7] = { i, a: new Array(8).fill(i) };
             }
         }, ITERATIONS);
-        expect(collections > 0 && heapGrowth > 0).toBe(true);
+        // the heap growth is not asserted: a scavenge can leave it at or below 0
+        expect(collections).toBeGreaterThan(0);
     });
 
     // One call or pair per loop, so that the calls fit the inlining budget of the optimizing compiler.

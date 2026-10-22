@@ -68,7 +68,7 @@ Paths below are relative to `aeron-client/src/{main,test}/java/io/aeron/` (Aeron
   `DataView` and a `Uint8Array`, little-endian by default with the `ByteOrder` overloads kept.
 - `BufferUtil.allocateDirectAligned(length, alignment)` returns an `ArrayBuffer` (alignment is a no-op, recorded).
 - Bounds checks follow Agrona (`SHOULD_BOUNDS_CHECK`, default on) and throw `IndexOutOfBoundsException`
-  (ported in `src/agrona/exceptions.ts` with the JDK exception names Agrona throws).
+  (ported in `src/agrona/jdk.ts` with the JDK exception names Agrona throws).
 - `*Volatile`, `*Ordered`, `*Release`, `*Acquire`, `*Opaque`, `compareAndSet*`, `getAndAdd*`, `getAndSet*` are
   plain single-threaded operations with the same names and return values.
 - Tests: `MutableDirectBufferTests` (33, shared function), `UnsafeBufferTest` (24 + the 33 inherited),

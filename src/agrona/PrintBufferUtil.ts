@@ -1,5 +1,6 @@
 /*
  * Copyright 2014-2025 Real Logic Limited.
+ * Copyright 2012 The Netty Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +16,7 @@
  *
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
-// Port of org/agrona/PrintBufferUtil.java @ 2.6.1 (only byteToHexStringPadded and its table)
+// Port of org/agrona/PrintBufferUtil.java @ Agrona 2.6.1 (only byteToHexStringPadded and its table)
 
 const BYTE2HEX_PAD: string[] = new Array<string>(256);
 
