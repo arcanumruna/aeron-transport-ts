@@ -9,6 +9,7 @@ const SCRIPT = new URL('./SharedLongAtomics.worker.ts', import.meta.url);
 const TIMEOUT_MS = 25_000;
 const INDEX = 64;
 const TWO_POW_32 = 4294967296;
+const FRAME_PASSES = 400;
 
 interface Reader {
     reads: number;
@@ -34,23 +35,30 @@ function worker(kind: string, buffer: SharedArrayBuffer, workers: number, extra:
 }
 
 describe('SharedLongAtomicsWorkersExtraTest', () => {
+    // k * (2^32 + 1) for k up to count: both halves change on every write. With many readers and writes, a reader that
+    // loads the stripe before a whole write and again after it is common, so a stripe that comes back to the value it had
+    // (an unlock that adds nothing) is caught every time: only the sequence number in the stripe tells it.
     it('readersNeverSeeATornLong', async () => {
         const sab = new SharedArrayBuffer(4096);
         const multiplier = TWO_POW_32 + 1;
-        const count = 1_000_000;
+        const count = 2_000_000;
+        const rounds = 5;
+        const readers = 5;
         const results = (await runWorkers(
             SCRIPT,
             [
-                worker('pattern-writer', sab, 3, { count, multiplier }),
-                worker('pattern-reader', sab, 3, { count, multiplier }),
-                worker('pattern-reader', sab, 3, { count, multiplier }),
+                worker('pattern-writer', sab, 1 + readers, { count, multiplier, rounds }),
+                ...Array.from({ length: readers }, () =>
+                    worker('pattern-reader', sab, 1 + readers, { count, multiplier, rounds }),
+                ),
             ],
             TIMEOUT_MS,
-        )) as [number, Reader, Reader];
+        )) as [number, ...Reader[]];
 
-        expect(results[0]).toBe(count);
+        expect(results[0]).toBe(count * rounds);
+        const violations = (results.slice(1) as Reader[]).reduce((sum, reader) => sum + reader.violations, 0);
+        expect(violations, (results.slice(1) as Reader[]).find((reader) => reader.violations > 0)?.first).toBe(0);
         for (const reader of results.slice(1) as Reader[]) {
-            expect(reader.violations, reader.first).toBe(0);
             expect(reader.sawFinal).toBe(true);
             expect(reader.reads).toBeGreaterThan(0);
         }
@@ -168,17 +176,25 @@ describe('SharedLongAtomicsWorkersExtraTest', () => {
         }
     }, 30_000);
 
+    // This guards the int order of TermRebuilder.insert itself, not the striped writes: the type, flags and the rest of
+    // the header (plain ints) are written BEFORE the length (putIntRelease), so a reader that sees a positive length
+    // (frameLengthVolatile) sees the type too. Written the other way round, a frame reads as type 0, padding, which is
+    // silent loss. The passes (re-inserting 4096 frames each) are enough for the swapped order to be caught every time.
     it('termRebuilderFrameNeverReadsAsPaddingAcrossThreadsRegression', async () => {
         const frames = 4096 * 64;
         const sab = new SharedArrayBuffer(frames + 64);
         const barrier = frames + 4;
+        const passes = FRAME_PASSES;
         const results = (await runWorkers(
             SCRIPT,
-            [worker('frame-writer', sab, 2, { barrier }), worker('frame-reader', sab, 2, { barrier })],
+            [
+                worker('frame-writer', sab, 2, { barrier, count: passes }),
+                worker('frame-reader', sab, 2, { barrier, count: passes }),
+            ],
             TIMEOUT_MS,
         )) as [number, { scans: number; frames: number; violations: number; first: string }];
 
-        expect(results[0]).toBe(40 * 4096);
+        expect(results[0]).toBe(passes * 4096);
         expect(results[1].violations, results[1].first).toBe(0);
         expect(results[1].frames).toBeGreaterThan(0);
     }, 30_000);

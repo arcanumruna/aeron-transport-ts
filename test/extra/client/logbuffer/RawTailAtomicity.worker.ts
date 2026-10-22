@@ -14,6 +14,7 @@ interface Data {
 const data = workerData as Data;
 const buffer = new UnsafeBuffer(data.buffer);
 const BARRIER = 2048;
+const DONE = 2056;
 const MAX_SPINS = 400_000_000;
 /** The raw tail with the unsigned 32 bit `low` (packTail sign-extends a negative int offset, as Java does). */
 function raw(termId: number, low: number): bigint {
@@ -32,18 +33,42 @@ function barrier(): void {
     }
 }
 
-/** count getAndAddRawTailOffset(+32), recording the (term id, term offset) of each. */
-function add(): { termIds: Int32Array; offsets: Float64Array } {
-    const termIds = new Int32Array(data.count);
-    const offsets = new Float64Array(data.count);
+/** Adds beyond which the adder stops, whatever the rotator does (a hard cap on the loop). */
+const MAX_ADDS = 5_000_000;
+/** Offset within a term (20 bits) beyond which the adder waits for the rotation, so that it never carries into the term. */
+const WAIT_OFFSET = 0xc0000;
+
+/**
+ * getAndAddRawTailOffset(+32) until the rotator sets DONE (at most MAX_ADDS times), counting the torn (term id, term
+ * offset) pairs inline: the offset of a pair must carry its term id in bits 20 and up, as the rotator packs them.
+ */
+function add(): { adds: number; torn: number; first: string } {
     const holder = new Int32Array(1);
     const slot = LogBufferDescriptor.TERM_TAIL_COUNTERS_OFFSET + 8 * data.partition;
+    let torn = 0;
+    let first = '';
+    let adds = 0;
     barrier();
-    for (let i = 0; i < data.count; i++) {
-        offsets[i] = LogBufferDescriptor.getAndAddRawTailOffset(buffer, slot, 32, holder);
-        termIds[i] = holder[0]!;
+    while (0 === buffer.getIntVolatile(DONE) && adds < MAX_ADDS) {
+        const offset = LogBufferDescriptor.getAndAddRawTailOffset(buffer, slot, 32, holder);
+        const termId = holder[0]!;
+        adds++;
+        if (offset >>> 20 !== termId && ++torn === 1) {
+            first = 'termId ' + termId + ' offset ' + offset;
+        }
+        if ((offset & 0xfffff) > WAIT_OFFSET) {
+            // the rotator has to catch up: wait (capped) for the next term
+            for (let spins = 0; spins < MAX_SPINS; spins++) {
+                if (
+                    LogBufferDescriptor.rawTailTermId(buffer, data.partition) !== termId ||
+                    0 !== buffer.getIntVolatile(DONE)
+                ) {
+                    break;
+                }
+            }
+        }
     }
-    return { termIds, offsets };
+    return { adds, torn, first };
 }
 
 /** count rotations: raw tail (t, any) -> (t + 1, (t + 1) << 20) with casRawTail; returns the failed CASes. */
@@ -60,10 +85,12 @@ function rotate(): number {
             }
             failures++;
             if (++attempts > MAX_CAS_ATTEMPTS) {
+                buffer.putIntVolatile(DONE, 1);
                 throw new Error('casRawTail never succeeded');
             }
         }
     }
+    buffer.putIntVolatile(DONE, 1);
     return failures;
 }
 

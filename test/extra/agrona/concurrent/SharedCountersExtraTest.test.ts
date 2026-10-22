@@ -8,7 +8,7 @@ import { UnsafeBufferPosition } from '../../../../src/agrona/concurrent/status/U
 import { UnsafeBuffer } from '../../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { BACKINGS, SHARED_BACKING } from '../../../support/Backing.js';
 import { runWorkers } from '../../../support/Workers.js';
-import { CAPACITY, COUNTER_ID, DONE, START, WRITES } from './SharedCountersLayout.js';
+import { CAPACITY, COUNTER_ID, DONE, START, STEP, STEPS, WRITES } from './SharedCountersLayout.js';
 
 const SCRIPT = new URL('./SharedCounters.worker.ts', import.meta.url);
 const TIMEOUT_MS = 25_000;
@@ -69,6 +69,32 @@ describe('SharedCountersExtraTest', () => {
         }
         expect(buffer.getIntVolatile(DONE)).toBe(1);
         expect(new UnsafeBufferPosition(buffer, COUNTER_ID).getVolatile()).toBe(START + WRITES);
+    }, 30_000);
+
+    // a read of a value k * (2^32 + 1) is whole only if its high half equals its low half; every write changes both and
+    // steps the low half across a 2^32 boundary, so any torn read of the counter (position, reader or counter) shows
+    it('readersOfASteppingCounterNeverSeeATornValueAcrossManyBoundaries', async () => {
+        const sab = SHARED_BACKING.arrayBuffer(CAPACITY) as SharedArrayBuffer;
+        const buffer = new UnsafeBuffer(sab);
+
+        const results = (await runWorkers(
+            SCRIPT,
+            [
+                { kind: 'writer', buffer: sab, stepped: true },
+                { kind: 'position', buffer: sab, stepped: true },
+                { kind: 'reader', buffer: sab, stepped: true },
+                { kind: 'counter', buffer: sab, stepped: true },
+            ],
+            TIMEOUT_MS,
+        )) as [number, ReaderResult, ReaderResult, ReaderResult];
+
+        expect(results[0]).toBe(STEPS);
+        for (const reader of results.slice(1) as ReaderResult[]) {
+            expect(reader.bad, reader.firstBad).toBe(0);
+            expect(reader.reads).toBeGreaterThan(0);
+            expect(reader.last).toBe(STEPS * STEP);
+        }
+        expect(new UnsafeBufferPosition(buffer, COUNTER_ID).getVolatile()).toBe(STEPS * STEP);
     }, 30_000);
 });
 
