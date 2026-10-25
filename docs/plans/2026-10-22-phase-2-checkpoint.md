@@ -44,7 +44,7 @@ is in `0721b7e` and `3bc4d42` and has been reviewed (Opus, whole diff `0721b7e~1
 - The `CommonContext` members added outside the brief are faithful to Java and needed. The `DEDICATED` default is
   acceptable; T18's `launch` must reject anything but `INVOKER` (#31).
 
-T7b is done. Next: T8 (see "Not started").
+T7b is done. Next: T4 (see "Not started").
 
 Omitted members and the task that adds each are listed in `docs/mapping.md`.
 
@@ -56,11 +56,9 @@ Driving every allowance to 0 is #19.
 
 ## Not started (dependency order)
 
-1. **T7b** — `Configuration`, `MediaDriver.Context`, `PublicationParams`, `SubscriptionParams`
-   (tests: ConfigurationTest, MediaDriverContextTest, PublicationParamsTest).
-2. **T4** — broadcast and `ExpandableArrayBuffer`; then revert the workaround tracked in #20.
-3. **T10** — needs T7b; also port `CubicCongestionControl` (`DefaultCongestionControlSupplier` needs it).
-4. **T11**, then **T12–T25**. Plan edits already recorded from the T8 review:
+1. **T4** — broadcast and `ExpandableArrayBuffer`; then revert the workaround tracked in #20.
+2. **T10** — needs T7b (done); also port `CubicCongestionControl` (`DefaultCongestionControlSupplier` needs it).
+3. **T11**, then **T12–T25**. Plan edits already recorded from the T8 review:
    - T12: reuse the last sender address and memoize `getHostAddress`.
    - T18: `NativeResourceAgent` (#12).
    - T19: `dns.lookup` with ipv4first; pre-resolve the hosts in `interface=` and `control=`, and for `addDestination`.
