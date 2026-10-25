@@ -30,15 +30,21 @@ Run all checks after every merge:
 ## In flight
 
 T7b (`Configuration`, `MediaDriver.Context`, `PublicationParams`, `SubscriptionParams`, `ThreadingMode.valueOf` #27)
-is in `0721b7e` (pushed as WIP) and `3bc4d42` (docs/mapping.md, spec §6 D22–D25). The implementer reports that the full
-checks pass (6241 passed, 62 skipped); the session did not re-run them. **No review yet.**
+is in `0721b7e` and `3bc4d42` and has been reviewed (Opus, whole diff `0721b7e~1..3bc4d42`).
+- **Checks:** the reviewer re-ran them and all are green: typecheck, lint, format:check, check:mapping and the full
+  `npm test` (6241 passed, 62 skipped).
+- **No urgent findings.** The ports are faithful: the 250 `Configuration` constants match Java, the accessor order
+  matches, and the tests keep Java's names, order and values. Every skip is recorded.
+- **Non-urgent findings, filed per the scope rules:**
+  - #30: D5 gaps for values of 2^53 and above (`PublicationParams`, `getSizeAsInt`, `TimeUnit.convert`, `long`
+    setters, receiver gtag);
+  - #31: nullable `getProperty` typing, readers evaluated at module load, `resolverInterface` silently ignored,
+    `toString` gaps, D3/T18 note on rejecting non-`INVOKER` modes;
+  - #32: two vacuous tests.
+- The `CommonContext` members added outside the brief are faithful to Java and needed. The `DEDICATED` default is
+  acceptable; T18's `launch` must reject anything but `INVOKER` (#31).
 
-Next session: an Opus review of `0721b7e..3bc4d42`, then a fix round. Points to check:
-- `CommonContext` instance members that were added outside the brief (`conclude`, `clone`, `close`, the counters
-  buffers, `setupErrorHandler`);
-- `conclude` defaults to `DEDICATED` as Java does, so a driver launch must set `INVOKER`;
-- `nameResolver` ignores the `DriverNameResolver` branch;
-- tests were written alongside the code, not red first.
+T7b is done. Next: T8 (see "Not started").
 
 Omitted members and the task that adds each are listed in `docs/mapping.md`.
 
