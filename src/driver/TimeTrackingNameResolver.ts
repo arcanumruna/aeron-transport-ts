@@ -21,33 +21,15 @@ import type { CountersReader } from '../agrona/concurrent/status/CountersReader.
 import { requireNonNull } from '../agrona/jdkLang.js';
 import type { CounterProvider } from '../client/CounterProvider.js';
 import type { InetAddress } from './jdkNet.js';
+import type { DutyCycleTracker } from './DutyCycleTracker.js';
 import type { NameResolverAgent } from './NameResolverAgent.js';
-
-/**
- * The part of `DutyCycleTracker` that the resolver uses. `DutyCycleTracker` (task T7) satisfies it.
- */
-export interface DutyCycleTrackerLike {
-    /**
-     * Update the last known clock time.
-     *
-     * @param nowNs to update with.
-     */
-    update(nowNs: number): void;
-
-    /**
-     * Pass measurement to tracker and report updating last known clock time with time.
-     *
-     * @param nowNs of the measurement.
-     */
-    measureAndUpdate(nowNs: number): void;
-}
 
 export class TimeTrackingNameResolver implements NameResolverAgent {
     private readonly delegateResolver: NameResolverAgent;
     private readonly clock: NanoClock;
-    private readonly maxTimeTracker: DutyCycleTrackerLike;
+    private readonly maxTimeTracker: DutyCycleTracker;
 
-    public constructor(delegateResolver: NameResolverAgent, clock: NanoClock, maxTimeTracker: DutyCycleTrackerLike) {
+    public constructor(delegateResolver: NameResolverAgent, clock: NanoClock, maxTimeTracker: DutyCycleTracker) {
         this.delegateResolver = requireNonNull(delegateResolver);
         this.clock = requireNonNull(clock);
         this.maxTimeTracker = requireNonNull(maxTimeTracker);

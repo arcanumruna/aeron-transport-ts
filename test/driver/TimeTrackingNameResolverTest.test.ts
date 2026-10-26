@@ -21,7 +21,7 @@ import type { CountersReader } from '../../src/agrona/concurrent/status/Counters
 import type { NanoClock } from '../../src/agrona/concurrent/NanoClock.js';
 import { IllegalStateException, NullPointerException } from '../../src/agrona/jdk.js';
 import type { CounterProvider } from '../../src/client/CounterProvider.js';
-import type { DutyCycleTrackerLike } from '../../src/driver/TimeTrackingNameResolver.js';
+import type { DutyCycleTracker } from '../../src/driver/DutyCycleTracker.js';
 import { TimeTrackingNameResolver } from '../../src/driver/TimeTrackingNameResolver.js';
 import type { NameResolverAgent } from '../../src/driver/NameResolverAgent.js';
 import { InetAddress } from '../../src/driver/jdkNet.js';
@@ -75,7 +75,7 @@ describe('TimeTrackingNameResolverTest', () => {
                 new TimeTrackingNameResolver(
                     null as unknown as NameResolverAgent,
                     mockNanoClock() as NanoClock,
-                    mockDutyCycleTracker() as DutyCycleTrackerLike,
+                    mockDutyCycleTracker() as unknown as DutyCycleTracker,
                 ),
         );
     });
@@ -87,7 +87,7 @@ describe('TimeTrackingNameResolverTest', () => {
                 new TimeTrackingNameResolver(
                     mockNameResolverAgent() as unknown as NameResolverAgent,
                     null as unknown as NanoClock,
-                    mockDutyCycleTracker() as DutyCycleTrackerLike,
+                    mockDutyCycleTracker() as unknown as DutyCycleTracker,
                 ),
         );
     });
@@ -99,7 +99,7 @@ describe('TimeTrackingNameResolverTest', () => {
                 new TimeTrackingNameResolver(
                     mockNameResolverAgent() as unknown as NameResolverAgent,
                     mockNanoClock() as NanoClock,
-                    null as unknown as DutyCycleTrackerLike,
+                    null as unknown as DutyCycleTracker,
                 ),
         );
     });
@@ -111,7 +111,7 @@ describe('TimeTrackingNameResolverTest', () => {
         const resolver = new TimeTrackingNameResolver(
             delegateResolver as unknown as NameResolverAgent,
             clock as NanoClock,
-            maxTime as DutyCycleTrackerLike,
+            maxTime as unknown as DutyCycleTracker,
         );
 
         resolver.onClose();
@@ -129,7 +129,7 @@ describe('TimeTrackingNameResolverTest', () => {
         const resolver = new TimeTrackingNameResolver(
             delegateResolver as unknown as NameResolverAgent,
             clock as NanoClock,
-            maxTime as DutyCycleTrackerLike,
+            maxTime as unknown as DutyCycleTracker,
         );
 
         resolver.onClose();
@@ -146,7 +146,7 @@ describe('TimeTrackingNameResolverTest', () => {
         const resolver = new TimeTrackingNameResolver(
             delegateResolver as unknown as NameResolverAgent,
             clock as NanoClock,
-            maxTime as DutyCycleTrackerLike,
+            maxTime as unknown as DutyCycleTracker,
         );
 
         resolver.doWork();
@@ -163,7 +163,7 @@ describe('TimeTrackingNameResolverTest', () => {
         const resolver = new TimeTrackingNameResolver(
             delegateResolver as unknown as NameResolverAgent,
             clock as NanoClock,
-            maxTime as DutyCycleTrackerLike,
+            maxTime as unknown as DutyCycleTracker,
         );
 
         const countersReader = {} as CountersReader;
@@ -188,7 +188,7 @@ describe('TimeTrackingNameResolverTest', () => {
         const resolver = new TimeTrackingNameResolver(
             delegateResolver as unknown as NameResolverAgent,
             clock as NanoClock,
-            maxTime as DutyCycleTrackerLike,
+            maxTime as unknown as DutyCycleTracker,
         );
 
         const name = 'my-host:8080';
@@ -228,7 +228,7 @@ describe('TimeTrackingNameResolverTest', () => {
         const resolver = new TimeTrackingNameResolver(
             delegateResolver as unknown as NameResolverAgent,
             clock as NanoClock,
-            maxTime as DutyCycleTrackerLike,
+            maxTime as unknown as DutyCycleTracker,
         );
 
         const name = 'test:555';
@@ -264,7 +264,7 @@ describe('TimeTrackingNameResolverTest', () => {
         const resolver = new TimeTrackingNameResolver(
             delegateResolver as unknown as NameResolverAgent,
             clock as NanoClock,
-            maxTime as DutyCycleTrackerLike,
+            maxTime as unknown as DutyCycleTracker,
         );
 
         const name = 'localhost';
@@ -302,7 +302,7 @@ describe('TimeTrackingNameResolverTest', () => {
         const resolver = new TimeTrackingNameResolver(
             delegateResolver as unknown as NameResolverAgent,
             clock as NanoClock,
-            maxTime as DutyCycleTrackerLike,
+            maxTime as unknown as DutyCycleTracker,
         );
 
         const name = 'localhost';

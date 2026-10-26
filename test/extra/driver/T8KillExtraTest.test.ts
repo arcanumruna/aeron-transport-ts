@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { DutyCycleTracker } from '../../../src/driver/DutyCycleTracker.js';
 import { DefaultNameResolver } from '../../../src/driver/DefaultNameResolver.js';
 import { TimeTrackingNameResolver } from '../../../src/driver/TimeTrackingNameResolver.js';
 import type { NameResolver } from '../../../src/driver/NameResolver.js';
@@ -35,10 +36,7 @@ describe('T8KillExtraTest', () => {
         const r = new TimeTrackingNameResolver(
             new DefaultNameResolver(),
             { nanoTime: () => 0 },
-            {
-                update: () => {},
-                measureAndUpdate: () => {},
-            },
+            new DutyCycleTracker(),
         );
         expect(r.name()).toBe('TimeTracking(DefaultNameResolver)');
         expect(r.roleName()).toBe('TimeTracking(DefaultNameResolver)');
