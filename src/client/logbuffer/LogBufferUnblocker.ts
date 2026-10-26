@@ -44,9 +44,9 @@ export class LogBufferUnblocker {
         termLength: number,
     ): boolean {
         const positionBitsToShift = LogBufferDescriptor.positionBitsToShift(termLength);
-        // Java's `(int)(long >> n)` and `(int)long`: the helpers of `LogBufferDescriptor` (spec 5.5, D5)
-        const blockedTermCount = LogBufferDescriptor.termCountByPosition(blockedPosition, positionBitsToShift);
-        const blockedOffset = LogBufferDescriptor.termOffsetByPosition(blockedPosition, termLength);
+        // Java's `(int)(long >> n)` and `(int)long`: the position is a `number` (spec D5), so it is divided, not shifted
+        const blockedTermCount = Math.floor(blockedPosition / 2 ** positionBitsToShift) | 0;
+        const blockedOffset = (blockedPosition | 0) & (termLength - 1);
         const activeTermCount = LogBufferDescriptor.activeTermCount(logMetaDataBuffer);
 
         if (activeTermCount === ((blockedTermCount - 1) | 0) && blockedOffset === 0) {

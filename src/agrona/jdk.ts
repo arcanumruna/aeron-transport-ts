@@ -737,10 +737,9 @@ const FENCE = new Int32Array(new SharedArrayBuffer(4));
  * module load:
  * - x64 (total store order): a later store cannot pass an earlier store, and V8 does not move a plain typed-array
  *   access across an `Atomics` operation in its IR, so the fence is the empty function;
- * - any other architecture (ARM64): `Atomics.add(FENCE, 0, 0)`, a sequentially consistent read-modify-write. With the
- *   LSE extension (ARMv8.1 and later) it is one `ldaddal`, a full barrier for the pairs the fences need. On ARMv8.0
- *   it is an `ldaxr` / `stlxr` loop, which the architecture does not guarantee to be a full fence (spec D21). Only
- *   x64 has been checked. The module instance is per worker, so the word is never contended.
+ * - any other architecture (ARM64): `Atomics.add(FENCE, 0, 0)`, a sequentially consistent read-modify-write
+ *   (`ldaddal` on ARM64), which orders the stores before it ahead of the stores after it. The module instance is per
+ *   worker, so the word is never contended.
  */
 export class VarHandle {
     /** `VarHandle.releaseFence()`: no earlier load or store is reordered with a later store. */

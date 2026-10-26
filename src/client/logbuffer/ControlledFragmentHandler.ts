@@ -100,11 +100,3 @@ export interface ControlledFragmentHandler {
  * The nested enum `ControlledFragmentHandler.Action`, beside the interface of the same name.
  */
 export const ControlledFragmentHandler = { Action } as const;
-
-type ActionType = Action;
-
-// Declaration merging: `ControlledFragmentHandler.Action` is a type as well as a value, as the nested Java enum is.
-// eslint-disable-next-line @typescript-eslint/no-namespace
-export namespace ControlledFragmentHandler {
-    export type Action = ActionType;
-}
