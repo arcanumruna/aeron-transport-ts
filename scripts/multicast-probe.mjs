@@ -7,6 +7,7 @@
 // REQUIRE_IPV6_MULTICAST=1, which CI sets, it fails like the IPv4 leg (issue #64).
 import { Buffer } from 'node:buffer';
 import dgram from 'node:dgram';
+import os from 'node:os';
 import { setImmediate } from 'node:timers';
 
 const GROUP = '224.20.30.39';
@@ -75,6 +76,12 @@ function bound(socket) {
 async function probeIpv6() {
     if ('linux' !== process.platform) {
         return 'not checked on ' + process.platform;
+    }
+
+    // libuv ignores an unknown scope (`::%nonexistent0`) and lets the kernel pick the interface by route, which would
+    // make the leg succeed on the wrong interface; the named interface must exist.
+    if (undefined === os.networkInterfaces()[IPV6_INTERFACE]) {
+        return 'the interface ' + IPV6_INTERFACE + ' does not exist';
     }
 
     const receiver = dgram.createSocket({ type: 'udp6', reuseAddr: true });
