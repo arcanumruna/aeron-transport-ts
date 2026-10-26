@@ -57,6 +57,7 @@ import { ReceiverPos } from '../../src/driver/status/ReceiverPos.js';
 import { SubscriberPos } from '../../src/driver/status/SubscriberPos.js';
 import type { SystemCounterDescriptor } from '../../src/driver/status/SystemCounterDescriptor.js';
 import type { SystemCounters } from '../../src/driver/status/SystemCounters.js';
+import { parseSendArgs } from './SendArgs.js';
 import { CaptureSocket } from './SenderRig.js';
 import { TestLogProducer } from './TestLogProducer.js';
 
@@ -66,24 +67,15 @@ const { FRAME_ALIGNMENT } = FrameDescriptor;
 
 /**
  * The recording socket of the receiver: it keeps where each datagram was sent as well (the receiver sends to the control
- * address of the source, with `dgram.send(slot, 0, length, port, host, callback)`).
+ * address of the source, with `dgram.send(view, port, host, callback)`).
  */
 export class DestinationSocket extends CaptureSocket {
     public readonly destinations: { port: number | undefined; address: string | undefined }[] = [];
 
-    public override send(
-        slot: Uint8Array,
-        offset: number,
-        length: number,
-        portOrCallback?: number | (() => void),
-        address?: string,
-    ): void {
-        super.send(slot, offset, length);
-        this.destinations.push(
-            typeof portOrCallback === 'number'
-                ? { port: portOrCallback, address }
-                : { port: undefined, address: undefined },
-        );
+    public override send(slot: Uint8Array, ...args: unknown[]): void {
+        super.send(slot, ...args);
+        const { port, address } = parseSendArgs(slot, args);
+        this.destinations.push({ port, address });
     }
 }
 

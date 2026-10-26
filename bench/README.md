@@ -317,17 +317,19 @@ Allocation per message (estimates, bytes per message):
 
 | run                                       | port   | node   | harness | other | minor GCs per 1000 msgs |
 | ----------------------------------------- | ------ | ------ | ------- | ----- | ----------------------- |
-| stream 64 B                               | 133.9  | 69.8   | 42.0    | 42.2  | 0.02                    |
+| stream 64 B                               | 31.8   | 85.9   | 9.4     | 46.5  | 0.00                    |
 | stream 1376 B                             | 814.0  | 949.1  | 601.6   | 580.1 | 0.20                    |
 | round trip 32 B, per message (2 per trip) | 1274.4 | 1091.3 | 1211.4  | 622.1 | 0.17                    |
 
-The `port` column is not zero, although spec 5.3 says the port's own code allocates nothing per datagram. The biggest
-sites of the 64 B stream in this run were `AbstractMutableDirectBuffer.putInt` (50.6 B/msg), `PublicationImage.validatePacket`
-(32.2), `AgentRunner.dutyCycle` (16.6: the `Immediate` or `Timeout` of each cycle, D11), `getInt` (6.1) and
-`TermRebuilder.insert` (5.0); in another run `putInt` was not among them, so the attribution is a sample, not a count.
-They are not investigated here; the candidates are the heap numbers of values above 2^31 (D13) in code the profiler
-sees unoptimized. The figures are per message of a run, so they grow with the datagrams per message (1376 B) and with the
-cycles per message (the round trip spins the loop many times for each message). Recorded, not a gate. The minor
+The `port` column is not zero, although spec 5.3 says the port's own code allocates nothing per datagram. Issue #52
+measured it at 134 to 141 B/msg in the 64 B stream; it took out the `UnsafeBuffer` fields that were kept as doubles
+(41 B/msg: `validatePacket`, `getInt`, `putInt`), the slice and the host of each `dgram` send (D113) and the `Immediate` of
+each duty cycle (D114), and the column went to 31.8 (the 64 B stream row above was measured once with `--runs 1`, the
+others are from before the change). What is left in `src/` is the heap numbers of D13: the `nowNs` that `Sender.doWork`,
+`Receiver.doWork` and `DriverConductor.doWork` pass on (7 to 8 B/msg each) and `ClientConductor.service` (4). The
+rest of a send is node's own (about 47 B per datagram, D113). The figures are per message of a run, so they grow with the
+datagrams per message (1376 B) and with the cycles per message (the round trip spins the loop many times for each
+message). Recorded, not a gate. The minor
 collections are rare (0.02 per 1000 messages at 64 B).
 
 First message after the runners went idle, microseconds, 100 messages (one run of the report with `--idle 100`):
