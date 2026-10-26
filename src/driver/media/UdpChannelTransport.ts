@@ -42,8 +42,8 @@ import {
     InetAddress,
     InetSocketAddress,
     IOException,
+    NetworkInterface,
     StandardProtocolFamily,
-    type NetworkInterface,
 } from '../jdkNet.js';
 import type { MediaDriverContext } from '../MediaDriver.js';
 import { SystemCounterDescriptor } from '../status/SystemCounterDescriptor.js';
@@ -275,8 +275,8 @@ export abstract class UdpChannelTransport implements AutoCloseable {
                 // Java: bind(new InetSocketAddress(port)) on a channel with IP_MULTICAST_ALL off (spec D119). A node socket
                 // cannot turn the option off, so the socket is bound to the group instead and the kernel gives it that group
                 // only; it then no longer receives unicast to the port. This is unconditional except on Windows (which binds
-                // the wildcard address) and for an IPv6 link-local group (scope 2 or less) without an interface, which also
-                // binds the wildcard address; see multicastBindHost.
+                // the wildcard address) and for an IPv6 link-local group (scope 2 or less) on a host without any usable interface;
+                // see multicastBindHost.
                 this.bindChecked(
                     this._receiveDatagramChannel,
                     this.endPointAddress.getPort(),
@@ -850,7 +850,8 @@ export abstract class UdpChannelTransport implements AutoCloseable {
     /**
      * The host a multicast receive socket is bound to: the group of the channel (D119), otherwise the wildcard (null). A
      * group of interface-local or link-local scope (`ffx1`, `ffx2`) is bound with the scope of the channel's interface
-     * (`%name`), which the kernel needs for it; without an interface it cannot be bound, and the wildcard is kept.
+     * (`%name`), which the kernel needs for it; a channel without an interface gets a default one from
+     * `multicastInterface` (D132), and only a host that has no usable interface at all keeps the wildcard.
      */
     private static multicastBindHost(
         udpChannel: UdpChannel,
@@ -933,7 +934,12 @@ export abstract class UdpChannelTransport implements AutoCloseable {
     private multicastInterface(): string | undefined {
         const networkInterface: NetworkInterface | null = this._udpChannel.localInterface();
         if (null === networkInterface) {
-            return undefined;
+            // A group of interface-local or link-local scope can only be bound with the scope of an interface (D119, D132):
+            // without one of the channel the receive bind, the join and the send all use the same default interface.
+            return StandardProtocolFamily.INET6 === this._udpChannel.protocolFamily() &&
+                UdpChannelTransport.isScopedGroup(this.endPointAddress)
+                ? UdpChannelTransport.defaultScopedInterface()
+                : undefined;
         }
 
         if (StandardProtocolFamily.INET6 === this._udpChannel.protocolFamily()) {
@@ -948,6 +954,35 @@ export abstract class UdpChannelTransport implements AutoCloseable {
         }
 
         return undefined;
+    }
+
+    /** Whether the IPv6 group is of interface-local or link-local scope (`ffx1`, `ffx2`): needs the scope of an interface. */
+    private static isScopedGroup(endPointAddress: InetSocketAddress): boolean {
+        const address = endPointAddress.getAddress() as InetAddress;
+        return !address.getHostAddress().includes('%') && ((address.getAddress()[1] as number) & 0x0f) <= 2;
+    }
+
+    /**
+     * The interface that a scoped group of a channel without an interface is bound, joined and sent on (`::%name`): the
+     * first interface that is up and supports multicast and is not the loopback, otherwise the first loopback interface
+     * that is up (the kernel's choice for a join without an interface is the one of its routing table, which node cannot
+     * ask). Undefined when the host has none.
+     */
+    private static defaultScopedInterface(): string | undefined {
+        let loopback: NetworkInterface | null = null;
+        for (const networkInterface of NetworkInterface.getNetworkInterfaces()) {
+            if (!networkInterface.isUp()) {
+                continue;
+            }
+
+            if (networkInterface.isLoopback()) {
+                loopback ??= networkInterface;
+            } else if (networkInterface.supportsMulticast()) {
+                return '::%' + networkInterface.getName();
+            }
+        }
+
+        return null !== loopback ? '::%' + loopback.getName() : undefined;
     }
 
     private configureMulticastSend(socket: Socket): void {

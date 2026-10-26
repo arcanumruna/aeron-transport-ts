@@ -5,9 +5,9 @@
 // socket to the group address, where the kernel does the filtering (IPv4, and IPv6 with the scope of the interface for a
 // link-local group). Linux only: elsewhere node's sockets already filter (macOS) or cannot bind a group (Windows).
 import dgram from 'node:dgram';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { UnsafeBuffer } from '../../../../src/agrona/concurrent/UnsafeBuffer.js';
-import { InetSocketAddress } from '../../../../src/driver/jdkNet.js';
+import { InetSocketAddress, InterfaceAddress, NetworkInterface } from '../../../../src/driver/jdkNet.js';
 import { MediaDriver } from '../../../../src/driver/MediaDriver.js';
 import type { PortManager } from '../../../../src/driver/media/PortManager.js';
 import { UdpChannel } from '../../../../src/driver/media/UdpChannel.js';
@@ -56,7 +56,7 @@ function listening(socket: dgram.Socket): Promise<void> {
 }
 
 /** Whether this host passes IPv6 multicast over `lo`: a datagram to a group is received by a socket that joined it. */
-async function ipv6MulticastWorks(): Promise<boolean> {
+async function ipv6MulticastWorks(interfaceName = 'lo'): Promise<boolean> {
     if (!IS_LINUX) {
         return false;
     }
@@ -69,10 +69,10 @@ async function ipv6MulticastWorks(): Promise<boolean> {
         receiver.on('message', () => (got = true));
         receiver.bind(0);
         await listening(receiver);
-        receiver.addMembership('ff05::11:77', '::%lo');
+        receiver.addMembership('ff05::11:77', '::%' + interfaceName);
         sender.bind(0);
         await listening(sender);
-        sender.setMulticastInterface('::%lo');
+        sender.setMulticastInterface('::%' + interfaceName);
         sender.setMulticastLoopback(true);
         sender.send('x', receiver.address().port, 'ff05::11:77');
         await waitUntilTurns(() => got, 'the probe datagram', 50_000);
@@ -86,6 +86,15 @@ async function ipv6MulticastWorks(): Promise<boolean> {
 }
 
 const ipv6Works = await ipv6MulticastWorks();
+// the interface that a channel without `interface=` gets (issue #61): IPv6 multicast must work over it for those rows
+const defaultInterfaceName = IS_LINUX
+    ? (UdpChannel.parse('aeron:udp?endpoint=[ff02::11:87]:' + PORT)
+          .localInterface()
+          ?.getName() ?? null)
+    : null;
+const ipv6WorksOverDefaultInterface =
+    null !== defaultInterfaceName &&
+    ('lo' === defaultInterfaceName ? ipv6Works : await ipv6MulticastWorks(defaultInterfaceName));
 
 const noPortManager: PortManager = {
     getManagedPort: (_channel, address) => address,
@@ -101,10 +110,14 @@ class TestTransport extends UdpChannelTransport {
 let context: MediaDriver.Context;
 let transports: TestTransport[];
 
-function open(family: Family, group: string): TestTransport {
+function open(family: Family, group: string, withInterface = true): TestTransport {
     const transport = new TestTransport(
         UdpChannel.parse(
-            'aeron:udp?endpoint=' + family.endpoint(group) + ':' + PORT + '|interface=' + family.interface,
+            'aeron:udp?endpoint=' +
+                family.endpoint(group) +
+                ':' +
+                PORT +
+                (withInterface ? '|interface=' + family.interface : ''),
         ),
         context,
     );
@@ -214,5 +227,75 @@ describe.skipIf(!IS_LINUX)('multicast transports on one port', () => {
         it.skipIf(!IS_LINUX)('isTheWildcardForALinkLocalGroupWithoutAnInterface Regression', () => {
             expect(bindHostOf('[ff02::11:87]', undefined)).toBeNull();
         });
+    });
+    // Issue #61 (spec D132): a link-local group of a channel without an interface was bound to the wildcard address.
+    describe('a link-local group of a channel without an interface', () => {
+        const ethernet = (name: string, up: boolean, multicast: boolean, loopback = false): NetworkInterface =>
+            new NetworkInterface(name, name, [] as InterfaceAddress[], { loopback, up, multicast });
+        type Private = {
+            multicastInterface(): string | undefined;
+        };
+        const transportOf = (interfaces: NetworkInterface[]): TestTransport => {
+            const channel = UdpChannel.parse('aeron:udp?endpoint=[ff02::11:87]:' + PORT);
+            vi.spyOn(channel, 'localInterface').mockReturnValue(null);
+            vi.spyOn(NetworkInterface, 'getNetworkInterfaces').mockReturnValue(interfaces);
+            const transport = new TestTransport(channel, context);
+            transports.push(transport);
+            return transport;
+        };
+        const bindHostOf = (transport: TestTransport): string | null => {
+            const select = (
+                UdpChannelTransport as unknown as {
+                    multicastBindHost: (c: UdpChannel, a: InetSocketAddress, i: string | undefined) => string | null;
+                }
+            ).multicastBindHost;
+            return select(
+                transport.udpChannel(),
+                transport.udpChannel().remoteData(),
+                (transport as unknown as Private).multicastInterface(),
+            );
+        };
+
+        afterEach(() => {
+            vi.restoreAllMocks();
+        });
+
+        it.skipIf(!IS_LINUX)('isBoundWithTheScopeOfTheFirstUpMulticastInterface Regression', () => {
+            const transport = transportOf([
+                ethernet('lo', true, false, true),
+                ethernet('down0', false, true),
+                ethernet('eth7', true, true),
+                ethernet('eth8', true, true),
+            ]);
+
+            expect((transport as unknown as Private).multicastInterface()).toBe('::%eth7');
+            expect(bindHostOf(transport)).toBe('ff02:0:0:0:0:0:11:87%eth7');
+        });
+
+        it.skipIf(!IS_LINUX)('isBoundWithTheScopeOfTheLoopbackWhenItIsTheOnlyInterfaceThatIsUp Regression', () => {
+            const transport = transportOf([ethernet('eth7', false, true), ethernet('lo', true, false, true)]);
+
+            expect(bindHostOf(transport)).toBe('ff02:0:0:0:0:0:11:87%lo');
+        });
+
+        it.skipIf(!IS_LINUX)('keepsTheWildcardOnlyOnAHostWithoutAnInterfaceThatIsUp Regression', () => {
+            const transport = transportOf([ethernet('eth7', false, true)]);
+
+            expect((transport as unknown as Private).multicastInterface()).toBeUndefined();
+            expect(bindHostOf(transport)).toBeNull();
+        });
+
+        it.skipIf(!IS_LINUX || !ipv6WorksOverDefaultInterface)(
+            'doesNotSeeTheDatagramsOfAnotherGroupOnThePort Regression',
+            async () => {
+                const a = open(IPV6_LINK_LOCAL, IPV6_LINK_LOCAL.groupA, false);
+                const b = open(IPV6_LINK_LOCAL, IPV6_LINK_LOCAL.groupB, false);
+
+                a.sendTo(bufferOf('to b'), 0, 4, new InetSocketAddress(IPV6_LINK_LOCAL.groupB, PORT));
+                expect(await receiveText(b)).toBe('to b');
+                a.sendTo(bufferOf('to a'), 0, 4, new InetSocketAddress(IPV6_LINK_LOCAL.groupA, PORT));
+                expect(await receiveText(a)).toBe('to a');
+            },
+        );
     });
 });
