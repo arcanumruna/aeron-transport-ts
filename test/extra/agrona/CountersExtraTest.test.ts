@@ -604,4 +604,38 @@ describe('CountersExtra', () => {
             expect(String(StandardCharsets.US_ASCII)).toBe('US-ASCII');
         });
     });
+
+    describe('cross thread long fields (issue 16)', () => {
+        it('ownerIdReferenceIdAndFreeForReuseDeadlineUseTheAtomicLongMethodsRegression', () => {
+            const clockMs = { value: 1000 };
+            const timed = new CountersManager(
+                metadataBuffer,
+                valuesBuffer,
+                StandardCharsets.UTF_8,
+                { time: () => clockMs.value },
+                100,
+            );
+            const plainPuts = [vi.spyOn(metadataBuffer, 'putLong'), vi.spyOn(valuesBuffer, 'putLong')];
+            const plainGets = [vi.spyOn(metadataBuffer, 'getLong'), vi.spyOn(valuesBuffer, 'getLong')];
+            const releases = [vi.spyOn(metadataBuffer, 'putLongRelease'), vi.spyOn(valuesBuffer, 'putLongRelease')];
+            const volatiles = [vi.spyOn(metadataBuffer, 'getLongVolatile'), vi.spyOn(valuesBuffer, 'getLongVolatile')];
+
+            const a = timed.allocate('a');
+            timed.setCounterOwnerId(a, 7);
+            timed.setCounterReferenceId(a, 9);
+            expect(timed.getCounterOwnerId(a)).toBe(7);
+            expect(timed.getCounterReferenceId(a)).toBe(9);
+            expect(timed.getFreeForReuseDeadline(a)).toBe(NOT_FREE_TO_REUSE);
+            timed.free(a);
+            expect(timed.getFreeForReuseDeadline(a)).toBe(1100);
+            clockMs.value = 2000;
+            expect(timed.allocate('b')).toBe(a); // reuse resets owner and reference id
+            expect(timed.getCounterOwnerId(a)).toBe(0);
+
+            expect(plainPuts.map((s) => s.mock.calls.length)).toEqual([0, 0]);
+            expect(plainGets.map((s) => s.mock.calls.length)).toEqual([0, 0]);
+            expect(releases.every((s) => s.mock.calls.length > 0)).toBe(true);
+            expect(volatiles.every((s) => s.mock.calls.length > 0)).toBe(true);
+        });
+    });
 });

@@ -499,7 +499,9 @@ export class CountersReader {
      */
     public getCounterOwnerId(counterId: number): number {
         this.validateCounterId(counterId);
-        return this._valuesBuffer.getLong(CountersReader.counterOffset(counterId) + CountersReader.OWNER_ID_OFFSET);
+        return this._valuesBuffer.getLongVolatile(
+            CountersReader.counterOffset(counterId) + CountersReader.OWNER_ID_OFFSET,
+        );
     }
 
     /**
@@ -513,7 +515,9 @@ export class CountersReader {
      */
     public getCounterReferenceId(counterId: number): number {
         this.validateCounterId(counterId);
-        return this._valuesBuffer.getLong(CountersReader.counterOffset(counterId) + CountersReader.REFERENCE_ID_OFFSET);
+        return this._valuesBuffer.getLongVolatile(
+            CountersReader.counterOffset(counterId) + CountersReader.REFERENCE_ID_OFFSET,
+        );
     }
 
     /**
@@ -551,7 +555,7 @@ export class CountersReader {
      */
     public getFreeForReuseDeadline(counterId: number): number {
         this.validateCounterId(counterId);
-        return this._metaDataBuffer.getLong(
+        return this._metaDataBuffer.getLongVolatile(
             CountersReader.metaDataOffset(counterId) + CountersReader.FREE_FOR_REUSE_DEADLINE_OFFSET,
         );
     }

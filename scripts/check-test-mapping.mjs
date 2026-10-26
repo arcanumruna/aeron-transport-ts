@@ -149,6 +149,8 @@ function multisetDiff(a, b) {
  * @param opts.readTs reads a TS test file by its repo-relative path
  * @param opts.fileExists optional: whether a repo-relative path exists; when given, every TS file named in the
  *        "Sources" table must exist
+ * @param opts.findJavaTest optional: whether the Java test `<name>` exists under the source root `prefix`; when given,
+ *        every Sources row with such a test needs a Tests row or a Not-ported row
  * @returns error messages, empty when the mapping holds
  */
 export function checkMapping(md, opts) {

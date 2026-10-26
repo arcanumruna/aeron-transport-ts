@@ -123,7 +123,7 @@ export class CountersManager extends CountersReader {
                 const counterId = this.freeList.getInt(i);
                 if (
                     nowMs >=
-                    this._metaDataBuffer.getLong(
+                    this._metaDataBuffer.getLongVolatile(
                         CountersReader.metaDataOffset(counterId) + FREE_FOR_REUSE_DEADLINE_OFFSET,
                     )
                 ) {
@@ -313,7 +313,7 @@ export class CountersManager extends CountersReader {
 
         this._metaDataBuffer.putIntRelease(offset, RECORD_RECLAIMED);
         this._metaDataBuffer.setMemory(offset + KEY_OFFSET, MAX_KEY_LENGTH, 0);
-        this._metaDataBuffer.putLong(
+        this._metaDataBuffer.putLongRelease(
             offset + FREE_FOR_REUSE_DEADLINE_OFFSET,
             this.epochClock.time() + this.freeToReuseTimeoutMs,
         );
@@ -353,7 +353,7 @@ export class CountersManager extends CountersReader {
      */
     public setCounterOwnerId(counterId: number, ownerId: number): void {
         this.validateCounterId(counterId);
-        this._valuesBuffer.putLong(CountersReader.counterOffset(counterId) + OWNER_ID_OFFSET, ownerId);
+        this._valuesBuffer.putLongRelease(CountersReader.counterOffset(counterId) + OWNER_ID_OFFSET, ownerId);
     }
 
     /**
@@ -364,7 +364,7 @@ export class CountersManager extends CountersReader {
      */
     public setCounterReferenceId(counterId: number, referenceId: number): void {
         this.validateCounterId(counterId);
-        this._valuesBuffer.putLong(CountersReader.counterOffset(counterId) + REFERENCE_ID_OFFSET, referenceId);
+        this._valuesBuffer.putLongRelease(CountersReader.counterOffset(counterId) + REFERENCE_ID_OFFSET, referenceId);
     }
 
     /**
@@ -458,7 +458,7 @@ export class CountersManager extends CountersReader {
 
         try {
             this._metaDataBuffer.putInt(recordOffset + TYPE_ID_OFFSET, typeId);
-            this._metaDataBuffer.putLong(recordOffset + FREE_FOR_REUSE_DEADLINE_OFFSET, NOT_FREE_TO_REUSE);
+            this._metaDataBuffer.putLongRelease(recordOffset + FREE_FOR_REUSE_DEADLINE_OFFSET, NOT_FREE_TO_REUSE);
             this.putLabel(recordOffset, label);
 
             this._metaDataBuffer.putIntRelease(recordOffset, RECORD_ALLOCATED);
@@ -482,7 +482,7 @@ export class CountersManager extends CountersReader {
 
             this._metaDataBuffer.putInt(recordOffset + TYPE_ID_OFFSET, typeId);
             keyFunc(new UnsafeBuffer(this._metaDataBuffer, recordOffset + KEY_OFFSET, MAX_KEY_LENGTH));
-            this._metaDataBuffer.putLong(recordOffset + FREE_FOR_REUSE_DEADLINE_OFFSET, NOT_FREE_TO_REUSE);
+            this._metaDataBuffer.putLongRelease(recordOffset + FREE_FOR_REUSE_DEADLINE_OFFSET, NOT_FREE_TO_REUSE);
             this.putLabel(recordOffset, label);
 
             this._metaDataBuffer.putIntRelease(recordOffset, RECORD_ALLOCATED);
@@ -509,7 +509,7 @@ export class CountersManager extends CountersReader {
             const recordOffset = CountersReader.metaDataOffset(counterId);
 
             this._metaDataBuffer.putInt(recordOffset + TYPE_ID_OFFSET, typeId);
-            this._metaDataBuffer.putLong(recordOffset + FREE_FOR_REUSE_DEADLINE_OFFSET, NOT_FREE_TO_REUSE);
+            this._metaDataBuffer.putLongRelease(recordOffset + FREE_FOR_REUSE_DEADLINE_OFFSET, NOT_FREE_TO_REUSE);
 
             if (null !== keyBuffer) {
                 const length = Math.min(keyLength, MAX_KEY_LENGTH);
@@ -537,7 +537,7 @@ export class CountersManager extends CountersReader {
                 const counterId = this.freeList.getInt(i);
                 if (
                     nowMs >=
-                    this._metaDataBuffer.getLong(
+                    this._metaDataBuffer.getLongVolatile(
                         CountersReader.metaDataOffset(counterId) + FREE_FOR_REUSE_DEADLINE_OFFSET,
                     )
                 ) {
@@ -545,8 +545,8 @@ export class CountersManager extends CountersReader {
 
                     const offset = CountersReader.counterOffset(counterId);
                     this._valuesBuffer.putLongRelease(offset + REGISTRATION_ID_OFFSET, DEFAULT_REGISTRATION_ID);
-                    this._valuesBuffer.putLong(offset + OWNER_ID_OFFSET, DEFAULT_OWNER_ID);
-                    this._valuesBuffer.putLong(offset + REFERENCE_ID_OFFSET, DEFAULT_REFERENCE_ID);
+                    this._valuesBuffer.putLongRelease(offset + OWNER_ID_OFFSET, DEFAULT_OWNER_ID);
+                    this._valuesBuffer.putLongRelease(offset + REFERENCE_ID_OFFSET, DEFAULT_REFERENCE_ID);
                     this._valuesBuffer.putLongRelease(offset, 0);
 
                     return counterId;
