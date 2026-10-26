@@ -305,8 +305,30 @@ should be able to follow both line by line.
 
 Tests follow the same rule: each JUnit test becomes a vitest `it` with the same name, the same arrange / act /
 assert steps and the same expected values. `@BeforeEach` / `@AfterEach` become `beforeEach` / `afterEach`;
-`@ParameterizedTest` sources become `it.each` tables with the same rows; Mockito mocks become `vi.fn()` / hand fakes
+`@ParameterizedTest` sources become `it.each` tables with the same rows; Mockito mocks become the doubles of §5.5
 and `verify(...)` becomes the matching `expect(...).toHaveBeenCalledWith(...)` / call-count check, in the same order.
+
+### 5.5 Conventions (one choice for each recurring Java construct)
+A porter meets these in every file, so the choice is made once. The code was aligned to it in issue #6.
+
+- **A field that has the name of a method.** The field is `_x` (`_loadFactor`, `_missingValue`, `_keySet`,
+  `_entrySet`, `_resizeThreshold`). No `xValue` suffix. A field that has no method of its name keeps Java's name
+  (`valueCollection`).
+- **A nested Java enum or interface** (`Outer.Inner`) is a top-level class (or type) `Inner` in the file of `Outer`,
+  and `Outer` also has the merged `export namespace Outer { export type Inner = InnerType }`, so that
+  `Outer.Inner` works as a type. When `Outer` is an interface, it also has `const Outer = { Inner }` for the value
+  (`ControlledFragmentHandler.Action`, `ControlledMessageHandler.Action`). Other cases: `AeronException.Category`,
+  `CommonContext.InferableBoolean`, `CountersReader.MetaData`.
+- **`long` arithmetic on a position** (a `number`, D5) goes through one pair in `LogBufferDescriptor`:
+  `termCountByPosition(position, positionBitsToShift)` for Java's `(int)(position >> bits)` and
+  `termOffsetByPosition(position, termLength)` for `(int)position & (termLength - 1)`. Both are exact for a position
+  in the range of D5 and allocate nothing. `computePosition`, `computeTermIdFromPosition` and `indexByPosition` keep
+  their own forms because they also cover the `termCount * 2^bits` product and the cold negative branch.
+- **Test doubles for Mockito.** `vi.fn()` for a function or a single method; `mock()` of `test/support/Mockito.ts` for
+  an interface with several methods; `vi.spyOn` on a real object for a concrete class (a `verify` on a real buffer);
+  a hand-written fake (`MockAgent`, `MockPosition`) where the Java test has its own stub class or the fake keeps state.
+- **`bigint` against `number`.** Unchanged (§5.2, D14): an opaque 64-bit wire value is a `bigint`, every other `long`
+  is a `number`.
 
 ## 6. Deviations from Aeron (closed list)
 Any deviation outside this list is a bug in the port.
