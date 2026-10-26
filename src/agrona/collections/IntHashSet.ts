@@ -69,7 +69,7 @@ export class IntHashSet extends AbstractSet<number> {
     /** @internal */
     public containsMissingValue = false;
     private readonly _loadFactor: number;
-    private _resizeThreshold: number;
+    private resizeThresholdValue: number;
     // NB: excludes missing value
     /** @internal */
     public _sizeOfArrayValues = 0;
@@ -102,7 +102,7 @@ export class IntHashSet extends AbstractSet<number> {
         const capacity = BitUtil.findNextPositivePowerOfTwo(
             Math.max(IntHashSet.DEFAULT_INITIAL_CAPACITY, proposedCapacity),
         );
-        this._resizeThreshold = Math.trunc(Math.fround(Math.fround(capacity) * loadFactor));
+        this.resizeThresholdValue = Math.trunc(Math.fround(Math.fround(capacity) * loadFactor));
         this._values = new Int32Array(capacity);
     }
 
@@ -131,7 +131,7 @@ export class IntHashSet extends AbstractSet<number> {
      * @return the threshold when the map will resize.
      */
     public resizeThreshold(): number {
-        return this._resizeThreshold;
+        return this.resizeThresholdValue;
     }
 
     /**
@@ -165,7 +165,7 @@ export class IntHashSet extends AbstractSet<number> {
         values[index] = value;
         this._sizeOfArrayValues++;
 
-        if (this._sizeOfArrayValues > this._resizeThreshold) {
+        if (this._sizeOfArrayValues > this.resizeThresholdValue) {
             this.increaseCapacity();
         }
 
@@ -184,7 +184,7 @@ export class IntHashSet extends AbstractSet<number> {
     private rehash(newCapacity: number): void {
         const capacity = newCapacity;
         const mask = newCapacity - 1;
-        this._resizeThreshold = Math.trunc(Math.fround(Math.fround(newCapacity) * this._loadFactor));
+        this.resizeThresholdValue = Math.trunc(Math.fround(Math.fround(newCapacity) * this._loadFactor));
 
         const tempValues = new Int32Array(capacity);
         const values = this._values;

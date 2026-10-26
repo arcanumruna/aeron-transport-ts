@@ -94,11 +94,3 @@ export interface ControlledMessageHandler {
  * The nested enum `ControlledMessageHandler.Action`, beside the interface of the same name.
  */
 export const ControlledMessageHandler = { Action } as const;
-
-type ActionType = Action;
-
-// Declaration merging: `ControlledMessageHandler.Action` is a type as well as a value, as the nested Java enum is.
-// eslint-disable-next-line @typescript-eslint/no-namespace
-export namespace ControlledMessageHandler {
-    export type Action = ActionType;
-}
