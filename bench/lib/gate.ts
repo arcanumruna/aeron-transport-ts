@@ -103,6 +103,7 @@ function prng(seed: number): () => number {
 function runFile(cwd: string, file: string, options: Options): Line[] {
     const args = [
         '--expose-gc',
+        '--experimental-transform-types',
         '--import',
         './test/support/workerRegister.mjs',
         '--no-warnings',

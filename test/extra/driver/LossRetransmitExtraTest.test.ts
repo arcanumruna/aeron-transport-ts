@@ -24,6 +24,7 @@ import type { AtomicCounter } from '../../../src/agrona/concurrent/status/Atomic
 import { CountersManager } from '../../../src/agrona/concurrent/status/CountersManager.js';
 import { CountersReader } from '../../../src/agrona/concurrent/status/CountersReader.js';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
+import { OptimalMulticastDelayGenerator } from '../../../src/driver/OptimalMulticastDelayGenerator.js';
 import { FrameDescriptor } from '../../../src/client/logbuffer/FrameDescriptor.js';
 import { LogBufferDescriptor } from '../../../src/client/logbuffer/LogBufferDescriptor.js';
 import type { FlowControl } from '../../../src/driver/FlowControl.js';
@@ -340,6 +341,16 @@ describe('RetransmitHandlerMatrixExtraTest', () => {
         expect(overflow.get()).toBe(0);
     });
 
+    it('RetransmitHandlerOptimalDelayNanAdversarialRegression: a NaN delay is 0, so a NAK resends at once', () => {
+        const generator = new OptimalMulticastDelayGenerator(0, 10);
+        expect(generator.generateNewOptimalDelay()).toBeNaN();
+        const handler = new RetransmitHandler(clock, generator, new StaticDelayGenerator(ms(40)), true, 16, overflow);
+
+        nak(handler, TERM_ID, 0, 64);
+
+        expect(sent).toEqual([[TERM_ID, 0, 64]]);
+    });
+
     it('unicast ignores a NAK inside the range of the active one, in delay and in linger', () => {
         const handler = newHandler(false, 16);
         nak(handler, TERM_ID, 0, 256);
@@ -538,5 +549,16 @@ describe('RetransmitHandlerAllocationExtraTest', () => {
             }
         });
         expect(Number.isInteger(sink)).toBe(true);
+    });
+});
+
+describe('OptimalMulticastDelayGeneratorExtraTest', () => {
+    it('OptimalMulticastDelayGeneratorNanDelayAdversarialRegression: a NaN delay is 0 as Java (long) casts it', () => {
+        expect(new OptimalMulticastDelayGenerator(0, 10).generateDelayNs()).toBe(0);
+    });
+
+    it('OptimalMulticastDelayGeneratorRetryDelayRegression: retryDelayNs is an integer, 0 for a degenerate group', () => {
+        expect(new OptimalMulticastDelayGenerator(0, 10).retryDelayNs()).toBe(0);
+        expect(Number.isInteger(new OptimalMulticastDelayGenerator(1_000_000, 10).generateDelayNs())).toBe(true);
     });
 });

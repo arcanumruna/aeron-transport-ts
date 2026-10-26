@@ -16,7 +16,7 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of io/aeron/driver/OptimalMulticastDelayGenerator.java @ 1.53.3
-import { ThreadLocalRandom } from '../agrona/jdk.js';
+import { doubleToLong, ThreadLocalRandom } from '../agrona/jdk.js';
 import { type FeedbackDelayGenerator } from './FeedbackDelayGenerator.js';
 
 /**
@@ -47,7 +47,7 @@ export class OptimalMulticastDelayGenerator implements FeedbackDelayGenerator {
      * {@inheritDoc}
      */
     public generateDelayNs(): number {
-        return Math.trunc(this.generateNewOptimalDelay());
+        return doubleToLong(this.generateNewOptimalDelay());
     }
 
     /**
