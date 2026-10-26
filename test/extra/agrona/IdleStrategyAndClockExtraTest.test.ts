@@ -1,6 +1,8 @@
 // Not in Agrona (its idle strategies and clocks have no tests of their own except CachedClockTest, which is not
 // mapped): the idle strategies return the wait instead of blocking (spec D11), and the clocks.
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { performance } from 'node:perf_hooks';
+import type { NanoClock } from '../../../src/agrona/concurrent/NanoClock.js';
 import { BackoffIdleStrategy } from '../../../src/agrona/concurrent/BackoffIdleStrategy.js';
 import { CachedEpochClock } from '../../../src/agrona/concurrent/CachedEpochClock.js';
 import { CachedNanoClock } from '../../../src/agrona/concurrent/CachedNanoClock.js';
@@ -139,5 +141,38 @@ describe('ClockExtra', () => {
         expect(Number.isInteger(time)).toBe(true);
         expect(time).toBeGreaterThanOrEqual(before);
         expect(time).toBeLessThanOrEqual(after);
+    });
+});
+
+describe('SystemNanoClockExtra', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.resetModules();
+    });
+
+    async function loadWith(loadMs: number): Promise<{ clock: NanoClock; now: ReturnType<typeof vi.spyOn> }> {
+        vi.resetModules();
+        const now = vi.spyOn(performance, 'now').mockReturnValue(loadMs);
+        const mod = await import('../../../src/agrona/concurrent/SystemNanoClock.js');
+        return { clock: mod.SystemNanoClock.INSTANCE, now };
+    }
+
+    it('startsNearZeroFromTheModuleLoadBaselineRegression', async () => {
+        const { clock, now } = await loadWith(5000);
+
+        expect(clock.nanoTime()).toBe(0);
+        now.mockReturnValue(5001.5);
+        expect(clock.nanoTime()).toBe(1_500_000);
+    });
+
+    it('neverExceedsTheSafeIntegerLimitAfterAVeryLongUptimeRegression', async () => {
+        const { clock, now } = await loadWith(5000);
+
+        now.mockReturnValue(5000 + 9.0e9); // just under 104.25 days
+        expect(clock.nanoTime()).toBeLessThanOrEqual(Number.MAX_SAFE_INTEGER);
+        for (const ms of [5000 + 9.1e9, 5000 + 1e12, 1e15]) {
+            now.mockReturnValue(ms);
+            expect(clock.nanoTime()).toBe(Number.MAX_SAFE_INTEGER);
+        }
     });
 });
