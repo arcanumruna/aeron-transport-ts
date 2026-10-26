@@ -69,7 +69,7 @@ import type { DriverConductorProxy } from '../../../../src/driver/DriverConducto
 import { newFakeConductorProxy, type FakeConductorProxy } from '../../../support/ConductorProxyFake.js';
 import { assertThrows } from '../../../support/Assertions.js';
 import { type Fake, calledMembers } from '../../../support/Mockito.js';
-import { FakeSocket, freeUdpPort, hasIpv6Loopback, waitUntil } from '../../../support/Udp.js';
+import { FakeSocket, freeUdpPort, hasIpv6Loopback, skipUnlessRequired, waitUntil } from '../../../support/Udp.js';
 
 const { LITTLE_ENDIAN } = ByteOrder;
 const LOOPBACK = '127.0.0.1';
@@ -1788,7 +1788,7 @@ describe('endpoints over loopback (the real path)', () => {
 
     it('IPv6: the same over [::1]', async (ctx) => {
         if (!hasIpv6Loopback()) {
-            ctx.skip();
+            skipUnlessRequired(ctx, 'no IPv6 loopback on this host');
         }
         await roundTrip('::1', '[::1]');
     });

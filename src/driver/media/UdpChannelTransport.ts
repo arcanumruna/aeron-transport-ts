@@ -178,6 +178,10 @@ export abstract class UdpChannelTransport implements AutoCloseable {
     private pendingSendError: Error | null = null;
     private openError: Error | null = null;
     private isOpening = false;
+    private readonly endOpeningCallback = (): void => {
+        this.isOpening = false;
+        this.openError = null;
+    };
     private isClosed = false;
     // close() has run: it frees the managed port once. Not isClosed, which a failed open also sets (late socket errors).
     private closeDone = false;
@@ -606,6 +610,7 @@ export abstract class UdpChannelTransport implements AutoCloseable {
      * @param statusIndicator for the channel
      */
     public updateEndpoint(newAddress: InetSocketAddress, statusIndicator: AtomicCounter | null): void {
+        let failed = false;
         try {
             const socket = this.sendDatagramChannel;
             if (null !== socket) {
@@ -641,9 +646,17 @@ export abstract class UdpChannelTransport implements AutoCloseable {
                 '): ' +
                 this._udpChannel.originalUriString();
 
+            // The failed connect was handled by this throw. Node also emits it as an 'error' event on the next tick
+            // (Java has no such second error), so the transport stays "opening" until a tick queued after node's own, and
+            // the event is dropped by onSocketError instead of being reported at the next poll.
+            failed = true;
+            process.nextTick(this.endOpeningCallback);
+
             throw new AeronException(message, error);
         } finally {
-            this.isOpening = false;
+            if (!failed) {
+                this.isOpening = false;
+            }
         }
     }
 

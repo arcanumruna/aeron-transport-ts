@@ -165,6 +165,30 @@ describe('NameResolutionExtraTest', () => {
             assertThrowsExactly(UnknownHostException, () => InetAddress.getByName(host));
         });
 
+        // JDK 17+ hardening (issue 13), pinned against OpenJDK 21's InetAddress.getByName.
+        it.each(['0x7f.0.0.1', '0x7f', '1.0x100', '0.0.0.0x1', '0177.0x1.0.1', '0x7f.1'])(
+            'rejectsTheAmbiguousBsdLiteralRegression %s',
+            (host) => {
+                expect(() => InetAddress.getByName(host)).toThrow(new UnknownHostException(host));
+            },
+        );
+
+        it.each(['::ffff:1.2.3.4%1', '::ffff:1.2.3.4%eth0'])(
+            'rejectsAnIpV4MappedAddressWithAScopeRegression %s',
+            (host) => {
+                expect(() => InetAddress.getByName(host)).toThrow(host + ': invalid IPv4-mapped address');
+            },
+        );
+
+        it.each(['a\0', '1.2.3.4\0', '::1\0', '\0'])('rejectsANulInTheHostRegression %j', (host) => {
+            expect(() => InetAddress.getByName(host)).toThrow('NUL character not allowed in hostname');
+        });
+
+        it('stillAcceptsTheDecimalForms', () => {
+            expect(InetAddress.getByName('0177.0.0.1').getHostAddress()).toBe('177.0.0.1');
+            expect(InetAddress.getByName('127.1').getHostAddress()).toBe('127.0.0.1');
+        });
+
         it('turnsAnIpV4MappedIpV6AddressIntoAnIpV4Address', () => {
             const address = InetAddress.getByName('::ffff:10.1.2.3');
 

@@ -53,6 +53,32 @@ class FixedNameResolver implements NameResolver {
 }
 
 describe('UdpChannelExtraTest', () => {
+    describe('null arguments', () => {
+        it('parseOfANullUriThrowsInvalidChannelWithANullPointerCauseRegression', () => {
+            let thrown: unknown = null;
+            try {
+                UdpChannel.parse(null as unknown as string);
+            } catch (ex) {
+                thrown = ex;
+            }
+
+            expect(thrown).toBeInstanceOf(InvalidChannelException);
+            expect(getCause(thrown as Error)).toBeInstanceOf(NullPointerException);
+        });
+
+        it('parseWithANullNameResolverThrowsInvalidChannelWithANullPointerCauseRegression', () => {
+            let thrown: unknown = null;
+            try {
+                UdpChannel.parse('aeron:udp?endpoint=localhost:1234', null as unknown as NameResolver);
+            } catch (ex) {
+                thrown = ex;
+            }
+
+            expect(thrown).toBeInstanceOf(InvalidChannelException);
+            expect(getCause(thrown as Error)).toBeInstanceOf(NullPointerException);
+        });
+    });
+
     describe('canonical form', () => {
         // Mutation: in the final `else` branch of parse, `'-' + uniqueCanonicalFormValue++` becomes
         // `'-' + uniqueCanonicalFormValue` (the increment is dropped).

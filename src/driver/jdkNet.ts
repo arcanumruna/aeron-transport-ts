@@ -135,6 +135,57 @@ function textToNumericFormatV4(src: string): Uint8Array | null {
     return res;
 }
 
+/**
+ * `sun.net.util.IPAddressUtil.isBsdParsableV4` (JDK 17+): whether a literal that `textToNumericFormatV4` refused is
+ * one the BSD `inet_aton` would still accept (hex `0x` or octal parts, one to four parts, the last filling the rest).
+ * Such a literal is ambiguous, so `getByName` rejects it instead of looking it up as a host name.
+ */
+function isBsdParsableV4(src: string): boolean {
+    if (0 === src.length || digit(src.charAt(0), 10) < 0) {
+        return false;
+    }
+
+    const parts = src.split('.');
+    if (parts.length > 4) {
+        return false;
+    }
+
+    for (let p = 0; p < parts.length; p++) {
+        const part = parts[p] as string;
+        let radix = 10;
+        let start = 0;
+        if (part.length >= 2 && '0' === part.charAt(0) && ('x' === part.charAt(1) || 'X' === part.charAt(1))) {
+            radix = 16;
+            start = 2;
+        } else if (part.length >= 2 && '0' === part.charAt(0)) {
+            radix = 8;
+            start = 1;
+        }
+        if (start >= part.length) {
+            return false;
+        }
+
+        let value = 0;
+        for (let i = start; i < part.length; i++) {
+            const d = digit(part.charAt(i), radix);
+            if (d < 0) {
+                return false;
+            }
+            value = value * radix + d;
+            if (value > 0xffffffff) {
+                return false;
+            }
+        }
+
+        const last = p === parts.length - 1;
+        if (last ? value >= Math.pow(2, (5 - parts.length) * 8) : value > 0xff) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 function isIPv4MappedAddress(addr: Uint8Array): boolean {
     if (addr.length < INADDR16SZ) {
         return false;
@@ -325,6 +376,10 @@ export abstract class InetAddress {
             return InetAddress.getLoopbackAddress();
         }
 
+        if (host.includes('\0')) {
+            throw new UnknownHostException('NUL character not allowed in hostname');
+        }
+
         let ipv6Expected = false;
         if ('[' === host.charAt(0)) {
             if (host.length > 2 && ']' === host.charAt(host.length - 1)) {
@@ -337,6 +392,9 @@ export abstract class InetAddress {
 
         if (-1 !== digit(host.charAt(0), 16) || ':' === host.charAt(0)) {
             let addr = textToNumericFormatV4(host);
+            if (null === addr && isBsdParsableV4(host)) {
+                throw new UnknownHostException(host);
+            }
             let numericZone = -1;
             let ifname: string | null = null;
             if (null === addr) {
@@ -350,6 +408,9 @@ export abstract class InetAddress {
                 addr = textToNumericFormatV6(host);
                 if (null === addr && host.includes(':')) {
                     throw new UnknownHostException(host + ': invalid IPv6 address');
+                }
+                if (null !== addr && INADDR4SZ === addr.length && (-1 !== numericZone || null !== ifname)) {
+                    throw new UnknownHostException(host + ': invalid IPv4-mapped address');
                 }
             } else if (ipv6Expected) {
                 throw new UnknownHostException('[' + host + ']');

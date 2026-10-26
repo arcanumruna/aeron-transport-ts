@@ -138,6 +138,17 @@ export class Collector {
     }
 }
 
+/**
+ * Skips a test that needs a host capability (IPv6 loopback, a route off the host) the host lacks, with the reason shown in the
+ * report. With AERON_TS_REQUIRE_NET=1 (set in CI) the missing capability fails the test instead, so CI never skips it silently.
+ */
+export function skipUnlessRequired(ctx: { skip: (note?: string) => void }, reason: string): void {
+    if ('1' === process.env['AERON_TS_REQUIRE_NET']) {
+        throw new Error('AERON_TS_REQUIRE_NET=1 but ' + reason);
+    }
+    ctx.skip(reason);
+}
+
 /** Whether the host can bind an IPv6 loopback socket. */
 export function hasIpv6Loopback(): boolean {
     const socket = dgram.createSocket({ type: 'udp6', lookup: syncLookup });
@@ -155,13 +166,68 @@ export function hasIpv6Loopback(): boolean {
     }
 }
 
-/** An unused loopback UDP port: bound and released. */
-export function freeUdpPort(): number {
+/** The ports a worker owns: below the kernel's ephemeral range (32768+), a slice of this many ports per worker. */
+const PORT_SLICE = 300;
+const PORT_BASE = 20_000;
+const PORT_SLICES = 40;
+let sliceNext = 0;
+const issued = new Set<number>();
+
+function workerSlice(): number {
+    const id = Number(process.env['VITEST_POOL_ID'] ?? process.env['VITEST_WORKER_ID'] ?? process.pid);
+    return (Number.isFinite(id) ? id : process.pid) % PORT_SLICES;
+}
+
+/** Whether `port` can be bound on the IPv4 loopback right now (the socket is released at once). */
+function canBind(port: number): boolean {
     const socket = dgram.createSocket({ type: 'udp4', lookup: syncLookup });
-    socket.bind(0, '127.0.0.1');
-    const port = socket.address().port;
-    socket.close();
-    return port;
+    try {
+        socket.bind(port, '127.0.0.1');
+        return true;
+    } catch {
+        return false;
+    } finally {
+        try {
+            socket.close();
+        } catch {
+            // not bound
+        }
+    }
+}
+
+/**
+ * An unused loopback UDP port that no other test can take between this call and the test's own bind.
+ * <p>
+ * Binding port 0 and releasing it (the earlier version) hands the kernel's ephemeral port back to the pool, where a
+ * parallel worker's `bind(0)` can take it before the caller does (a TOCTOU race). The callers hand the port to a
+ * driver, so the socket cannot be handed over. Instead each worker draws from a slice of ports of its own, below the
+ * ephemeral range (no kernel `bind(0)` is ever given one), never repeats a port within the process until its slice is used up, and skips a
+ * port that is bound right now.
+ */
+export function freeUdpPort(): number {
+    const base = PORT_BASE + workerSlice() * PORT_SLICE;
+    for (let attempt = 0; attempt < 2 * PORT_SLICE; attempt++) {
+        const port = base + (sliceNext++ % PORT_SLICE);
+        if (issued.has(port)) {
+            continue;
+        }
+        if (canBind(port)) {
+            issued.add(port);
+            return port;
+        }
+    }
+
+    // the slice is used up: start it again, and still skip a port that is bound
+    issued.clear();
+    for (let i = 0; i < PORT_SLICE; i++) {
+        const port = base + (sliceNext++ % PORT_SLICE);
+        if (canBind(port)) {
+            issued.add(port);
+            return port;
+        }
+    }
+
+    throw new Error('no free UDP port in ' + base + '..' + (base + PORT_SLICE - 1));
 }
 
 /**

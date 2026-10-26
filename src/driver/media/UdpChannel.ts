@@ -22,6 +22,7 @@ import {
     Integer,
     Long,
     LongOverflowError,
+    NullPointerException,
     NumberFormatException,
 } from '../../agrona/jdk.js';
 import { objectsEquals, requireNonNull, stringHashCode } from '../../agrona/jdkUtil.js';
@@ -142,6 +143,7 @@ export class UdpChannel {
         isDestination: boolean = false,
     ): UdpChannel {
         try {
+            requireNonNull(channelUriString);
             const channelUri = ChannelUri.parse(channelUriString);
             UdpChannel.validateConfiguration(channelUri);
 
@@ -296,6 +298,10 @@ export class UdpChannel {
             // parameter Java would have accepted; it rejects the channel here instead of escaping as a RangeError.
             if (ex instanceof Exception || ex instanceof LongOverflowError) {
                 throw new InvalidChannelException(ex);
+            }
+            // A null name resolver is used lazily in Java: its NullPointerException surfaces at the first lookup.
+            if (null === nameResolver && ex instanceof TypeError) {
+                throw new InvalidChannelException(new NullPointerException(ex.message));
             }
             throw ex;
         }
