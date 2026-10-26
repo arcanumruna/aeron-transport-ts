@@ -12,7 +12,7 @@ import { LogBufferDescriptor } from '../../src/client/logbuffer/LogBufferDescrip
 import { DataHeaderFlyweight } from '../../src/client/protocol/DataHeaderFlyweight.js';
 import { Publication } from '../../src/client/Publication.js';
 import type { RawLog } from '../../src/driver/buffer/RawLog.js';
-import { newFakeLogBuffers, newFakePublicationConductor } from './ClientFakes.js';
+import { asConductor, asLogBuffers, newFakeLogBuffers, newFakePublicationConductor } from './ClientFakes.js';
 import { MockPosition } from './MockPosition.js';
 
 const { HEADER_LENGTH } = DataHeaderFlyweight;
@@ -52,13 +52,13 @@ export class TestLogProducer {
         const limit = new MockPosition();
         limit.value = Long.MAX_VALUE;
         this.publication = new ConcurrentPublication(
-            newFakePublicationConductor(),
+            asConductor(newFakePublicationConductor()),
             'aeron:udp?endpoint=localhost:40124',
             start.streamId,
             start.sessionId,
             limit,
             -1,
-            newFakeLogBuffers(rawLog.termBuffers(), this.termLength, rawLog.metaData()),
+            asLogBuffers(newFakeLogBuffers(rawLog.termBuffers(), this.termLength, rawLog.metaData())),
             0,
             0,
         );

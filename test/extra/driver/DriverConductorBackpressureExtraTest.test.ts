@@ -10,7 +10,7 @@ import { MediaDriver } from '../../../src/driver/MediaDriver.js';
 import { NativeResourceAgent } from '../../../src/driver/NativeResourceAgent.js';
 import type { NativeResourceAgentProxy } from '../../../src/driver/NativeResourceAgentProxy.js';
 import { ThreadingMode } from '../../../src/driver/ThreadingMode.js';
-import { DriverProxy } from '../../support/DriverProxy.js';
+import { DriverProxy } from '../../../src/client/DriverProxy.js';
 import { LogBufferDescriptor } from '../../../src/client/logbuffer/LogBufferDescriptor.js';
 import type { DriverConductorProxy } from '../../../src/driver/DriverConductorProxy.js';
 

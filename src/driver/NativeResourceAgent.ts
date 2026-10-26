@@ -16,8 +16,6 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of io/aeron/driver/NativeResourceAgent.java @ 1.53.3
-import dns from 'node:dns';
-import net from 'node:net';
 import type { Agent } from '../agrona/concurrent/Agent.js';
 import type { CountedErrorHandler } from '../agrona/concurrent/CountedErrorHandler.js';
 import type { NanoClock } from '../agrona/concurrent/NanoClock.js';
@@ -27,36 +25,17 @@ import type { ChannelUri } from '../client/ChannelUri.js';
 import type { LogFactory } from './buffer/LogFactory.js';
 import type { RawLog } from './buffer/RawLog.js';
 import type { CommandResult } from './CommandResult.js';
-import { DefaultNameResolver } from './DefaultNameResolver.js';
 import type { DutyCycleTracker } from './DutyCycleTracker.js';
 import type { NameResolverAgent } from './NameResolverAgent.js';
 import type { SystemCounters } from './status/SystemCounters.js';
-import { InetAddress, type InetSocketAddress } from './jdkNet.js';
+import { hostToLookUp, lookUpHost } from './HostNameLookup.js';
+import type { InetSocketAddress } from './jdkNet.js';
 import { MediaDriver, type MediaDriverContext } from './MediaDriver.js';
 import { UdpChannel } from './media/UdpChannel.js';
 import { SystemCounterDescriptor } from './status/SystemCounterDescriptor.js';
 import { TimeTrackingNameResolver } from './TimeTrackingNameResolver.js';
 
 type Task = () => void;
-
-const HOST_NAME = /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/;
-
-/**
- * The host of an `endpoint` or `control` value that is a DNS name to look up: not an IP literal, not `localhost`, and
- * a valid host name. Anything else (and anything that does not parse) is resolved at once by the synchronous resolver,
- * which fails as Java's does.
- */
-function hostToLookUp(endpoint: string): string | null {
-    const separator = endpoint.lastIndexOf(':');
-    if (separator <= 0 || '[' === endpoint.charAt(0)) {
-        return null;
-    }
-    const host = endpoint.substring(0, separator);
-    if (0 !== net.isIP(host) || 'localhost' === host.toLowerCase() || !HOST_NAME.test(host)) {
-        return null;
-    }
-    return host;
-}
 
 /**
  * Agent that does the work of the conductor's blocking commands: parsing channels (name resolution), re-resolution,
@@ -139,15 +118,7 @@ export class NativeResourceAgent implements Agent {
         }
 
         try {
-            dns.lookup(host, { order: 'ipv4first' }, (err, address) => {
-                if (null === err) {
-                    try {
-                        DefaultNameResolver.cache(host, InetAddress.getByName(address));
-                    } catch (ex) {
-                        // the address is not usable: resolve as a failed lookup would
-                        void ex;
-                    }
-                }
+            lookUpHost(host, () => {
                 // A failed lookup leaves the cache as it is: the resolution then ends as Java's does when the name
                 // cannot be resolved, an unresolved address.
                 this.completeReResolution(result, endpoint, uriParamName);

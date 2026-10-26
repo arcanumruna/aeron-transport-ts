@@ -12,7 +12,7 @@ import { ConcurrentConcludeException } from '../../../src/client/exceptions/Conc
 import { ErrorResponseFlyweight } from '../../../src/client/command/ErrorResponseFlyweight.js';
 import { MediaDriver } from '../../../src/driver/MediaDriver.js';
 import { ThreadingMode } from '../../../src/driver/ThreadingMode.js';
-import { DriverProxy } from '../../support/DriverProxy.js';
+import { DriverProxy } from '../../../src/client/DriverProxy.js';
 import { freeUdpPort } from '../../support/Udp.js';
 
 const { ON_ERROR, ON_OPERATION_SUCCESS, ON_PUBLICATION_READY, ON_SUBSCRIPTION_READY } = ControlProtocolEvents;

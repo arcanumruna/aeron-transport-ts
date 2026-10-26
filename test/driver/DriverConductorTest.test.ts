@@ -72,7 +72,7 @@ import { SystemCounterDescriptor } from '../../src/driver/status/SystemCounterDe
 import { SystemCounters } from '../../src/driver/status/SystemCounters.js';
 import { ThreadingMode } from '../../src/driver/ThreadingMode.js';
 import { assertThrowsExactly } from '../support/Assertions.js';
-import { DriverProxy } from '../support/DriverProxy.js';
+import { DriverProxy } from '../../src/client/DriverProxy.js';
 import { InOrder } from '../support/InOrder.js';
 import { mock } from '../support/Mockito.js';
 import { TestLogFactory } from '../support/TestLogFactory.js';

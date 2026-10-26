@@ -26,7 +26,8 @@ import { FrameDescriptor } from './logbuffer/FrameDescriptor.js';
 import { LogBufferDescriptor } from './logbuffer/LogBufferDescriptor.js';
 import { DataHeaderFlyweight } from './protocol/DataHeaderFlyweight.js';
 import { Publication } from './Publication.js';
-import type { PublicationClientConductor, PublicationLogBuffers } from './Publication.js';
+import type { ClientConductor } from './ClientConductor.js';
+import type { LogBuffers } from './LogBuffers.js';
 import type { ReservedValueSupplier } from './ReservedValueSupplier.js';
 
 const { align, SIZE_OF_LONG } = BitUtil;
@@ -66,13 +67,13 @@ const { ADMIN_ACTION, CLOSED, MAX_POSITION_EXCEEDED } = Publication;
 export class ConcurrentPublication extends Publication {
     /** @internal package-private in Java */
     public constructor(
-        clientConductor: PublicationClientConductor,
+        clientConductor: ClientConductor,
         channel: string,
         streamId: number,
         sessionId: number,
         positionLimit: ReadablePosition,
         channelStatusId: number,
-        logBuffers: PublicationLogBuffers,
+        logBuffers: LogBuffers,
         originalRegistrationId: number,
         registrationId: number,
     ) {

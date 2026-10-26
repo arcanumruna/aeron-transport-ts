@@ -34,7 +34,7 @@ import { DataHeaderFlyweight } from '../../src/client/protocol/DataHeaderFlyweig
 import { HeaderFlyweight } from '../../src/client/protocol/HeaderFlyweight.js';
 import type { Subscription } from '../../src/client/Subscription.js';
 import { Subscription as SubscriptionClass } from '../../src/client/Subscription.js';
-import { newFakeLogBuffers } from '../support/ClientFakes.js';
+import { asLogBuffers, newFakeLogBuffers } from '../support/ClientFakes.js';
 import { AtomicLongPosition } from '../support/AtomicLongPosition.js';
 import { expectInOrder } from '../support/InOrder.js';
 import { mock } from '../support/Mockito.js';
@@ -127,7 +127,15 @@ describe('ImageTest', () => {
     });
 
     function createImage(): Image {
-        return new Image(subscription, SESSION_ID, position, logBuffers, errorHandler, SOURCE_IDENTITY, CORRELATION_ID);
+        return new Image(
+            subscription,
+            SESSION_ID,
+            position,
+            asLogBuffers(logBuffers),
+            errorHandler,
+            SOURCE_IDENTITY,
+            CORRELATION_ID,
+        );
     }
 
     function insertDataFrame(activeTermId: number, termOffset: number): void {

@@ -32,7 +32,7 @@ import {
 import { System, type AutoCloseable } from '../agrona/jdkLang.js';
 import { SystemErr, SystemOut, type PrintStream } from '../agrona/jdkThrowable.js';
 import { SystemUtil } from '../agrona/SystemUtil.js';
-import { Aeron } from './Aeron.js';
+import { NULL_VALUE } from './NullValue.js';
 import { ConcurrentConcludeException } from './exceptions/ConcurrentConcludeException.js';
 
 /**
@@ -141,7 +141,7 @@ export class CommonContext implements AutoCloseable {
     /**
      * Value to represent a sessionId that is not to be used.
      */
-    public static readonly NULL_SESSION_ID: number = Aeron.NULL_VALUE;
+    public static readonly NULL_SESSION_ID: number = NULL_VALUE;
 
     /**
      * The top level Aeron directory used for communication between a Media Driver and client.

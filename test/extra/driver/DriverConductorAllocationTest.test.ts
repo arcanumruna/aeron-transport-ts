@@ -10,7 +10,7 @@ import { NativeResourceAgent } from '../../../src/driver/NativeResourceAgent.js'
 import type { NativeResourceAgentProxy } from '../../../src/driver/NativeResourceAgentProxy.js';
 import { ThreadingMode } from '../../../src/driver/ThreadingMode.js';
 import { ITERATIONS, expectNoAllocation } from '../../support/Allocation.js';
-import { DriverProxy } from '../../support/DriverProxy.js';
+import { DriverProxy } from '../../../src/client/DriverProxy.js';
 import { freeUdpPort } from '../../support/Udp.js';
 
 describe('DriverConductor allocation', () => {
