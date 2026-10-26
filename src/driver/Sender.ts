@@ -16,14 +16,12 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of io/aeron/driver/Sender.java @ 1.53.3
-import { IllegalArgumentException } from '../agrona/jdk.js';
 import { ArrayUtil } from '../agrona/collections/ArrayUtil.js';
 import type { Agent } from '../agrona/concurrent/Agent.js';
 import type { CachedNanoClock } from '../agrona/concurrent/CachedNanoClock.js';
 import type { NanoClock } from '../agrona/concurrent/NanoClock.js';
 import type { OneToOneConcurrentArrayQueue } from '../agrona/concurrent/OneToOneConcurrentArrayQueue.js';
 import type { AtomicCounter } from '../agrona/concurrent/status/AtomicCounter.js';
-import { System } from '../agrona/jdkLang.js';
 import type { ChannelUri } from '../client/ChannelUri.js';
 import { CommonContext } from '../client/CommonContext.js';
 import type { DutyCycleTracker } from './DutyCycleTracker.js';
@@ -41,22 +39,6 @@ const { BYTES_SENT, RESOLUTION_CHANGES, SHORT_SENDS } = SystemCounterDescriptor;
 // Java's `MediaDriver.AERON_DRIVER_SENDER_THREAD_NAME` and `..._CLASSIC`, which `MediaDriver` gets with T18.
 const AERON_DRIVER_SENDER_THREAD_NAME = 'aeron-md-snd';
 const AERON_DRIVER_SENDER_THREAD_NAME_CLASSIC = 'sender';
-
-/**
- * `CommonContext.threadName(newName, classicName)`, which the port gets with `Aeron.Context` (T19, `docs/mapping.md`):
- * the name for the naming mode of the system property.
- */
-function threadName(newName: string, classicName: string): string {
-    const mode = System.getProperty(CommonContext.THREAD_NAMING_PROP_NAME, CommonContext.THREAD_NAMING_DEFAULT);
-    switch (mode) {
-        case CommonContext.THREAD_NAMING_CLASSIC:
-            return classicName;
-        case CommonContext.THREAD_NAMING_NEW:
-            return newName;
-        default:
-            throw new IllegalArgumentException('Unknown thread naming mode: ' + mode);
-    }
-}
 
 /**
  * Agent that iterates over {@link NetworkPublication}s for sending them to {@link Receiver}s on behalf of registered
@@ -103,7 +85,10 @@ export class Sender implements Agent {
         this.dutyCycleRatio = ctx.sendToStatusMessagePollRatio();
         this.conductorProxy = ctx.driverConductorProxy();
         this.dutyCycleTracker = ctx.senderDutyCycleTracker() as DutyCycleTracker;
-        this._roleName = threadName(AERON_DRIVER_SENDER_THREAD_NAME, AERON_DRIVER_SENDER_THREAD_NAME_CLASSIC);
+        this._roleName = CommonContext.threadName(
+            AERON_DRIVER_SENDER_THREAD_NAME,
+            AERON_DRIVER_SENDER_THREAD_NAME_CLASSIC,
+        );
     }
 
     /**

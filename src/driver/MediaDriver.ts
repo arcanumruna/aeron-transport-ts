@@ -58,6 +58,7 @@ import { LogBufferDescriptor } from '../client/logbuffer/LogBufferDescriptor.js'
 import { MemoryLogFactory } from './buffer/MemoryLogFactory.js';
 import type { LogFactory } from './buffer/LogFactory.js';
 import { AgentInvoker } from '../agrona/concurrent/AgentInvoker.js';
+import { AgentRunner } from '../agrona/concurrent/AgentRunner.js';
 import { CompositeAgent } from '../agrona/concurrent/CompositeAgent.js';
 import { ConcurrentConcludeException } from '../client/exceptions/ConcurrentConcludeException.js';
 import { ClientProxy } from './ClientProxy.js';
@@ -68,6 +69,7 @@ import { Sender } from './Sender.js';
 import type { Runnable } from './CommandProxy.js';
 import { Configuration } from './Configuration.js';
 import { DriverConductorProxy } from './DriverConductorProxy.js';
+import { EmbeddedAgent } from './EmbeddedAgent.js';
 import { DefaultNameResolver } from './DefaultNameResolver.js';
 import type { DutyCycleTracker } from './DutyCycleTracker.js';
 import { MediaDriverVersion } from './MediaDriverVersion.js';
@@ -214,6 +216,7 @@ export class MediaDriverContext extends CommonContext {
     private _senderCachedNanoClock: CachedNanoClock | null = null;
     private _receiverCachedNanoClock: CachedNanoClock | null = null;
     private _threadingMode: ThreadingMode | null = null;
+    private _wakeUp: (() => void) | null = null;
     private _conductorIdleStrategy: IdleStrategy | null = null;
     private _senderIdleStrategy: IdleStrategy | null = null;
     private _receiverIdleStrategy: IdleStrategy | null = null;
@@ -1667,6 +1670,32 @@ export class MediaDriverContext extends CommonContext {
         }
 
         this._threadingMode = threadingMode;
+        return this;
+    }
+
+    /**
+     * Not in Java (spec D8, D100). The function that the transports of the driver call, from the event loop, when a
+     * datagram has arrived or a full send queue has drained, so that a runner that is idle does not sleep through it.
+     * {@link MediaDriver.launch} sets the wake up of its own runner (after the one set here, which it calls too); an
+     * application that steps the driver itself ({@link ThreadingMode.INVOKER}) sets its own. It is read when a
+     * transport is made, so it is set before the first channel is added.
+     *
+     * @return the function, or null for none.
+     */
+    public wakeUp(): (() => void) | null;
+    /**
+     * Not in Java (spec D8, D100). See {@link wakeUp}.
+     *
+     * @param wakeUp to call, or null for none.
+     * @return this for a fluent API.
+     */
+    public wakeUp(wakeUp: (() => void) | null): this;
+    public wakeUp(wakeUp?: (() => void) | null): (() => void) | null | this {
+        if (undefined === wakeUp) {
+            return this._wakeUp;
+        }
+
+        this._wakeUp = wakeUp;
         return this;
     }
 
@@ -4035,12 +4064,17 @@ export class MediaDriverContext extends CommonContext {
 }
 
 /**
- * Main class of the media driver: it concludes the {@link MediaDriverContext}, makes the agents and, as
- * `ThreadingMode.INVOKER`, steps them from an {@link AgentInvoker} (`sharedAgentInvoker()`) in the order
- * sender, receiver, native resource agent, conductor.
+ * Main class of the media driver: it concludes the {@link MediaDriverContext}, makes the agents and steps them from
+ * an {@link AgentInvoker} (`sharedAgentInvoker()`) in the order sender, receiver, native resource agent, conductor.
  * <p>
- * Whatever the context's threading mode is, the driver runs as `INVOKER`: the thread modes are out of scope (spec D3,
- * D54). The Aeron directory, its checks and its deletion are not ported (the CnC is in memory, spec D4), nor are
+ * With `ThreadingMode.INVOKER` the application calls the invoker. With any other mode the driver runs itself on the
+ * event loop (spec D3, D11, D100): {@link MediaDriver.launch} starts an {@link AgentRunner} with one agent for all of
+ * them (the thread modes that Java has are one JS thread here), the idle strategy of the context
+ * (`sharedIdleStrategy`, a back off by default), and the wake up hooks of spec D8: a datagram arriving, a send
+ * completing, a command of a client and the look-up of a host name. The conductors of the clients of this process
+ * (`Aeron.connect` with `AeronContext.mediaDriver`) run in the same duty cycle ({@link MediaDriver.host}).
+ * <p>
+ * The Aeron directory, its checks and its deletion are not ported (the CnC is in memory, spec D4), nor are
  * `main`, `launchEmbedded` (no directory name to generate), the high resolution timer and the thread factories.
  */
 export class MediaDriver implements AutoCloseable {
@@ -4062,6 +4096,9 @@ export class MediaDriver implements AutoCloseable {
 
     private readonly sharedInvoker: AgentInvoker;
     private readonly ctx: MediaDriverContext;
+    private readonly embeddedAgent: EmbeddedAgent | null;
+    private readonly agentRunner: AgentRunner | null;
+    private readonly wakeRunner: () => void;
 
     /**
      * Construct a media driver with the given ctx.
@@ -4094,6 +4131,33 @@ export class MediaDriver implements AutoCloseable {
                 errorCounter,
                 new CompositeAgent(sender, receiver, nativeResourceAgent, conductor),
             );
+
+            if (ThreadingMode.INVOKER === ctx.threadingMode()) {
+                this.embeddedAgent = null;
+                this.agentRunner = null;
+                this.wakeRunner = () => {};
+            } else {
+                const embeddedAgent = new EmbeddedAgent(this.sharedInvoker);
+                const indicator = new UnsafeBufferStatusIndicator(
+                    (ctx.countersManager() as CountersManager).valuesBuffer(),
+                    SystemCounterDescriptor.CONTROLLABLE_IDLE_STRATEGY.id(),
+                );
+                const runner = new AgentRunner(
+                    ctx.sharedIdleStrategy() ?? Configuration.sharedIdleStrategy(indicator),
+                    errorHandler,
+                    errorCounter,
+                    embeddedAgent,
+                );
+                const applicationWakeUp = ctx.wakeUp();
+                this.embeddedAgent = embeddedAgent;
+                this.agentRunner = runner;
+                this.wakeRunner = (): void => {
+                    runner.wake();
+                    applicationWakeUp?.();
+                };
+                ctx.wakeUp(this.wakeRunner);
+                nativeResourceAgent.setWakeUp(this.wakeRunner);
+            }
         } catch (ex) {
             if (ex instanceof ConcurrentConcludeException) {
                 throw ex;
@@ -4112,6 +4176,9 @@ export class MediaDriver implements AutoCloseable {
     public static launch(ctx: MediaDriverContext = new MediaDriverContext()): MediaDriver {
         const mediaDriver = new MediaDriver(ctx);
         mediaDriver.sharedInvoker.start();
+        if (null !== mediaDriver.agentRunner) {
+            AgentRunner.startOnThread(mediaDriver.agentRunner);
+        }
 
         return mediaDriver;
     }
@@ -4135,10 +4202,59 @@ export class MediaDriver implements AutoCloseable {
     }
 
     /**
+     * Not in Java (spec D100). The {@link AgentRunner} that runs the driver on the event loop.
+     *
+     * @return the runner, or null if the context has {@link ThreadingMode.INVOKER}: the application steps the driver.
+     */
+    public runner(): AgentRunner | null {
+        return this.agentRunner;
+    }
+
+    /**
+     * Not in Java (spec D8, D100). Cut short the idle wait of the runner, so that its next duty cycle runs now. It is
+     * what a datagram, a send, a command of a client and a host name look-up do. An application that has put a message
+     * in a publication and wants it to leave without waiting for the end of a park (at most the maximum park of the
+     * idle strategy, 1 ms by default) calls it. It does nothing if the runner is not parked, or if there is none.
+     */
+    public wake(): void {
+        this.wakeRunner();
+    }
+
+    /**
+     * Not in Java (spec D100). Run the conductor of a client of this process in the duty cycle of the runner, after
+     * the driver ({@code Aeron.connect} does it for a client that does not use an invoker).
+     *
+     * @param invoker of the conductor of the client, started.
+     * @return true if it is hosted, false if there is no runner to host it (the application steps the driver).
+     */
+    public host(invoker: AgentInvoker): boolean {
+        if (null === this.embeddedAgent) {
+            return false;
+        }
+
+        this.embeddedAgent.host(invoker);
+        return true;
+    }
+
+    /**
+     * Not in Java (spec D100). Stop running the conductor of a client: it was closed.
+     *
+     * @param invoker of the conductor of the client.
+     */
+    public unhost(invoker: AgentInvoker): void {
+        this.embeddedAgent?.unhost(invoker);
+    }
+
+    /**
      * Shutdown the media driver by stopping all agents and freeing resources.
      */
     public close(): void {
-        CloseHelper.closeAll(this.sharedInvoker);
+        if (null !== this.agentRunner) {
+            // the runner ends the loop and closes the agent, which closes the invoker
+            CloseHelper.closeAll(this.agentRunner, this.sharedInvoker);
+        } else {
+            CloseHelper.closeAll(this.sharedInvoker);
+        }
     }
 
     public toString(): string {

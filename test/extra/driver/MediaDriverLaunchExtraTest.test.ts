@@ -83,10 +83,12 @@ describe('MediaDriver launch', () => {
         };
     }
 
-    it('launches as INVOKER whatever the threading mode of the context, with the agents in order', () => {
+    it('steps the agents from an invoker in order whatever the threading mode, and runs them on the event loop unless INVOKER', () => {
         for (const mode of ThreadingMode.values()) {
             const driver = launch(new MediaDriver.Context().threadingMode(mode));
 
+            // spec D100: the invoker is the driver's agent in every mode; a mode that is not INVOKER has a runner for it
+            expect(null === driver.runner()).toBe(ThreadingMode.INVOKER === mode);
             const invoker = driver.sharedAgentInvoker();
             expect(invoker.isStarted()).toBe(true);
             expect(invoker.isRunning()).toBe(true);
