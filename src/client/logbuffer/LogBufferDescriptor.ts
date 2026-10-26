@@ -814,6 +814,32 @@ export class LogBufferDescriptor {
     }
 
     /**
+     * The term count of a position: Java's `(int)(position >> positionBitsToShift)`. The one helper for it (spec 5.5):
+     * a position is a `number` (D5), so it is divided, not shifted. Exact for a position in [0, 2^53 - 1]; the
+     * allocation-free hot path form of the division of {@link indexByPosition}.
+     *
+     * @param position            in the stream, not negative.
+     * @param positionBitsToShift number of times to right shift the position for term count
+     * @return the term count, wrapped to an `int` as Java's cast does
+     */
+    public static termCountByPosition(position: number, positionBitsToShift: number): number {
+        return Math.floor(position / POW2[positionBitsToShift & 63]!) | 0;
+    }
+
+    /**
+     * The offset in its term of a position: Java's `(int)position & (termLength - 1)`. The pair of
+     * {@link termCountByPosition} (spec 5.5). `position | 0` keeps the low 32 bits of a `number` that is an exact
+     * integer, so it is exact for any position in +/-(2^53 - 1).
+     *
+     * @param position   in the stream.
+     * @param termLength of each term, a power of two not above 2^30.
+     * @return the offset in the term
+     */
+    public static termOffsetByPosition(position: number, termLength: number): number {
+        return (position | 0) & (termLength - 1);
+    }
+
+    /**
      * Compute the current position in absolute number of bytes.
      * <p>
      * Throws `RangeError`, as every `long` that leaves +/-(2^53 - 1) does (spec D5), for a position that a `number`

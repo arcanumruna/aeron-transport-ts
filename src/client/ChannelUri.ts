@@ -341,7 +341,7 @@ export class ChannelUri {
 
         const bitsToShift = LogBufferDescriptor.positionBitsToShift(termLength);
         const termId = LogBufferDescriptor.computeTermIdFromPosition(position, bitsToShift, initialTermId);
-        const termOffset = Long.and(position, termLength - 1) | 0;
+        const termOffset = LogBufferDescriptor.termOffsetByPosition(position, termLength);
 
         this.put(CommonContext.INITIAL_TERM_ID_PARAM_NAME, String(initialTermId));
         this.put(CommonContext.TERM_ID_PARAM_NAME, String(termId));

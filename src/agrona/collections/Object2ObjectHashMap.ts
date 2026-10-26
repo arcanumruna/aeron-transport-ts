@@ -47,8 +47,8 @@ import { Hashing } from './Hashing.js';
 export class Object2ObjectHashMap<K, V> {
     static readonly MIN_CAPACITY = 8;
 
-    private readonly loadFactorValue: number;
-    private resizeThresholdValue = 0;
+    private readonly _loadFactor: number;
+    private _resizeThreshold = 0;
     /** @internal accessed by the nested classes, which are in this file */
     public _size = 0;
     /** @internal */
@@ -57,9 +57,9 @@ export class Object2ObjectHashMap<K, V> {
     /** @internal the keys at the even indexes, the values at the odd ones */
     public _entries: unknown[] = [];
 
-    private keySetValue: Object2ObjectHashMapKeySet<K, V> | null = null;
+    private _keySet: Object2ObjectHashMapKeySet<K, V> | null = null;
     private valueCollection: Object2ObjectHashMapValueCollection<K, V> | null = null;
-    private entrySetValue: Object2ObjectHashMapEntrySet<K, V> | null = null;
+    private _entrySet: Object2ObjectHashMapEntrySet<K, V> | null = null;
 
     /**
      * Construct a new map allowing a configuration for initial capacity and load factor, or copy-construct a new map
@@ -76,8 +76,8 @@ export class Object2ObjectHashMap<K, V> {
     ) {
         if (typeof initialCapacity === 'object') {
             const mapToCopy = initialCapacity;
-            this.loadFactorValue = mapToCopy.loadFactorValue;
-            this.resizeThresholdValue = mapToCopy.resizeThresholdValue;
+            this._loadFactor = mapToCopy._loadFactor;
+            this._resizeThreshold = mapToCopy._resizeThreshold;
             this._size = mapToCopy._size;
             this._shouldAvoidAllocation = mapToCopy._shouldAvoidAllocation;
 
@@ -86,7 +86,7 @@ export class Object2ObjectHashMap<K, V> {
             loadFactor = Math.fround(loadFactor);
             CollectionUtil.validateLoadFactor(loadFactor);
 
-            this.loadFactorValue = loadFactor;
+            this._loadFactor = loadFactor;
             this._shouldAvoidAllocation = shouldAvoidAllocation;
 
             this.setCapacity(
@@ -101,7 +101,7 @@ export class Object2ObjectHashMap<K, V> {
      * @returns load factor for when the map should increase size.
      */
     public loadFactor(): number {
-        return this.loadFactorValue;
+        return this._loadFactor;
     }
 
     /**
@@ -111,7 +111,7 @@ export class Object2ObjectHashMap<K, V> {
      * @returns the threshold when the map will resize.
      */
     public resizeThreshold(): number {
-        return this.resizeThresholdValue;
+        return this._resizeThreshold;
     }
 
     /**
@@ -202,7 +202,7 @@ export class Object2ObjectHashMap<K, V> {
     }
 
     private increaseCapacity(): void {
-        if (this._size > this.resizeThresholdValue) {
+        if (this._size > this._resizeThreshold) {
             // entries.length = 2 * capacity
             const newCapacity = this._entries.length;
             this.rehash(newCapacity);
@@ -271,7 +271,7 @@ export class Object2ObjectHashMap<K, V> {
      * and giving consideration to the load factor.
      */
     public compact(): void {
-        const idealCapacity = Math.round(this.size() * (1.0 / this.loadFactorValue));
+        const idealCapacity = Math.round(this.size() * (1.0 / this._loadFactor));
         this.rehash(BitUtil.findNextPositivePowerOfTwo(Math.max(Object2ObjectHashMap.MIN_CAPACITY, idealCapacity)));
     }
 
@@ -313,11 +313,11 @@ export class Object2ObjectHashMap<K, V> {
      * {@inheritDoc}
      */
     public keySet(): Object2ObjectHashMapKeySet<K, V> {
-        if (null === this.keySetValue) {
-            this.keySetValue = new Object2ObjectHashMapKeySet<K, V>(this);
+        if (null === this._keySet) {
+            this._keySet = new Object2ObjectHashMapKeySet<K, V>(this);
         }
 
-        return this.keySetValue;
+        return this._keySet;
     }
 
     /**
@@ -335,11 +335,11 @@ export class Object2ObjectHashMap<K, V> {
      * {@inheritDoc}
      */
     public entrySet(): Object2ObjectHashMapEntrySet<K, V> {
-        if (null === this.entrySetValue) {
-            this.entrySetValue = new Object2ObjectHashMapEntrySet<K, V>(this);
+        if (null === this._entrySet) {
+            this._entrySet = new Object2ObjectHashMapEntrySet<K, V>(this);
         }
 
-        return this.entrySetValue;
+        return this._entrySet;
     }
 
     /**
@@ -594,7 +594,7 @@ export class Object2ObjectHashMap<K, V> {
             throw new IllegalStateException('max capacity reached at size=' + this._size);
         }
 
-        this.resizeThresholdValue = Math.trunc(Math.fround(Math.fround(newCapacity) * this.loadFactorValue));
+        this._resizeThreshold = Math.trunc(Math.fround(Math.fround(newCapacity) * this._loadFactor));
         this._entries = new Array<unknown>(entriesLength).fill(null);
     }
 }
