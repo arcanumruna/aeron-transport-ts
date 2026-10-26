@@ -229,6 +229,7 @@ export class AeronContext extends CommonContext {
     private _useConductorAgentInvoker = false;
     private _preTouchMappedMemory: boolean = AeronConfiguration.preTouchMappedMemory();
     private _driverAgentInvoker: AgentInvoker | null = null;
+    private _isDriverAgentInvokerOfDriver = false;
     private _clientLock: Lock | null = null;
     private _epochClock: EpochClock | null = null;
     private _nanoClock: NanoClock | null = null;
@@ -279,7 +280,11 @@ export class AeronContext extends CommonContext {
             );
         }
 
-        if (null !== this._driverAgentInvoker && !this._useConductorAgentInvoker) {
+        if (
+            null !== this._driverAgentInvoker &&
+            !this._useConductorAgentInvoker &&
+            !this._isDriverAgentInvokerOfDriver
+        ) {
             throw new ConfigurationException(
                 'Must use Aeron.Context.useConductorAgentInvoker(true) when Aeron.Context.driverAgentInvoker() ' +
                     'is set',
@@ -474,14 +479,18 @@ export class AeronContext extends CommonContext {
         }
 
         this._driverAgentInvoker = driverAgentInvoker;
+        this._isDriverAgentInvokerOfDriver = false;
         return this;
     }
 
     /**
      * Not in Java (spec D15, D93). The media driver in this process to connect to: its CnC takes the place of the
      * Aeron directory, its logs are where the client finds the log of a publication or an image, and its
-     * {@link MediaDriver.sharedAgentInvoker} is the {@link driverAgentInvoker} unless one is set already. The client
-     * then needs {@link useConductorAgentInvoker} (the rule of Java for a `driverAgentInvoker`).
+     * {@link MediaDriver.sharedAgentInvoker} is the {@link driverAgentInvoker} unless one is set already (the
+     * calls that wait for the driver run it, spec D93). A driver that runs itself on the event loop
+     * ({@link MediaDriver.runner}) also runs the conductor of the client in its duty cycle, unless the client has
+     * {@link useConductorAgentInvoker} (spec D100). The rule of Java, that a `driverAgentInvoker` needs
+     * {@link useConductorAgentInvoker}, is for an invoker set with {@link driverAgentInvoker}.
      *
      * @param mediaDriver the driver that was launched in this process.
      * @return this for a fluent API.
@@ -501,6 +510,7 @@ export class AeronContext extends CommonContext {
         this._mediaDriver = mediaDriver;
         if (null !== mediaDriver && null === this._driverAgentInvoker) {
             this._driverAgentInvoker = mediaDriver.sharedAgentInvoker();
+            this._isDriverAgentInvokerOfDriver = true;
         }
         return this;
     }
@@ -1120,6 +1130,9 @@ export class Aeron implements AutoCloseable {
     private readonly commandBuffer: RingBuffer;
     private readonly conductorInvoker: AgentInvoker | null;
     private readonly conductorRunner: AgentRunner | null;
+    private readonly hostedInvoker: AgentInvoker | null;
+    private readonly hostingDriver: MediaDriver | null;
+    private readonly wakeConductor: () => void;
     private readonly ctx: AeronContext;
 
     /**
@@ -1138,9 +1151,18 @@ export class Aeron implements AutoCloseable {
             this.commandBuffer = ctx.toDriverBuffer() as RingBuffer;
             this.conductor = new ClientConductor(ctx, this);
 
+            const driver = ctx.mediaDriver();
             if (ctx.useConductorAgentInvoker()) {
                 this.conductorInvoker = new AgentInvoker(ctx.errorHandler() as ErrorHandler, null, this.conductor);
                 this.conductorRunner = null;
+                this.hostedInvoker = null;
+                this.hostingDriver = null;
+            } else if (null !== driver && null !== driver.runner()) {
+                // the driver runs itself on the event loop: the conductor shares its duty cycle (spec D100)
+                this.conductorInvoker = null;
+                this.conductorRunner = null;
+                this.hostedInvoker = new AgentInvoker(ctx.errorHandler() as ErrorHandler, null, this.conductor);
+                this.hostingDriver = driver;
             } else {
                 this.conductorInvoker = null;
                 this.conductorRunner = new AgentRunner(
@@ -1149,7 +1171,18 @@ export class Aeron implements AutoCloseable {
                     null,
                     this.conductor,
                 );
+                this.hostedInvoker = null;
+                this.hostingDriver = null;
             }
+
+            // the commands of the client and the look-ups of host names cut short the idle wait of the runner
+            // that runs the driver and the conductor (spec D8, D100)
+            this.wakeConductor = (): void => {
+                this.conductorRunner?.wake();
+                driver?.wake();
+            };
+            ctx.driverProxy()?.setWakeUp(this.wakeConductor);
+            this.conductor.setWakeUp(this.wakeConductor);
         } catch (ex) {
             if (ex instanceof ConcurrentConcludeException) {
                 throw ex;
@@ -1183,6 +1216,9 @@ export class Aeron implements AutoCloseable {
 
             if (ctx.useConductorAgentInvoker()) {
                 (aeron.conductorInvoker as AgentInvoker).start();
+            } else if (null !== aeron.hostedInvoker) {
+                aeron.hostedInvoker.start();
+                (aeron.hostingDriver as MediaDriver).host(aeron.hostedInvoker);
             } else {
                 AgentRunner.startOnThread(aeron.conductorRunner as AgentRunner);
             }
@@ -1279,6 +1315,9 @@ export class Aeron implements AutoCloseable {
             const errorHandler = this.ctx.errorHandler();
             if (null !== this.conductorRunner) {
                 CloseHelper.close(errorHandler, this.conductorRunner);
+            } else if (null !== this.hostedInvoker) {
+                this.hostingDriver?.unhost(this.hostedInvoker);
+                CloseHelper.close(errorHandler, this.hostedInvoker);
             } else {
                 CloseHelper.close(errorHandler, this.conductorInvoker);
             }
@@ -1315,7 +1354,8 @@ export class Aeron implements AutoCloseable {
 
     /**
      * Not in Java (spec D92, D8). Call a function when a look-up of a host name for an `async` call is over, so that a
-     * runner that is idle can be woken.
+     * runner that is idle can be woken. The client sets one for the runner that runs its conductor (and the driver, for
+     * a driver of this process that runs itself); this replaces it.
      *
      * @param wakeUp to call, or null for none.
      */

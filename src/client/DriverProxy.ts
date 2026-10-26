@@ -65,6 +65,7 @@ export class DriverProxy {
     private readonly destinationByIdMessageFlyweight = new DestinationByIdMessageFlyweight();
     private readonly rejectImageFlyweight = new RejectImageFlyweight();
     private readonly toDriverCommandBuffer: RingBuffer;
+    private wakeUp: (() => void) | null = null;
 
     /**
      * Create a proxy to send commands to the driver.
@@ -75,6 +76,21 @@ export class DriverProxy {
     public constructor(toDriverCommandBuffer: RingBuffer, clientId: number) {
         this.toDriverCommandBuffer = toDriverCommandBuffer;
         this.clientId = clientId;
+    }
+
+    /**
+     * Not in Java (spec D8, D100). The function to call after a command has been written, so that a driver that runs
+     * on the event loop and is idle looks at it now: {@code MediaDriver.wake}, for a client of this process.
+     *
+     * @param wakeUp to call, or null for none.
+     */
+    public setWakeUp(wakeUp: (() => void) | null): void {
+        this.wakeUp = wakeUp;
+    }
+
+    private commit(index: number): void {
+        this.toDriverCommandBuffer.commit(index);
+        this.wakeUp?.();
     }
 
     /**
@@ -121,7 +137,7 @@ export class DriverProxy {
             .clientId(this.clientId)
             .correlationId(correlationId);
 
-        this.toDriverCommandBuffer.commit(index);
+        this.commit(index);
 
         return correlationId;
     }
@@ -140,7 +156,7 @@ export class DriverProxy {
             .clientId(this.clientId)
             .correlationId(correlationId);
 
-        this.toDriverCommandBuffer.commit(index);
+        this.commit(index);
 
         return correlationId;
     }
@@ -162,7 +178,7 @@ export class DriverProxy {
             .clientId(this.clientId)
             .correlationId(id);
 
-        this.toDriverCommandBuffer.commit(index);
+        this.commit(index);
 
         return id;
     }
@@ -180,7 +196,7 @@ export class DriverProxy {
             .clientId(this.clientId)
             .correlationId(correlationId);
 
-        this.toDriverCommandBuffer.commit(index);
+        this.commit(index);
 
         return correlationId;
     }
@@ -231,7 +247,7 @@ export class DriverProxy {
             .clientId(this.clientId)
             .correlationId(id);
 
-        this.toDriverCommandBuffer.commit(index);
+        this.commit(index);
 
         return id;
     }
@@ -277,7 +293,7 @@ export class DriverProxy {
             .clientId(this.clientId)
             .correlationId(correlationId);
 
-        this.toDriverCommandBuffer.commit(index);
+        this.commit(index);
 
         return correlationId;
     }
@@ -293,7 +309,7 @@ export class DriverProxy {
                 .clientId(this.clientId)
                 .correlationId(NULL_VALUE);
 
-            this.toDriverCommandBuffer.commit(index);
+            this.commit(index);
         }
     }
 
@@ -315,7 +331,7 @@ export class DriverProxy {
                 .clientId(this.clientId)
                 .correlationId(NULL_VALUE);
 
-            this.toDriverCommandBuffer.commit(index);
+            this.commit(index);
 
             return true;
         }
@@ -347,7 +363,7 @@ export class DriverProxy {
             .position(position)
             .reason(reason);
 
-        this.toDriverCommandBuffer.commit(index);
+        this.commit(index);
 
         return correlationId;
     }

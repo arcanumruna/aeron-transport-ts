@@ -593,6 +593,25 @@ describe('receive ring (D1, spec 4.2)', () => {
         expect(ringDrops()).toBe(before);
     });
 
+    it('a transport starts with the wake-up function of its context (spec D8, D100)', () => {
+        const wake = vi.fn();
+        context.wakeUp(wake);
+        const withWake = newOpenTransport();
+        withWake.onMessage(Buffer.from('x'), rinfoOf('10.0.0.1', 5000));
+        expect(wake).toHaveBeenCalledTimes(1);
+
+        // the function of the context is read when the transport is made: a later change is not seen, setWakeUp replaces it
+        context.wakeUp(null);
+        withWake.onMessage(Buffer.from('x'), rinfoOf('10.0.0.1', 5000));
+        expect(wake).toHaveBeenCalledTimes(2);
+        const without = newOpenTransport();
+        without.onMessage(Buffer.from('x'), rinfoOf('10.0.0.1', 5000));
+        expect(wake).toHaveBeenCalledTimes(2);
+        withWake.setWakeUp(null);
+        withWake.onMessage(Buffer.from('x'), rinfoOf('10.0.0.1', 5000));
+        expect(wake).toHaveBeenCalledTimes(2);
+    });
+
     it('close clears the ring: unread datagrams are discarded and nothing more is taken', () => {
         const transport = newOpenTransport();
         const buffer = new UnsafeBuffer(new Uint8Array(RECEIVE_CAPACITY));

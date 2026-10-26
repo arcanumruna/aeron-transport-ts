@@ -180,7 +180,7 @@ export abstract class UdpChannelTransport implements AutoCloseable {
     // close() has run: it frees the managed port once. Not isClosed, which a failed open also sets (late socket errors).
     private closeDone = false;
     private connected = false;
-    private wakeUp: (() => void) | null = null;
+    private wakeUp: (() => void) | null;
     private readonly onMessageCallback: (message: Uint8Array, rinfo: RemoteInfo) => void;
     private readonly onSocketErrorCallback: (error: Error) => void;
     private readonly onSendCompleteCallback: (error: Error | null) => void;
@@ -210,6 +210,7 @@ export abstract class UdpChannelTransport implements AutoCloseable {
         socketSndbufLength?: number,
     ) {
         this.context = context;
+        this.wakeUp = context.wakeUp();
         this._udpChannel = udpChannel as UdpChannel;
         this.errorHandler = context.countedErrorHandler();
         this.portManager = portManager as PortManager;
@@ -652,7 +653,8 @@ export abstract class UdpChannelTransport implements AutoCloseable {
     /**
      * Not in Java (spec D8). The function to call, from the event loop, when a datagram has arrived or a full send
      * queue has drained, so that the agent runner cuts short an idle sleep (`AgentRunner.wake`). The owner of the
-     * transport sets one preallocated function.
+     * transport sets one preallocated function. A transport starts with the one of its context
+     * (`MediaDriver.Context.wakeUp`, which `MediaDriver.launch` sets for its runner).
      */
     public setWakeUp(wakeUp: (() => void) | null): void {
         this.wakeUp = wakeUp;

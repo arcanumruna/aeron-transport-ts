@@ -16,7 +16,6 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of io/aeron/driver/Receiver.java @ 1.53.3
-import { IllegalArgumentException } from '../agrona/jdk.js';
 import { ArrayListUtil } from '../agrona/collections/ArrayListUtil.js';
 import { ArrayUtil } from '../agrona/collections/ArrayUtil.js';
 import type { Agent } from '../agrona/concurrent/Agent.js';
@@ -24,7 +23,6 @@ import type { CachedNanoClock } from '../agrona/concurrent/CachedNanoClock.js';
 import type { NanoClock } from '../agrona/concurrent/NanoClock.js';
 import type { OneToOneConcurrentArrayQueue } from '../agrona/concurrent/OneToOneConcurrentArrayQueue.js';
 import type { AtomicCounter } from '../agrona/concurrent/status/AtomicCounter.js';
-import { System } from '../agrona/jdkLang.js';
 import { CommonContext } from '../client/CommonContext.js';
 import { Configuration } from './Configuration.js';
 import { SessionState } from './DataPacketDispatcher.js';
@@ -48,22 +46,6 @@ const { BYTES_RECEIVED, RESOLUTION_CHANGES } = SystemCounterDescriptor;
 // Java's `MediaDriver.AERON_DRIVER_RECEIVER_THREAD_NAME` and `..._CLASSIC`, which `MediaDriver` gets with T18.
 const AERON_DRIVER_RECEIVER_THREAD_NAME = 'aeron-md-rcv';
 const AERON_DRIVER_RECEIVER_THREAD_NAME_CLASSIC = 'receiver';
-
-/**
- * `CommonContext.threadName(newName, classicName)`, which the port gets with `Aeron.Context` (T19, `docs/mapping.md`):
- * the name for the naming mode of the system property (as in `Sender.ts`, spec D39).
- */
-function threadName(newName: string, classicName: string): string {
-    const mode = System.getProperty(CommonContext.THREAD_NAMING_PROP_NAME, CommonContext.THREAD_NAMING_DEFAULT);
-    switch (mode) {
-        case CommonContext.THREAD_NAMING_CLASSIC:
-            return classicName;
-        case CommonContext.THREAD_NAMING_NEW:
-            return newName;
-        default:
-            throw new IllegalArgumentException('Unknown thread naming mode: ' + mode);
-    }
-}
 
 const EMPTY_IMAGES: PublicationImage[] = [];
 
@@ -100,7 +82,10 @@ export class Receiver implements Agent {
         this.conductorProxy = ctx.driverConductorProxy() as DriverConductorProxy;
         this.reResolutionCheckIntervalNs = ctx.reResolutionCheckIntervalNs();
         this.dutyCycleTracker = ctx.receiverDutyCycleTracker() as DutyCycleTracker;
-        this._roleName = threadName(AERON_DRIVER_RECEIVER_THREAD_NAME, AERON_DRIVER_RECEIVER_THREAD_NAME_CLASSIC);
+        this._roleName = CommonContext.threadName(
+            AERON_DRIVER_RECEIVER_THREAD_NAME,
+            AERON_DRIVER_RECEIVER_THREAD_NAME_CLASSIC,
+        );
     }
 
     /**
