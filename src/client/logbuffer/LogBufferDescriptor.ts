@@ -964,20 +964,19 @@ export class LogBufferDescriptor {
         const nextIndex = LogBufferDescriptor.indexByTermCount(nextTermCount);
         const expectedTermId = (nextTermId - LogBufferDescriptor.PARTITION_COUNT) | 0;
 
-        let rawTail: bigint;
+        // Java reads the raw tail as a long and compares the termId in its upper half. The halves are read and swapped
+        // as two ints here, so a rotation on the publish path makes no `bigint` (spec D16).
+        const index = LogBufferDescriptor.TERM_TAIL_COUNTERS_OFFSET + SIZE_OF_LONG * nextIndex;
+        let rawTailLo: number;
+        let rawTailHi: number;
         do {
-            rawTail = LogBufferDescriptor.rawTailVolatile(metadataBuffer, nextIndex);
-            if (expectedTermId !== LogBufferDescriptor.termId(rawTail)) {
+            metadataBuffer.getLongVolatileHalves(index, RAW_TAIL_HALVES);
+            rawTailLo = RAW_TAIL_HALVES[0]!;
+            rawTailHi = RAW_TAIL_HALVES[1]!;
+            if (expectedTermId !== rawTailHi) {
                 break;
             }
-        } while (
-            !LogBufferDescriptor.casRawTail(
-                metadataBuffer,
-                nextIndex,
-                rawTail,
-                LogBufferDescriptor.packTail(nextTermId, 0),
-            )
-        );
+        } while (!metadataBuffer.compareAndSetLongHalves(index, rawTailLo, rawTailHi, 0, nextTermId));
 
         return LogBufferDescriptor.casActiveTermCount(metadataBuffer, termCount, nextTermCount);
     }
