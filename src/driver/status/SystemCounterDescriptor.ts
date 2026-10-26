@@ -497,6 +497,15 @@ export class SystemCounterDescriptor {
 
     private static readonly DESCRIPTOR_BY_ID_MAP = new Int2ObjectHashMap<SystemCounterDescriptor>();
 
+    static {
+        for (const descriptor of SystemCounterDescriptor.values()) {
+            const other = SystemCounterDescriptor.DESCRIPTOR_BY_ID_MAP.put(descriptor.id(), descriptor);
+            if (null !== other) {
+                throw new IllegalStateException(descriptor.toString() + ' uses the same id as ' + other.toString());
+            }
+        }
+    }
+
     private readonly _name: string;
     private readonly _ordinal: number;
     private readonly _id: number;
@@ -623,14 +632,5 @@ export class SystemCounterDescriptor {
         countersManager.setCounterRegistrationId(counter.id(), id);
         countersManager.setCounterOwnerId(counter.id(), Aeron.NULL_VALUE);
         return counter;
-    }
-
-    static {
-        for (const descriptor of SystemCounterDescriptor.values()) {
-            const other = SystemCounterDescriptor.DESCRIPTOR_BY_ID_MAP.put(descriptor.id(), descriptor);
-            if (null !== other) {
-                throw new IllegalStateException(descriptor.toString() + ' uses the same id as ' + other.toString());
-            }
-        }
     }
 }

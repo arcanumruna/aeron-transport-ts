@@ -50,6 +50,7 @@ describe('AeronCountersTest', () => {
         // Reflection over the public static int fields named *_TYPE_ID: the own static properties of the class.
         const fieldByTypeId = new Map<number, string>();
         const duplicates = new Map<number, string[]>();
+        let fieldCount = 0;
 
         for (const name of Object.getOwnPropertyNames(AeronCounters)) {
             const typeId = (AeronCounters as unknown as Record<string, unknown>)[name];
@@ -57,6 +58,7 @@ describe('AeronCountersTest', () => {
                 continue;
             }
 
+            fieldCount++;
             const field = fieldByTypeId.get(typeId);
             if (undefined === field) {
                 fieldByTypeId.set(typeId, name);
@@ -71,7 +73,7 @@ describe('AeronCountersTest', () => {
         }
 
         // 190 Java fields end in _TYPE_ID; TRANSITION_MODULE_CONTROL_TOGGLE_TYPE_ID is commented out in the source
-        expect(fieldByTypeId.size + duplicates.size, 'the fields were found').toBe(189);
+        expect(fieldCount, 'the fields were found').toBe(189);
         expect(duplicates.size, 'Duplicate typeIds: ' + JSON.stringify([...duplicates])).toBe(0);
     });
 
