@@ -37,12 +37,12 @@ reports NO_VERDICT for it.
 ## The gate
 
 ```
-npm run bench:gate -- --base <ref> [--pairs n] [--filter s] [--file s] [--samples n] [--seed n] [--ignore-load] [--inject spec]
+npm run bench:gate -- --base <ref> [--pairs n] [--filter s] [--file s] [--samples n] [--seed n] [--ignore-load] [--no-calibrate] [--inject spec]
 ```
 
 It extracts `<ref>` (default `origin/main`) with `git archive` into a scratch directory under the temp directory,
 outside the repository, copies the candidate's `bench/` and worker loader into it, and runs each bench file as a
-separate process on both sides, `--pairs` times (default 5; latency benches need 5, throughput benches 3). The candidate
+separate process on both sides, `--pairs` times (default 15, the count at which a verdict is believed, see "Noise" below; latency benches need at least 5, throughput benches 3, and `--pairs 5` is the quick check). The candidate
 is the working tree. **The order within a pair is random**: a seeded PRNG (mulberry32) decides per pair and file whether
 the base or the candidate runs first, so that neither always runs first. The seed is printed (`seed ...`) and settable
 with `--seed`, which repeats the order. Bench processes start with `--expose-gc`. The scratch directory is deleted at
@@ -52,6 +52,25 @@ the end, also on a failure.
 it prints a warning and exits 3 (NO_VERDICT) without running. `--ignore-load` overrides this for local experiments and
 the gate prints that it was used.
 
+**A/A calibration.** Before the A/B pairs the gate runs the base against itself, for the same number of pairs
+(`A/A calibration: ...` on stderr). Two runs of the same code can differ by more than the limits on a shared host, and then
+a PASS or a FAIL says nothing about the candidate. For each metric that is a verdict (ns/op, p50, ops/s, and p99 / p99.9
+from 20,000 samples) the A/A pair ratios are checked, and the metric is **NO_VERDICT** instead of PASS or FAIL, with the
+measured median and spread in the message (`ns/op: A/A median ratio 1.012, spread 0.310 (pairs: ...), wider than 0.100:
+the host is too noisy for a verdict on this metric`), when
+
+- the median of its A/A ratios is beyond the metric's limit (over 1.05 for ns/op and p50, over 1.10 for p99 and p99.9,
+  under 0.95 for ops/s): the host alone would fail the gate; or
+- its A/A pair ratios spread (`max - min`) wider than the band the limit allows around 1, which is twice the distance of
+  the limit from 1 (0.10 for ns/op, p50 and ops/s, 0.20 for p99 and p99.9), so that a pair ratio of the A/B run cannot be
+  told from the host's own noise; or
+- the A/A run has no valid ratio for it.
+
+A metric that fails the A/A check is NO_VERDICT even if the A/B median is over its limit: rerun on an idle host.
+`--no-calibrate` skips the A/A run (the tests of the gate use it, they size their own noise rule); the gate says so.
+The A/A logic is `calibrate` and `unsteady` in `bench/lib/verdict.ts`, tested table-driven in
+`test/extra/bench/GateVerdict.test.ts` (`GateCalibration`).
+
 **It never passes without a verdict.** The benches expected are the ones the candidate's bench modules export, not the
 ones a run printed (`summarize` in `bench/lib/verdict.ts`):
 
@@ -59,7 +78,8 @@ ones a run printed (`summarize` in `bench/lib/verdict.ts`):
 - a bench file that fails to import in the base (`import:`) is `n/a in base` and passes; any other failure of the base
   (a bench new in the candidate whose setup fails, a base process that died, no result printed) is NO_VERDICT;
 - a metric with no valid ratio (NaN, zero or missing values) is NO_VERDICT, not a pass;
-- a bench with fewer pairs than required (5 latency, 3 throughput) is NO_VERDICT.
+- a bench with fewer pairs than required (5 latency, 3 throughput) is NO_VERDICT;
+- a metric the A/A calibration finds too noisy is NO_VERDICT (above).
 
 For each bench and metric the verdict is on the **median of the per-pair ratios candidate / base** (for an even number
 of pairs, the mean of the two middle ratios). It fails when the median is
@@ -101,7 +121,7 @@ sets `AERON_BENCH_INJECT` for the **candidate** runs only (the base never inheri
 (`bench/lib/inject.ts`, spec D110). It exists to prove that the gate fails a slow candidate: the tests of the gate use it
 (below), and nothing in `src/` has a hook.
 
-**Noise is never a verdict: rerun with `--pairs 15`, then bisect.** Run it on an idle machine; shared CI runners are
+**Noise is never a verdict: rerun with `--pairs 15` (the default), then bisect.** Run it on an idle machine; shared CI runners are
 too noisy for latency, so CI only runs the benches once per PR and reports the numbers.
 
 ## Baselines

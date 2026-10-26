@@ -44,6 +44,58 @@ export function ratios(pairs: readonly Pair[], metric: Rule['metric']): number[]
     return out;
 }
 
+/**
+ * What an A/A run (the base against itself) says about the host for one metric: the median of the pair ratios and
+ * their spread, `max - min`. The ratios of a quiet host are all near 1.
+ */
+export interface Calibration {
+    median: number;
+    spread: number;
+    ratios: number[];
+}
+
+/** The A/A figures of a metric; `undefined` when there is no valid ratio. */
+export function calibrate(pairs: readonly Pair[], metric: Rule['metric']): Calibration | undefined {
+    const r = ratios(pairs, metric);
+    if (0 === r.length) {
+        return undefined;
+    }
+    return { median: median(r), spread: Math.max(...r) - Math.min(...r), ratios: r };
+}
+
+/**
+ * The width of the band around 1 that a metric's limit allows: 0.05 for a limit of 1.05 (or 0.95), 0.10 for 1.10.
+ */
+export function bandWidth(rule: Rule): number {
+    return Math.abs(rule.limit - 1);
+}
+
+/**
+ * Whether an A/A run is too noisy to judge this metric: its median ratio is beyond the metric's limit (the host alone
+ * makes the gate fail), or the pair ratios spread wider than the band `1 +/- |limit - 1|` (`max - min` over twice the
+ * band width), so that no pair ratio of an A/B run could be told from the host's own noise. Returns the reason, or
+ * `undefined` when the host is steady enough.
+ */
+export function unsteady(rule: Rule, aa: Calibration): string | undefined {
+    const beyond = 'max' === rule.kind ? aa.median > rule.limit : aa.median < rule.limit;
+    const width = 2 * bandWidth(rule);
+    if (!beyond && aa.spread <= width) {
+        return undefined;
+    }
+    return (
+        rule.label +
+        ': A/A median ratio ' +
+        fixed(aa.median) +
+        ', spread ' +
+        fixed(aa.spread) +
+        ' (pairs: ' +
+        aa.ratios.map(fixed).join(', ') +
+        '), ' +
+        (beyond ? 'median beyond the limit ' + rule.limit : 'wider than ' + fixed(width)) +
+        ': the host is too noisy for a verdict on this metric'
+    );
+}
+
 function fixed(value: number): string {
     return value.toFixed(3);
 }
@@ -163,7 +215,11 @@ function worst(a: Status, b: Status): Status {
  *   the base, or a base that did not run the bench at all, is NO_VERDICT (no base to compare with);
  * - a bench with fewer valid pairs than required is NO_VERDICT;
  * - a metric without a valid ratio (NaN, zero or missing values) is NO_VERDICT;
- * - p99 and p99.9 are a verdict only when every run has MIN_TAIL_SAMPLES samples, otherwise INFO.
+ * - p99 and p99.9 are a verdict only when every run has MIN_TAIL_SAMPLES samples, otherwise INFO;
+ * - with `calibration` (the base run against itself, the same number of pairs, run before the A/B pairs), a metric
+ *   whose A/A median ratio is beyond its limit, or whose A/A pair ratios spread wider than the band the limit allows
+ *   (see {@link unsteady}), is NO_VERDICT with the measured spread, neither PASS nor FAIL; so is one that the A/A run
+ *   has no valid ratio for.
  *
  * The exit code is 0 when everything passes, 1 on any FAIL, 3 on a NO_VERDICT without a FAIL.
  */
@@ -171,6 +227,7 @@ export function summarize(
     runs: readonly PairLines[],
     expected: readonly Expected[],
     requiredPairs: RequiredPairs = REQUIRED_PAIRS,
+    calibration?: readonly PairLines[],
 ): Summary {
     const benches: BenchSummary[] = [];
     for (const { name, file } of expected) {
@@ -231,6 +288,15 @@ export function summarize(
         if (pairs.length < required) {
             noVerdict(pairs.length + ' valid pairs, ' + required + ' needed for a verdict');
         }
+        // the A/A pairs of this bench: the base against itself, a pair only when both runs printed a result
+        const aaPairs: Pair[] = [];
+        for (const run of calibration ?? []) {
+            const first = find(run.base, name, file);
+            const second = find(run.cand, name, file);
+            if (undefined !== first && undefined !== second && !isError(first) && !isError(second)) {
+                aaPairs.push({ base: first, cand: second });
+            }
+        }
         const tail = pairs.length > 0 && pairs.every((p) => hasTailSamples(p.base) && hasTailSamples(p.cand));
 
         const metrics: MetricSummary[] = [];
@@ -250,6 +316,16 @@ export function summarize(
                 metrics.push({ label: rule.label, status: 'NO_VERDICT', median: m, ratios: r, message });
                 noVerdict(message);
                 continue;
+            }
+            if (undefined !== calibration) {
+                const aa = calibrate(aaPairs, rule.metric);
+                const reason =
+                    undefined === aa ? rule.label + ': A/A run has no valid ratio, no calibration' : unsteady(rule, aa);
+                if (undefined !== reason) {
+                    metrics.push({ label: rule.label, status: 'NO_VERDICT', median: m, ratios: r, message: reason });
+                    noVerdict(reason);
+                    continue;
+                }
             }
             const message = judge(rule, r);
             if (undefined !== message) {
