@@ -165,10 +165,10 @@ describe('Long', () => {
 });
 
 describe('Unicode decimal digits (issue 17)', () => {
-    // Character.digit(ch, 10) accepts every Nd code point: fullwidth, Arabic-Indic, Devanagari, mathematical bold.
-    const ZEROS = [0xff10, 0x0660, 0x06f0, 0x0966, 0x09e6, 0x1d7ce, 0x1d7d8, 0x1d7ec].map((c) =>
-        String.fromCodePoint(c),
-    );
+    // Character.digit(char, 10) accepts every BMP Nd character: fullwidth, Arabic-Indic, Devanagari, Bengali. A
+    // supplementary one (mathematical bold) is two UTF-16 units in Java, neither a digit: it is refused.
+    const ZEROS = [0xff10, 0x0660, 0x06f0, 0x0966, 0x09e6].map((c) => String.fromCodePoint(c));
+    const SUPPLEMENTARY_ZEROS = [0x1d7ce, 0x1d7d8, 0x1d7ec].map((c) => String.fromCodePoint(c));
     const spell = (zero: string, n: string): string =>
         [...n].map((d) => (/\d/.test(d) ? String.fromCodePoint(zero.codePointAt(0)! + Number(d)) : d)).join('');
 
@@ -188,6 +188,19 @@ describe('Unicode decimal digits (issue 17)', () => {
         }
         const big = spell(ZEROS[0]!, '9007199254740993');
         expect(assertThrows(LongOverflowError, () => Long.parseLong(big)).value).toBe(9007199254740993n);
+    });
+
+    it('parseIntAndParseLongRefuseSupplementaryDigitsRegression', () => {
+        for (const zero of SUPPLEMENTARY_ZEROS) {
+            const text = spell(zero, '5');
+            expect(assertThrows(NumberFormatException, () => Integer.parseInt(text)).message).toBe(
+                'For input string: "' + text + '"',
+            );
+            expect(assertThrows(NumberFormatException, () => Long.parseLong(text)).message).toBe(
+                'For input string: "' + text + '"',
+            );
+        }
+        expect(() => Integer.parseInt('1' + String.fromCodePoint(0x1d7ce))).toThrow(NumberFormatException);
     });
 
     it('theMessageKeepsTheOriginalInputRegression', () => {
