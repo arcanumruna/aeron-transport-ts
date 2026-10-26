@@ -120,6 +120,11 @@ export class SimWorld {
         }
     }
 
+    /** The nodes that are in the world now. */
+    public allNodes(): readonly SimNode[] {
+        return this.nodes;
+    }
+
     public errorsOf(): string {
         return this.nodes
             .flatMap((node) => node.errors)
