@@ -839,6 +839,22 @@ describe('open and close', () => {
         expect(statusIndicator.setRelease).toHaveBeenLastCalledWith(ChannelEndpointStatus.ERRORED);
     });
 
+    it('reportsNoSecondErrorForARefusedUpdateEndpointConnectRegression', async () => {
+        const transport = newOpenTransport();
+        const statusIndicator = { setRelease: vi.fn() } as unknown as AtomicCounter;
+        const bad = new InetSocketAddress(InetAddress.getByName('::1'), 9);
+        assertThrows(AeronException, () => transport.updateEndpoint(bad, statusIndicator));
+
+        // node emits its own 'error' event for the failed connect on the next tick; it was already handled above
+        for (let i = 0; i < 3; i++) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        const before = errors.length;
+        transport.receive(new UnsafeBuffer(new Uint8Array(64)));
+
+        expect(errors.length).toBe(before);
+    });
+
     it('opens an IPv6 loopback transport', async (ctx) => {
         if (!hasIpv6Loopback()) {
             ctx.skip('no IPv6 loopback on this host');
