@@ -228,6 +228,19 @@ describe('ReceiveRing', () => {
         expect(bytes.offer(new Uint8Array(60), 60, address)).toBe(true);
     });
 
+    it('acceptsOneOversizeDatagramIntoAnEmptyRingRegression', () => {
+        const ring = new ReceiveRing(100, 8);
+        expect(ring.offer(new Uint8Array(500), 500, address)).toBe(true);
+        expect(ring.size()).toBe(1);
+        expect(ring.offer(new Uint8Array(1), 1, address)).toBe(false); // over budget and not empty
+        ring.advance();
+        expect(ring.byteSize()).toBe(0);
+        expect(ring.offer(new Uint8Array(500), 500, address)).toBe(true);
+        ring.advance();
+        expect(ring.offer(new Uint8Array(10), 10, address)).toBe(true);
+        expect(ring.offer(new Uint8Array(500), 500, address)).toBe(false); // only an empty ring takes an oversize one
+    });
+
     it('derives its slot count from the byte budget, between 64 and 16,384, rounded up to a power of two', () => {
         expect(ReceiveRing.slotsFor(1)).toBe(ReceiveRing.MIN_SLOTS);
         expect(ReceiveRing.slotsFor(212_992)).toBe(3328);
