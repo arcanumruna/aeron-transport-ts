@@ -32,7 +32,7 @@ import { AtomicCounter } from '../agrona/concurrent/status/AtomicCounter.js';
 import { CountersReader } from '../agrona/concurrent/status/CountersReader.js';
 import { UnsafeBufferPosition } from '../agrona/concurrent/status/UnsafeBufferPosition.js';
 import type { UnsafeBuffer } from '../agrona/concurrent/UnsafeBuffer.js';
-import { IllegalStateException, TimeUnit } from '../agrona/jdk.js';
+import { IllegalStateException, RuntimeException, TimeUnit } from '../agrona/jdk.js';
 import { JavaError, StandardCharsets, Thread } from '../agrona/jdkLang.js';
 import { SemanticVersion } from '../agrona/SemanticVersion.js';
 import { SystemUtil } from '../agrona/SystemUtil.js';
@@ -1384,6 +1384,7 @@ export class ClientConductor implements Agent {
             if (nowMs > lastKeepAliveMs + this.driverTimeoutMs) {
                 this.terminateConductor();
 
+                // Java puts the Aeron directory name in the messages; the port has none (spec D129)
                 if (NULL_VALUE === lastKeepAliveMs) {
                     throw new DriverTimeoutException('MediaDriver has been shutdown');
                 }
@@ -1418,6 +1419,12 @@ export class ClientConductor implements Agent {
                         );
                         this.timeOfLastKeepAliveNs = nowNs;
                     } catch (ex) {
+                        // Java: catch (final RuntimeException ex). A TypeError or another programming error of the port is
+                        // not a race with the driver and must not be hidden (spec D128).
+                        if (!(ex instanceof RuntimeException)) {
+                            throw ex;
+                        }
+
                         // a race caused by the driver timing out the client
                         this.terminateConductor();
                         throw new AeronException(
