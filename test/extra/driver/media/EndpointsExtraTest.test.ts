@@ -1788,7 +1788,7 @@ describe('endpoints over loopback (the real path)', () => {
 
     it('IPv6: the same over [::1]', async (ctx) => {
         if (!hasIpv6Loopback()) {
-            ctx.skip();
+            ctx.skip('no IPv6 loopback on this host');
         }
         await roundTrip('::1', '[::1]');
     });
