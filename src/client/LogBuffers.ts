@@ -17,6 +17,7 @@
  */
 // Port of io/aeron/LogBuffers.java @ 1.53.3
 import { UnsafeBuffer } from '../agrona/concurrent/UnsafeBuffer.js';
+import { INSPECT_CUSTOM } from '../agrona/inspect.js';
 import { IllegalStateException, Long } from '../agrona/jdk.js';
 import type { AutoCloseable } from '../agrona/jdkLang.js';
 import { LogBufferDescriptor } from './logbuffer/LogBufferDescriptor.js';
@@ -135,6 +136,16 @@ export class LogBuffers implements AutoCloseable {
                 buffer.compareAndSetInt(i, value, value);
             }
         }
+    }
+
+    /** A short form for pretty-format and JSON (issue #47): the sizes, never the term buffers. */
+    public toJSON(): object {
+        return { type: 'LogBuffers', termLength: this._termLength, refCount: this.refCount };
+    }
+
+    /** A short form for `util.inspect` (issue #47). */
+    public [INSPECT_CUSTOM](): string {
+        return 'LogBuffers{termLength=' + this._termLength + ', refCount=' + this.refCount + '}';
     }
 
     public close(): void {

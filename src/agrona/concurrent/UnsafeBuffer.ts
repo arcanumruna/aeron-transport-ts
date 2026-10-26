@@ -21,6 +21,7 @@ import { AbstractMutableDirectBuffer } from '../AbstractMutableDirectBuffer.js';
 import { BitUtil } from '../BitUtil.js';
 import { ArrayUtil } from '../collections/ArrayUtil.js';
 import { DirectBuffer } from '../DirectBuffer.js';
+import { INSPECT_CUSTOM } from '../inspect.js';
 import {
     dataViewGetLong,
     dataViewSetLong,
@@ -1255,6 +1256,21 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
         }
 
         return new IllegalArgumentException('Unaligned atomic access: index=' + index + ' size=8');
+    }
+
+    /** A short form for pretty-format and JSON (issue #47): the identity of the window, never its bytes. */
+    public toJSON(): object {
+        return {
+            type: 'UnsafeBuffer',
+            capacity: this._capacity,
+            addressOffset: this._addressOffset,
+            shared: this._shared,
+        };
+    }
+
+    /** A short form for `util.inspect` (issue #47). */
+    public [INSPECT_CUSTOM](): string {
+        return this.toString();
     }
 
     public override toString(): string {

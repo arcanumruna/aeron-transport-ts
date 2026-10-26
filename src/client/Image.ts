@@ -20,6 +20,7 @@ import { BitUtil } from '../agrona/BitUtil.js';
 import type { UnsafeBuffer } from '../agrona/concurrent/UnsafeBuffer.js';
 import type { Position } from '../agrona/concurrent/status/Position.js';
 import type { ErrorHandler } from '../agrona/ErrorHandler.js';
+import { INSPECT_CUSTOM } from '../agrona/inspect.js';
 import { ByteOrder, IllegalArgumentException, Long } from '../agrona/jdk.js';
 import type { BlockHandler } from './logbuffer/BlockHandler.js';
 import { ControlledFragmentHandler } from './logbuffer/ControlledFragmentHandler.js';
@@ -725,6 +726,21 @@ export class Image {
         this.isEos = this.finalPosition >= this.eosPosition;
         this.isRevoked = LogBufferDescriptor.isPublicationRevoked(this._logBuffers.metaDataBuffer());
         this._isClosed = true;
+    }
+
+    /** A short form for pretty-format and JSON (issue #47): the identity, never the log buffers it holds. */
+    public toJSON(): object {
+        return {
+            type: 'Image',
+            correlationId: this._correlationId,
+            sessionId: this._sessionId,
+            isClosed: this._isClosed,
+        };
+    }
+
+    /** A short form for `util.inspect` (issue #47). */
+    public [INSPECT_CUSTOM](): string {
+        return this.toString();
     }
 
     public toString(): string {
