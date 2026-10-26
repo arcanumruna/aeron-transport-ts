@@ -72,7 +72,7 @@ export class SimWorld {
         this.network = new SimNetwork(seed, model, this.clock);
         this.createSocket = vi
             .spyOn(dgram, 'createSocket')
-            .mockImplementation((() => this.network.newSocket()) as never);
+            .mockImplementation(((options?: { reuseAddr?: boolean }) => this.network.newSocket(options)) as never);
     }
 
     public addNode(configure: (ctx: MediaDriver.Context) => void = () => {}): SimNode {
@@ -118,6 +118,11 @@ export class SimWorld {
         while (this.clock.ns < until) {
             this.step();
         }
+    }
+
+    /** The nodes that are in the world now. */
+    public allNodes(): readonly SimNode[] {
+        return this.nodes;
     }
 
     public errorsOf(): string {

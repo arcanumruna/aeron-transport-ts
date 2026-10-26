@@ -16,14 +16,13 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of io/aeron/driver/DefaultUnicastFlowControlSupplier.java @ 1.53.3
-import { ClassNotFoundException, IllegalArgumentException } from '../agrona/jdk.js';
-import { LangUtil } from '../agrona/LangUtil.js';
+import { IllegalArgumentException } from '../agrona/jdk.js';
 import { CommonContext } from '../client/CommonContext.js';
 import { Configuration } from './Configuration.js';
 import { type FlowControl } from './FlowControl.js';
+import { FlowControlRegistry } from './FlowControlRegistry.js';
 import { type FlowControlSupplier } from './FlowControlSupplier.js';
 import { type UdpChannel } from './media/UdpChannel.js';
-import { UnicastFlowControl } from './UnicastFlowControl.js';
 
 /**
  * Default supplier of {@link FlowControl} strategies for unicast channels.
@@ -44,12 +43,8 @@ export class DefaultUnicastFlowControlSupplier implements FlowControlSupplier {
             throw new IllegalArgumentException('unsupported unicast flow control strategy: fc=' + fcStr);
         }
 
-        // Spec D25: no class loading. A strategy class name other than UnicastFlowControl is a ClassNotFoundException.
-        if (Configuration.UNICAST_FLOW_CONTROL_STRATEGY === 'io.aeron.driver.UnicastFlowControl') {
-            return new UnicastFlowControl();
-        }
-
-        return LangUtil.rethrowUnchecked(new ClassNotFoundException(Configuration.UNICAST_FLOW_CONTROL_STRATEGY));
+        // Spec D25, D118: the strategy is chosen by its Java class name from the static registry.
+        return FlowControlRegistry.newFlowControl(Configuration.UNICAST_FLOW_CONTROL_STRATEGY);
     }
 
     /**

@@ -78,6 +78,22 @@ export async function waitUntil(condition: () => boolean, what: string, capMs = 
     }
 }
 
+/** The most event loop turns `waitUntilTurns` takes by default. */
+export const WAIT_CAP_TURNS = 1_000_000;
+
+/**
+ * Like {@link waitUntil}, but bounded by a count of event loop turns instead of a deadline on the wall clock: the
+ * condition is tested after each `setImmediate` turn (no busy spin), and the wait fails after `capTurns` turns.
+ */
+export async function waitUntilTurns(condition: () => boolean, what: string, capTurns = WAIT_CAP_TURNS): Promise<void> {
+    for (let turn = 0; !condition(); turn++) {
+        if (turn >= capTurns) {
+            throw new Error('gave up after ' + capTurns + ' event loop turns waiting for ' + what);
+        }
+        await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+}
+
 /** Resolves with the arguments of the next `event` of the emitter; rejects at `capMs`. */
 export function nextEvent<T extends unknown[]>(
     emitter: { once(event: string, listener: (...args: T) => void): unknown; off(event: string, l: never): unknown },

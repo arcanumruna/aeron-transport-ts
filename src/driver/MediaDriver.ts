@@ -175,6 +175,7 @@ export class MediaDriverContext extends CommonContext {
     private _resourceFreeLimit: number = Configuration.resourceFreeLimit();
     private _maxResend: number = Configuration.maxResend();
     private _receiverGroupTag: number | null = Configuration.groupTag();
+    private _flowControlGroupTag: number = Configuration.flowControlGroupTag();
     private _flowControlGroupMinSize: number = Configuration.flowControlGroupMinSize();
     private _receiverGroupConsideration: InferableBoolean = Configuration.receiverGroupConsideration();
     private _resolverName: string | null = Configuration.resolverName();
@@ -2266,6 +2267,30 @@ export class MediaDriverContext extends CommonContext {
     }
 
     /**
+     * Get the default group tag (gtag) used by the tagged flow control strategy to group receivers.
+     *
+     * @return the group tag.
+     * @see Configuration#FLOW_CONTROL_GROUP_TAG_PROP_NAME
+     */
+    public flowControlGroupTag(): number;
+    /**
+     * Set the default group tag (gtag) used by the tagged flow control strategy to group receivers.
+     *
+     * @param groupTag value to use by default by the tagged flow control strategy.
+     * @return this for fluent API.
+     * @see Configuration#FLOW_CONTROL_GROUP_TAG_PROP_NAME
+     */
+    public flowControlGroupTag(groupTag: number): this;
+    public flowControlGroupTag(groupTag?: number): number | this {
+        if (undefined === groupTag) {
+            return this._flowControlGroupTag;
+        }
+
+        this._flowControlGroupTag = groupTag;
+        return this;
+    }
+
+    /**
      * Get the default min group size used by flow control strategies to indicate connectivity.
      *
      * @return required group size.
@@ -3985,6 +4010,8 @@ export class MediaDriverContext extends CommonContext {
             bytesToString(this._applicationSpecificFeedback) +
             '\n    receiverGroupTag=' +
             this._receiverGroupTag +
+            '\n    flowControlGroupTag=' +
+            this._flowControlGroupTag +
             '\n    flowControlGroupMinSize=' +
             this._flowControlGroupMinSize +
             '\n    flowControlReceiverTimeoutNs=' +

@@ -24,15 +24,27 @@ import { LangUtil } from './LangUtil.js';
 type Closeables = (AutoCloseable | Iterable<AutoCloseable | null | undefined> | null | undefined)[];
 
 /**
- * Whether the argument is an {@link ErrorHandler} (and not a closeable), which is how the overloads that start with
- * an error handler are told from the others at run time.
+ * Whether the argument has the method of an {@link ErrorHandler}, which is how the overloads that start with an error
+ * handler are told from the others at run time.
  */
-function isErrorHandler(arg: unknown): arg is ErrorHandler {
+function hasOnError(arg: unknown): arg is ErrorHandler {
+    return 'object' === typeof arg && null !== arg && 'function' === typeof (arg as ErrorHandler).onError;
+}
+
+/**
+ * Whether the arguments of {@code closeAll} are an error handler and the closeables to close. An object with
+ * {@code onError} is the handler when it cannot be closed, or when closeables follow it: a {@code CountedErrorHandler} is
+ * both an {@link ErrorHandler} and an {@link AutoCloseable}, and Java tells its overload by the static type (spec D120).
+ * Alone, a closeable error handler is a closeable. An object whose {@code onError} declares more than one parameter is
+ * not an {@link ErrorHandler} (its {@code onError} takes the throwable only), so it is closed as a closeable.
+ */
+function startsWithErrorHandler(args: unknown[]): boolean {
+    const first = args[0];
     return (
-        'object' === typeof arg &&
-        null !== arg &&
-        'function' === typeof (arg as ErrorHandler).onError &&
-        'function' !== typeof (arg as AutoCloseable).close
+        hasOnError(first) &&
+        // an ErrorHandler.onError takes one argument; an object with a longer onError (SendChannelEndpoint.onError) is no handler
+        first.onError.length <= 1 &&
+        ('function' !== typeof (first as Partial<AutoCloseable>).close || args.length > 1)
     );
 }
 
@@ -43,8 +55,9 @@ function isErrorHandler(arg: unknown): arg is ErrorHandler {
  * collection of them: {@code closeAll(a, b)} and {@code closeAll([a, b])} do the same. A {@code null} or
  * {@code undefined} closeable is skipped, as is a null collection. {@code close(errorHandler, closeable)} is told
  * from {@code close(closeable)} by its two arguments, and {@code closeAll(errorHandler, ...)} from
- * {@code closeAll(...)} by its first argument having {@code onError} and no {@code close}; a {@code null} error
- * handler is therefore only recognised by {@code close}.
+ * {@code closeAll(...)} by its first argument having {@code onError} and either no {@code close} or closeables after it
+ * (a {@code CountedErrorHandler} has both methods, spec D120); a {@code null} error handler is therefore only recognised by
+ * {@code close}.
  */
 export class CloseHelper {
     private constructor() {}
@@ -156,8 +169,8 @@ export class CloseHelper {
     public static closeAll(errorHandler: ErrorHandler | null | undefined, ...closeables: Closeables): void;
 
     public static closeAll(...args: unknown[]): void {
-        if (isErrorHandler(args[0])) {
-            const errorHandler = args[0];
+        if (startsWithErrorHandler(args)) {
+            const errorHandler = args[0] as ErrorHandler;
             for (const closeable of CloseHelper.flatten(args.slice(1) as Closeables)) {
                 if (null !== closeable && undefined !== closeable) {
                     try {

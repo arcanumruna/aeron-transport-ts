@@ -8,7 +8,7 @@ Low latency is the requirement, so a slowdown fails like a red test (plan, "Perf
 npm run bench:micro                       # every bench in bench/micro/*.bench.ts
 npm run bench:micro -- --filter ManyToOne # benches whose name contains the text
 npm run bench:micro -- --samples 500 --json
-npm run bench:e2e                         # the end-to-end report (below): latency, throughput, allocation, first message after idle
+npm run bench:e2e                         # the end-to-end report (below): latency, throughput, allocation, first message after idle, fan-out
 ```
 
 One JSON line per bench goes to stdout, `{name, nsPerOp, p50, p99, p999, samples, opsPerSec?}`, and a table goes to stderr
@@ -200,6 +200,77 @@ baseline for the gate is to be taken on the idle machine.
 | Sender doWork: a data frame at t=0 then a heartbeat at t=2 x timeout (two cycles per operation) | 1,070.9 | 1,013.1 | 2,059.2 | 3,146.3 |
 | NetworkPublication resend: 2 frames of 1024 B                                                   | 459.4   | 386.5   | 915.2   | 968.6   |
 
+### Multicast flow control and MDC (phase 3 T4)
+
+`bench/micro/multicastflowcontrol.bench.ts`: `onStatusMessage` from a receiver the strategy already tracks and `onIdle`,
+for the `max`, `min` and `tagged` strategies with 1, 8 and 64 receivers (the receiver ids are `(0, n)`, the tagged
+receivers carry the strategy's group tag, the positions and times stay below 2^30). `max` tracks no receivers, so its rows
+show that the count does not matter. The sender rows are on a manual MDC publication (`control-mode=manual`) over an
+in-memory log and a sink socket with 1, 4 and 16 destinations: the destination timeout and re-resolution check
+(`ControlTransportPoller.checkForReResolutions`, which `Sender.doWork` runs once per `reResolutionCheckInterval`; all
+destinations live) and `Sender.doWork` sending one data frame of 1024 B to every destination (`MultiSndDestination.send`
+per frame, the socket hand-off for each). The `dynamic` rows (`control-mode=dynamic`) get their destinations from the status messages of 1, 4 and 16 receivers, so `Sender.doWork` runs `DynamicSndMultiDestination.send` with its destination timeout check. None allocates (`expectNoAllocation` in `MulticastFlowControlAllocationTest`).
+Measured on 4 cores with a load average of 1.1 to 1.3 (`npm run bench:micro -- --file multicastflowcontrol`, 2,000
+samples, median of the repeats, n=1 run of the harness), so the p99 and p99.9 columns are information, and an `onIdle`
+of 5 to 13 ns is at the limit of what a batch of 1,000 calls resolves. The min and tagged figures grow with the receivers
+because both loops walk the receiver array once per call (as Java's do); `tagged` adds the three reads of the group tag
+(`asfLength`, the two halves) to `min`.
+
+| Bench                                                                                          | ns/op   | p50     | p99     | p99.9   |
+| ---------------------------------------------------------------------------------------------- | ------- | ------- | ------- | ------- |
+| Flow control max: onStatusMessage from a known receiver, 1 receivers                           | 30.8    | 26.9    | 64.3    | 99.3    |
+| Flow control max: onStatusMessage from a known receiver, 8 receivers                           | 28.1    | 26.1    | 54.4    | 92.3    |
+| Flow control max: onStatusMessage from a known receiver, 64 receivers                          | 31.1    | 26.1    | 66.7    | 310.7   |
+| Flow control min: onStatusMessage from a known receiver, 1 receivers                           | 67.5    | 60.2    | 140.0   | 675.0   |
+| Flow control min: onStatusMessage from a known receiver, 8 receivers                           | 84.8    | 82.6    | 152.6   | 250.0   |
+| Flow control min: onStatusMessage from a known receiver, 64 receivers                          | 304.9   | 292.5   | 483.4   | 643.0   |
+| Flow control tagged: onStatusMessage from a known receiver, 1 receivers                        | 97.4    | 79.1    | 240.2   | 623.2   |
+| Flow control tagged: onStatusMessage from a known receiver, 8 receivers                        | 130.3   | 110.1   | 283.1   | 445.6   |
+| Flow control tagged: onStatusMessage from a known receiver, 64 receivers                       | 457.6   | 409.9   | 792.4   | 963.3   |
+| Flow control max: onIdle, 1 receivers                                                          | 6.2     | 5.0     | 22.7    | 111.9   |
+| Flow control max: onIdle, 8 receivers                                                          | 5.5     | 4.9     | 12.0    | 29.4    |
+| Flow control max: onIdle, 64 receivers                                                         | 5.6     | 4.8     | 17.1    | 48.2    |
+| Flow control min: onIdle, 1 receivers                                                          | 13.4    | 12.5    | 28.6    | 61.0    |
+| Flow control min: onIdle, 8 receivers                                                          | 42.1    | 37.8    | 83.8    | 139.6   |
+| Flow control min: onIdle, 64 receivers                                                         | 275.8   | 259.9   | 470.8   | 497.3   |
+| Flow control tagged: onIdle, 1 receivers                                                       | 12.7    | 12.3    | 24.3    | 34.7    |
+| Flow control tagged: onIdle, 8 receivers                                                       | 62.2    | 63.0    | 98.6    | 109.3   |
+| Flow control tagged: onIdle, 64 receivers                                                      | 269.8   | 259.0   | 434.5   | 468.1   |
+| Sender destination timeouts (checkForReResolutions): manual MDC publication of 1 destinations  | 13.0    | 11.4    | 26.7    | 49.2    |
+| Sender destination timeouts (checkForReResolutions): manual MDC publication of 4 destinations  | 30.7    | 29.9    | 60.9    | 75.3    |
+| Sender destination timeouts (checkForReResolutions): manual MDC publication of 16 destinations | 43.6    | 42.9    | 62.3    | 83.6    |
+| Sender doWork: one data frame of 1024 B to a manual MDC publication of 1 destinations          | 555.8   | 497.8   | 1,061.6 | 1,673.7 |
+| Sender doWork: one data frame of 1024 B to a manual MDC publication of 4 destinations          | 988.3   | 844.0   | 1,738.6 | 2,701.9 |
+| Sender doWork: one data frame of 1024 B to a manual MDC publication of 16 destinations         | 2,244.5 | 1,993.9 | 3,898.2 | 4,990.9 |
+| Sender doWork: one data frame of 1024 B to a dynamic MDC publication of 1 destinations         | 589.4   | 488.2   | 1,138.0 | 2,726.6 |
+| Sender doWork: one data frame of 1024 B to a dynamic MDC publication of 4 destinations         | 893.5   | 807.2   | 1,734.5 | 3,691.4 |
+| Sender doWork: one data frame of 1024 B to a dynamic MDC publication of 16 destinations        | 1,991.4 | 1,860.7 | 3,612.1 | 4,144.4 |
+
+**The gate against the phase 2 tip (phase 3 T4).** `npm run bench:gate -- --base 2340b67` (the tip of phase 2 merged into the
+phase 3 branch) on an idle host (load average 0.8 at the start, 5 pairs): the 24 new benches are `n/a in base` and pass,
+and 5 benches of code that phase 3 does not touch failed on pairs that ranged from 0.8 to 1.4 (the receiver data frame
+and heartbeat, `ManyToOneRingBuffer tryClaim+commit+read`, the sender heartbeat and `TermReader read: 1 fragment`). The
+rerun of those files with 15 pairs, as above, passed all of them but two, by the margin of the noise: `Receiver doWork: an
+idle cycle` (median 1.050 against a limit of 1.05, p50 1.007, pairs from 0.62 to 1.34) and `ManyToOneRingBuffer
+write+read` (median 1.052, p50 1.033, pairs from 0.82 to 1.25). Neither runs a line that the branch changed (the diff to
+`src/` is the flow control, its suppliers, the registry, `Configuration`, `MediaDriver.Context` and two flyweight accessors;
+`FlowControl.calculateRetransmissionLength` is the only changed function that a running sender calls, once per NAK).
+This is the noise of the shared VM described below, not a verdict.
+
+**The gate after review A (d08decb against `origin/main`).** 5 pairs failed four benches: `Image poll` and
+`Image controlledPoll` of 64 B, `NetworkPublication resend: 2 frames of 1024 B` and `UdpChannelTransport
+onMessage+receive 128B, two senders alternating` (medians 1.059 to 1.209, pairs from 0.75 to 1.46). Rerun with 15 pairs,
+three passed (0.982, 1.017, 0.999) and the resend bench failed (1.080). Because it runs
+`FlowControl.calculateRetransmissionLength`, which the branch changed, it was bisected at 15 pairs each:
+
+- the same commit against itself: 0.978;
+- T2 (`13c379c`, the only commit that changes `FlowControl.ts`) against T1: 0.991;
+- T3 (`d13b093`, the registry that builds `UnicastFlowControl`) against T2: 0.977;
+- d08decb against the merge `7aaca68`: 0.934.
+
+T1, T4 and the merge do not change the resend path. A second 15-pair run of d08decb against `origin/main` gave 0.972.
+No step regresses, so the single 1.080 was noise.
+
 ### Receiver (T16)
 
 `bench/micro/receiver.bench.ts`: `Receiver.doWork` on a real `PublicationImage` over an in-memory log (`SharedArrayBuffer`),
@@ -275,6 +346,38 @@ the `'message'` handler; spec 5.3) is reported next to them and is not in the ga
   to the read by the subscriber, with and without `MediaDriver.wake()`, and the same for a plain `dgram` send to its
   `'message'`.
 
+### Fan-out benches (phase 3 T14, D121)
+
+`bench/lib/fanout.ts`: the same harness style for the phase 3 topologies, **one way** (offer to the read, not an echo).
+Each receiver is a `MediaDriver` and an `Aeron` client of its own in the process (a receiver id of its own for the flow
+control); the publisher is one more. The scenarios: a unicast reference; **multicast** (group 224.20.30.39,
+`interface=localhost`) with 1 and 3 subscriptions; **MDC dynamic** (`control-mode=dynamic`, receivers join with
+`control=`) and **MDC manual** (`control-mode=manual`, `addDestination`) with 2 and 4 destinations; **MDS** with 2
+destinations (one `control-mode=manual` subscription, two publications on one driver, one for each destination, the offers
+alternating between them). The multicast and MDC publications have `fc=min,g:/N` (as the interop rows of D116), so the
+stream starts when all N receivers are counted and the slowest paces it.
+
+- **Latency**: one 32 B message at a time, the ns from `offer` until the LAST subscriber has read it.
+- **Throughput**: a 64 B stream; the ns per message of a window of 100 read by the SLOWEST subscriber. msgs/s counts
+  messages offered (each reaches every receiver); MB/s is payload of one receiver.
+- **In the report** (`npm run bench:e2e`): 5 latency runs (3000 messages each) and 3 stream runs (50,000 messages),
+  every scenario taken in turn within each run (the order alternates), a fresh set of drivers for each scenario and run,
+  so they are interleaved with each other and run in the same process after the unicast sections above; allocation
+  per message as D112 measures it (sampling heap profiler, split by file) for the 64 B stream, with the top
+  allocation sites of `src/`.
+- **In the gate** (`bench/micro/fanout.bench.ts`, `npm run bench:micro -- --file fanout`): the 7 non-unicast
+  scenarios as latency benches (5 pairs) and as throughput benches (3 pairs). The unicast reference is the
+  `Unicast` benches of `e2e.bench.ts`. The file imports a phase 3 module, so a base without phase 3 reports it
+  `n/a in base`. The non-gating CI job `bench-e2e` posts the report and `--file fanout` to the run summary.
+- **Allocation reading.** The `port` column is the whole process: N+1 drivers. The remaining `src/` sites are the
+  D13 heap numbers (`nowNs` of `Sender`, `Receiver`, `DriverConductor`, `AgentRunner.dutyCycle`, about 4 B per message and
+  driver each, so they grow with the number of drivers), `ClientConductor.service`, and in the multicast and MDC runs
+  `DataTransportPoller.receive` and `PublicationImage.insertPacket` (1 to 2 B per message and receiver, the same class).
+  The send loops that phase 3 added (`MultiSndDestination.send`, `DynamicSndMultiDestination.send`), the multicast status
+  message and NAK path and the MDS receive path (`MultiRcvDestination`, 0.1 B) show no site of their own; their
+  `expectNoAllocation` tests are `MulticastFlowControlAllocationTest` and the allocation tests of the publication image.
+  No fix was needed in T14.
+
 ### Baselines of the end-to-end benches
 
 `npm run bench:e2e`, one invocation, 2026-10-26, Node v22.22.0, Intel(R) Xeon(R) Processor @ 2.10GHz, 4 cores, a shared
@@ -344,6 +447,64 @@ The median is a quarter of a millisecond with or without the wake (the floor is 
 cache). Without the wake the tail goes up to the park of the idle strategy, 1 ms (D101), plus the same quarter
 millisecond: 1.2 ms at the worst of 100. That is within the expectation of D101 (within 1 ms of the park, plus the path);
 the wake takes the tail to 0.58 ms. An application that cannot wait 1 ms calls `MediaDriver.wake()`.
+
+Fan-out (phase 3 T14, D121), `npm run bench:e2e`, one invocation, 2026-10-26, same Node and host (4 cores, load average 1.05
+at the end; not perfectly idle: indicative only). One way, offer to the read by the last subscriber, 32 B, 5 runs of 3000
+messages (median over the runs of each run's percentiles); throughput of a 64 B stream, 3 runs of 50,000 messages, per
+message offered; bytes per message offered of the whole process (N+1 drivers), 64 B stream. The scenarios were taken in
+turn within each run.
+
+| scenario                            | p50 us | p99 us | p99.9 us | msgs/s  | MB/s | port B/msg | node B/msg | harness B/msg | other B/msg |
+| ----------------------------------- | ------ | ------ | -------- | ------- | ---- | ---------- | ---------- | ------------- | ----------- |
+| unicast, 1 subscription (reference) | 27.4   | 88.4   | 288.6    | 457,545 | 29.3 | 37.5       | 67.6       | 15.1          | 37.4        |
+| multicast, 1 subscription           | 21.3   | 92.7   | 209.8    | 533,308 | 34.1 | 38.7       | 70.2       | 15.0          | 36.9        |
+| multicast, 3 subscriptions          | 36.3   | 113.7  | 399.8    | 267,923 | 17.1 | 77.8       | 72.6       | 14.5          | 92.0        |
+| MDC dynamic, 2 destinations         | 32.6   | 110.0  | 404.9    | 250,127 | 16.0 | 61.2       | 115.9      | 15.2          | 63.5        |
+| MDC dynamic, 4 destinations         | 55.0   | 158.3  | 837.1    | 169,105 | 10.8 | 99.3       | 223.4      | 14.9          | 118.1       |
+| MDC manual, 2 destinations          | 34.1   | 100.5  | 281.4    | 268,021 | 17.2 | 58.7       | 116.1      | 14.9          | 62.9        |
+| MDC manual, 4 destinations          | 57.4   | 133.7  | 407.0    | 172,947 | 11.1 | 98.0       | 223.4      | 15.2          | 116.5       |
+| MDS, 2 destinations                 | 22.2   | 84.7   | 169.4    | 439,803 | 28.1 | 34.1       | 86.7       | 15.1          | 45.6        |
+
+Reading: each extra receiver costs about 7 us at the median for multicast (1 to 3 subscriptions: 21 to 36 us) and about
+11 us for MDC (2 to 4 destinations: 33 to 56 us). It is one process with N+1 drivers on one thread, so every receiver adds
+a driver's work to the same event loop, and MDC sends a datagram to each destination where multicast sends one to the
+group. Dynamic and manual MDC are the same within the noise. MDS is at the unicast figure. The `port` column rises with the number of
+drivers (the D13 heap numbers, about 4 B per message and driver per duty-cycle function), not with the destinations: no
+`src/` site of the MDC send loop, the multicast status message and NAK path or the MDS receive path allocates per message
+on its own (the top sites are listed by `npm run bench:e2e`).
+
+The fan-out benches as the gate runs them (`npm run bench:micro -- --file fanout`, load average 1.1, 4 cores, ns per
+operation; a latency operation is one message offered and read by every subscriber, a stream operation is one message at the
+slowest subscriber). These are the baselines of the gate; the base of the first gate run (`origin/main`) has no phase 3, so
+they are `n/a in base` there.
+
+| Bench                                             | ns/op  | p50    | p99     | p99.9   | ops/s   |
+| ------------------------------------------------- | ------ | ------ | ------- | ------- | ------- |
+| Fan-out latency 32 B, multicast, 1 subscription   | 34,016 | 24,479 | 120,876 | 391,884 |         |
+| Fan-out latency 32 B, multicast, 3 subscriptions  | 43,003 | 37,040 | 118,004 | 489,551 |         |
+| Fan-out latency 32 B, MDC dynamic, 2 destinations | 36,673 | 31,486 | 104,552 | 468,622 |         |
+| Fan-out latency 32 B, MDC dynamic, 4 destinations | 76,196 | 58,947 | 177,778 | 487,578 |         |
+| Fan-out latency 32 B, MDC manual, 2 destinations  | 38,569 | 34,328 | 105,266 | 243,011 |         |
+| Fan-out latency 32 B, MDC manual, 4 destinations  | 68,373 | 58,050 | 175,615 | 445,102 |         |
+| Fan-out latency 32 B, MDS, 2 destinations         | 32,890 | 26,357 | 97,963  | 179,538 |         |
+| Fan-out stream 64 B, multicast, 1 subscription    | 2,380  | 2,056  | 5,354   | 10,240  | 420,120 |
+| Fan-out stream 64 B, multicast, 3 subscriptions   | 4,770  | 4,358  | 10,066  | 91,810  | 209,629 |
+| Fan-out stream 64 B, MDC dynamic, 2 destinations  | 4,911  | 4,447  | 11,257  | 69,058  | 203,647 |
+| Fan-out stream 64 B, MDC dynamic, 4 destinations  | 6,067  | 5,100  | 13,923  | 84,780  | 164,824 |
+| Fan-out stream 64 B, MDC manual, 2 destinations   | 3,296  | 2,852  | 7,814   | 62,594  | 303,449 |
+| Fan-out stream 64 B, MDC manual, 4 destinations   | 7,332  | 6,531  | 14,194  | 80,673  | 136,390 |
+| Fan-out stream 64 B, MDS, 2 destinations          | 2,128  | 1,897  | 5,325   | 10,386  | 470,019 |
+
+The mean (ns/op) of a latency bench sits above its p50 because of the tail (a collection or a timer in the one process).
+
+**Gate against `origin/main` (a79825d, T14, phase 3 candidate).** A full `npm run bench:gate` (5 pairs) failed on 16
+benches, all in code that phase 3 did not touch (`git diff origin/main..HEAD` is empty for the ring buffers, the
+publications, `Image`, the term reader, `Receiver`, `SendChannelEndpoint`, `ReceiveChannelEndpoint` and
+`ControlTransportPoller`), with pair ratios from 0.67 to 2.2 for the same code. Re-run per file with 11 pairs: the
+congestion, e2e (all four Unicast benches: 0.93 to 1.00), loss and transport files passed; `endpoint`, `publication`,
+`receiver` and `ringbuffer` still had benches over the limit with ratios that swing from 0.76 to 2.2 between pairs on
+byte-identical code (the shared 4-core VM is not idle), so they are noise and not a regression. The 14 new fan-out
+benches are `n/a in base`. The authoritative gate against `main` is on an idle host at T15.
 
 The gate's own figures for the same benches (`npm run bench:micro -- --file e2e` and `--file termreader`, load average
 0.8 to 0.9, 4 cores, ns per operation; a round trip is one operation, a stream operation is one message):

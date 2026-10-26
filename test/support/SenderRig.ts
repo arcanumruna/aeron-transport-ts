@@ -337,6 +337,18 @@ export class SenderRig {
         windowLength: number,
         flags = 0,
     ): void {
+        this.sendStatusMessageFrom(42, this.rcvAddress, consumptionTermId, consumptionTermOffset, windowLength, flags);
+    }
+
+    /** A status message of the receiver `receiverIdLow` at `address` (a dynamic MDC publication adds it as a destination). */
+    public sendStatusMessageFrom(
+        receiverIdLow: number,
+        address: InetSocketAddress,
+        consumptionTermId: number,
+        consumptionTermOffset: number,
+        windowLength: number,
+        flags = 0,
+    ): void {
         const sm = this.statusMessage;
         sm.version(HeaderFlyweight.CURRENT_VERSION)
             .headerType(HeaderFlyweight.HDR_TYPE_SM)
@@ -348,12 +360,12 @@ export class SenderRig {
             .consumptionTermOffset(consumptionTermOffset)
             .receiverWindowLength(windowLength)
             .receiverIdHigh(0)
-            .receiverIdLow(42);
+            .receiverIdLow(receiverIdLow);
         this.endpoint.onStatusMessage(
             sm,
             sm,
             StatusMessageFlyweight.HEADER_LENGTH,
-            this.rcvAddress,
+            address,
             this.conductorProxy as DriverConductorProxy,
         );
     }

@@ -274,6 +274,28 @@ export class ErrorFlyweight extends HeaderFlyweight {
     }
 
     /**
+     * The upper 32 bits of the group tag field, without a `bigint`: valid when {@link hasGroupTag}.
+     * <p>
+     * Not in Java (spec D118).
+     *
+     * @return the upper half of the group tag field, an `int`.
+     */
+    public groupTagHigh(): number {
+        return this.getInt(ErrorFlyweight.GROUP_TAG_FIELD_OFFSET + SIZE_OF_INT, LITTLE_ENDIAN);
+    }
+
+    /**
+     * The lower 32 bits of the group tag field, without a `bigint`: valid when {@link hasGroupTag}.
+     * <p>
+     * Not in Java (spec D118).
+     *
+     * @return the lower half of the group tag field, an `int`.
+     */
+    public groupTagLow(): number {
+        return this.getInt(ErrorFlyweight.GROUP_TAG_FIELD_OFFSET, LITTLE_ENDIAN);
+    }
+
+    /**
      * Whether the frame carries a group tag.
      *
      * @return `true` if the group tag flag is set.

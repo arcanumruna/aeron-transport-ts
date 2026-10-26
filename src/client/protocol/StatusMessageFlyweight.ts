@@ -343,6 +343,30 @@ export class StatusMessageFlyweight extends HeaderFlyweight {
     }
 
     /**
+     * The upper 32 bits of the group tag field, without a `bigint` and without the frame length check of
+     * {@link groupTag}: the caller has checked that the frame carries a group tag (`asfLength() == 8`).
+     * <p>
+     * Not in Java (spec D118).
+     *
+     * @return the upper half of the group tag field, an `int`.
+     */
+    public groupTagHigh(): number {
+        return this.getInt(StatusMessageFlyweight.GROUP_TAG_FIELD_OFFSET + SIZE_OF_INT, LITTLE_ENDIAN);
+    }
+
+    /**
+     * The lower 32 bits of the group tag field, without a `bigint` and without the frame length check of
+     * {@link groupTag}: the caller has checked that the frame carries a group tag (`asfLength() == 8`).
+     * <p>
+     * Not in Java (spec D118).
+     *
+     * @return the lower half of the group tag field, an `int`.
+     */
+    public groupTagLow(): number {
+        return this.getInt(StatusMessageFlyweight.GROUP_TAG_FIELD_OFFSET, LITTLE_ENDIAN);
+    }
+
+    /**
      * Return the field offset within the flyweight for the group tag field.
      *
      * @return offset of group tag field

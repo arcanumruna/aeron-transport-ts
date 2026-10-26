@@ -23,6 +23,9 @@ import { CountersReader } from '../../src/agrona/concurrent/status/CountersReade
 import { IllegalArgumentException } from '../../src/agrona/jdk.js';
 import { Configuration } from '../../src/driver/Configuration.js';
 import { FlowControl } from '../../src/driver/FlowControl.js';
+import { MaxMulticastFlowControl } from '../../src/driver/MaxMulticastFlowControl.js';
+import { MinMulticastFlowControl } from '../../src/driver/MinMulticastFlowControl.js';
+import { TaggedMulticastFlowControl } from '../../src/driver/TaggedMulticastFlowControl.js';
 import { MediaDriver } from '../../src/driver/MediaDriver.js';
 import { UdpChannel } from '../../src/driver/media/UdpChannel.js';
 import { UnicastFlowControl } from '../../src/driver/UnicastFlowControl.js';
@@ -61,6 +64,25 @@ function verifyCalculateRetransmissionLength(spy: ReturnType<typeof vi.spyOn>, e
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), expect.any(Number), expectedRrwm);
 }
+
+/** `multicastFlowControlStrategies()`: a strategy (made per test) and the channel that selects it. */
+const multicastFlowControlStrategies: [string, () => FlowControl, string][] = [
+    [
+        'MaxMulticastFlowControl',
+        () => new MaxMulticastFlowControl(),
+        'aeron:udp?endpoint=224.20.30.39:24326|interface=localhost|fc=max',
+    ],
+    [
+        'MinMulticastFlowControl',
+        () => new MinMulticastFlowControl(),
+        'aeron:udp?endpoint=224.20.30.39:24326|interface=localhost|fc=min',
+    ],
+    [
+        'TaggedMulticastFlowControl',
+        () => new TaggedMulticastFlowControl(),
+        'aeron:udp?endpoint=224.20.30.39:24326|interface=localhost|fc=tagged',
+    ],
+];
 
 describe('FlowControlTest', () => {
     it('shouldUseResendLengthIfSmallestValue', () => {
@@ -124,17 +146,66 @@ describe('FlowControlTest', () => {
         },
     );
 
-    it.skip('usesDefaultMulticastRetransmitReceiverWindowMultipleWhenNotSet', () => {
-        // Phase 3: parameterised over MaxMulticastFlowControl, MinMulticastFlowControl and TaggedMulticastFlowControl.
-    });
+    it.each(multicastFlowControlStrategies)(
+        'usesDefaultMulticastRetransmitReceiverWindowMultipleWhenNotSet %s',
+        (_name, newFlowControl, uri) => {
+            const expectedRrwm = Configuration.multicastFlowControlRetransmitReceiverWindowMultiple();
+            const countersManager = newCountersManager(COUNTERS_BUFFER_LENGTH);
 
-    it.skip('usesMulticastRetransmitReceiverWindowMultipleFromContextWhenNotSetInUri', () => {
-        // Phase 3: parameterised over MaxMulticastFlowControl, MinMulticastFlowControl and TaggedMulticastFlowControl.
-    });
+            withMockedFlowControl((calculateRetransmissionLengthSpy) => {
+                const context = new MediaDriver.Context().tempBuffer(
+                    new UnsafeBuffer(new ArrayBuffer(TERM_BUFFER_LENGTH)),
+                );
+                const flowControl = newFlowControl();
+                flowControl.initialize(context, countersManager, UdpChannel.parse(uri), 0, 0, 0, 0, 0);
 
-    it.skip('usesMulticastRetransmitReceiverWindowMultipleFromUriWhenSet', () => {
-        // Phase 3: parameterised over MaxMulticastFlowControl, MinMulticastFlowControl and TaggedMulticastFlowControl.
-    });
+                flowControl.maxRetransmissionLength(0, 32, TERM_BUFFER_LENGTH, MTU_LENGTH);
+
+                verifyCalculateRetransmissionLength(calculateRetransmissionLengthSpy, expectedRrwm);
+            });
+        },
+    );
+
+    it.each(multicastFlowControlStrategies)(
+        'usesMulticastRetransmitReceiverWindowMultipleFromContextWhenNotSetInUri %s',
+        (_name, newFlowControl, uri) => {
+            const expectedRrwm = 2;
+            const countersManager = newCountersManager(COUNTERS_BUFFER_LENGTH);
+
+            withMockedFlowControl((calculateRetransmissionLengthSpy) => {
+                const context = new MediaDriver.Context()
+                    .tempBuffer(new UnsafeBuffer(new ArrayBuffer(TERM_BUFFER_LENGTH)))
+                    .multicastFlowControlRetransmitReceiverWindowMultiple(expectedRrwm);
+                const flowControl = newFlowControl();
+                flowControl.initialize(context, countersManager, UdpChannel.parse(uri), 0, 0, 0, 0, 0);
+
+                flowControl.maxRetransmissionLength(0, 32, TERM_BUFFER_LENGTH, MTU_LENGTH);
+
+                verifyCalculateRetransmissionLength(calculateRetransmissionLengthSpy, expectedRrwm);
+            });
+        },
+    );
+
+    it.each(multicastFlowControlStrategies)(
+        'usesMulticastRetransmitReceiverWindowMultipleFromUriWhenSet %s',
+        (_name, newFlowControl, uri) => {
+            const expectedRrwm = 8;
+            const fullUri = uri + ',rrwm:' + expectedRrwm;
+            const countersManager = newCountersManager(COUNTERS_BUFFER_LENGTH);
+
+            withMockedFlowControl((calculateRetransmissionLengthSpy) => {
+                const context = new MediaDriver.Context()
+                    .tempBuffer(new UnsafeBuffer(new ArrayBuffer(TERM_BUFFER_LENGTH)))
+                    .multicastFlowControlRetransmitReceiverWindowMultiple(expectedRrwm / 2);
+                const flowControl = newFlowControl();
+                flowControl.initialize(context, countersManager, UdpChannel.parse(fullUri), 0, 0, 0, 0, 0);
+
+                flowControl.maxRetransmissionLength(0, 32, TERM_BUFFER_LENGTH, MTU_LENGTH);
+
+                verifyCalculateRetransmissionLength(calculateRetransmissionLengthSpy, expectedRrwm);
+            });
+        },
+    );
 
     it('usesDefaultUnicastRetransmitReceiverWindowMultipleWhenNotSetInContext', () => {
         const uri = 'aeron:udp?endpoint=localhost:0';

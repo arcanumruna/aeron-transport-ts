@@ -31,7 +31,7 @@ import { BroadcastBufferDescriptor } from '../agrona/concurrent/broadcast/Broadc
 import { RingBufferDescriptor } from '../agrona/concurrent/ringbuffer/RingBufferDescriptor.js';
 import { CountersReader } from '../agrona/concurrent/status/CountersReader.js';
 import type { StatusIndicator } from '../agrona/concurrent/status/StatusIndicator.js';
-import { ClassNotFoundException, Integer, Long, NumberFormatException, TimeUnit } from '../agrona/jdk.js';
+import { ByteOrder, ClassNotFoundException, Integer, Long, NumberFormatException, TimeUnit } from '../agrona/jdk.js';
 import { requireNonNull, System } from '../agrona/jdkLang.js';
 import { SystemErr } from '../agrona/jdkThrowable.js';
 import { LangUtil } from '../agrona/LangUtil.js';
@@ -49,6 +49,10 @@ import { DefaultCongestionControlSupplier } from './DefaultCongestionControlSupp
 import { DefaultDenyTerminationValidator } from './DefaultDenyTerminationValidator.js';
 import { DefaultMulticastFlowControlSupplier } from './DefaultMulticastFlowControlSupplier.js';
 import { DefaultUnicastFlowControlSupplier } from './DefaultUnicastFlowControlSupplier.js';
+import { FlowControlRegistry } from './FlowControlRegistry.js';
+import { ReceiverWindow } from './ReceiverWindow.js';
+import { PreferredMulticastFlowControlAsf } from './PreferredMulticastFlowControlAsf.js';
+import { UnsafeBuffer } from '../agrona/concurrent/UnsafeBuffer.js';
 import type { CongestionControlSupplier } from './CongestionControlSupplier.js';
 import type { FlowControlSupplier } from './FlowControlSupplier.js';
 import type { TerminationValidator } from './TerminationValidator.js';
@@ -64,8 +68,7 @@ import { ThreadingMode } from './ThreadingMode.js';
  * Configuration options for the {@link MediaDriver} and its components, with their defaults and the readers of the
  * system properties that set them.
  * <p>
- * The members that name a type not ported yet are left out and added by the task that ports the type (see
- * `docs/mapping.md`): `flowControlGroupTag` (phase 3). Their PROP_NAME and DEFAULT constants are ported.
+ * Every PROP_NAME and DEFAULT constant is ported; see `docs/mapping.md` for the members that differ.
  */
 export class Configuration {
     private constructor() {}
@@ -238,7 +241,7 @@ export class Configuration {
      * Buffer = (10 * 1000 * 1000 * 1000 / 8) * 0.0001 = 125000
      * Round to 128 KB
      */
-    public static readonly INITIAL_WINDOW_LENGTH_DEFAULT: number = 128 * 1024;
+    public static readonly INITIAL_WINDOW_LENGTH_DEFAULT: number = ReceiverWindow.INITIAL_WINDOW_LENGTH_DEFAULT;
 
     /**
      * Status message timeout in nanoseconds after which one will be sent when data flow has not triggered one.
@@ -1278,6 +1281,23 @@ export class Configuration {
     }
 
     /**
+     * Default group tag (gtag) used by the tagged flow control strategy to group receivers. The default is the legacy
+     * ASF of {@link PreferredMulticastFlowControlAsf.PREFERRED_ASF_PROP_NAME}, read as a little-endian long.
+     *
+     * @return group tag (gtag) used by the tagged flow control strategy to group receivers.
+     * @see #FLOW_CONTROL_GROUP_TAG_PROP_NAME
+     */
+    public static flowControlGroupTag(): number {
+        const propertyValue = System.getProperty(
+            PreferredMulticastFlowControlAsf.PREFERRED_ASF_PROP_NAME,
+            PreferredMulticastFlowControlAsf.PREFERRED_ASF_DEFAULT,
+        );
+        const legacyAsfValue = new UnsafeBuffer(BitUtil.fromHex(propertyValue)).getLong(0, ByteOrder.LITTLE_ENDIAN);
+
+        return Long.getLong(Configuration.FLOW_CONTROL_GROUP_TAG_PROP_NAME, legacyAsfValue);
+    }
+
+    /**
      * Default minimum group size used by flow control strategies to determine connectivity.
      *
      * @return default minimum group size used by flow control strategies to determine connectivity.
@@ -1450,7 +1470,7 @@ export class Configuration {
      * @return the length to be used for the receiver window.
      */
     public static receiverWindowLength(termBufferLength: number, initialWindowLength: number): number {
-        return Math.min(initialWindowLength, termBufferLength >> 1);
+        return ReceiverWindow.receiverWindowLength(termBufferLength, initialWindowLength);
     }
 
     /**
@@ -2016,26 +2036,27 @@ export class Configuration {
      */
     public static unicastFlowControlSupplier(): FlowControlSupplier {
         const className = System.getProperty(Configuration.UNICAST_FLOW_CONTROL_STRATEGY_SUPPLIER_PROP_NAME);
-        if (null === className || 'io.aeron.driver.DefaultUnicastFlowControlSupplier' === className) {
+        if (null === className) {
             return new DefaultUnicastFlowControlSupplier();
         }
 
-        return LangUtil.rethrowUnchecked(new ClassNotFoundException(className));
+        return FlowControlRegistry.newFlowControlSupplier(className);
     }
 
     /**
      * Get the supplier of {@link FlowControl}s which can be used for changing behavior of flow control for multicast
-     * publications.
+     * publications. The class name of the property is looked up in the static registry of
+     * {@link FlowControlRegistry} (spec D25, D118).
      *
      * @return the {@link FlowControlSupplier}.
      */
     public static multicastFlowControlSupplier(): FlowControlSupplier {
         const className = System.getProperty(Configuration.MULTICAST_FLOW_CONTROL_STRATEGY_SUPPLIER_PROP_NAME);
-        if (null === className || 'io.aeron.driver.DefaultMulticastFlowControlSupplier' === className) {
+        if (null === className) {
             return new DefaultMulticastFlowControlSupplier();
         }
 
-        return LangUtil.rethrowUnchecked(new ClassNotFoundException(className));
+        return FlowControlRegistry.newFlowControlSupplier(className);
     }
 
     /**

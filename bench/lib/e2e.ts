@@ -16,6 +16,7 @@ import { Publication } from '../../src/client/Publication.js';
 import type { Subscription } from '../../src/client/Subscription.js';
 import { MediaDriver } from '../../src/driver/MediaDriver.js';
 import { median, percentile } from './stats.js';
+import { MAX_TURNS, TurnCap } from './turnCap.js';
 
 /** The longest an end-to-end wait takes before it fails instead of hanging, in ms. */
 const WAIT_CAP_MS = 20_000;
@@ -213,7 +214,7 @@ export function message(length: number): UnsafeBuffer {
 }
 
 /** `n` round trips of `size` bytes (offer, echo, read), the time of each in ns in `out`. Returns the number done. */
-export async function roundTrips(lb: Loopback, size: number, out: Float64Array): Promise<void> {
+export async function roundTrips(lb: Loopback, size: number, out: Float64Array, maxTurns = MAX_TURNS): Promise<void> {
     const buffer = message(size);
     for (let i = 0; i < out.length; i++) {
         const t0 = performance.now();
@@ -221,7 +222,13 @@ export async function roundTrips(lb: Loopback, size: number, out: Float64Array):
         if (!lb.offer(buffer, size)) {
             throw new Error('the ping stream is not connected');
         }
+        const cap = new TurnCap(
+            'round trips of ' + size + ' bytes',
+            () => 'received ' + lb.received + '/' + target,
+            maxTurns,
+        );
         while (lb.received < target) {
+            cap.tick();
             await turn();
             lb.pollPing(1);
             lb.pollEnd(1);
@@ -240,6 +247,7 @@ export async function oneWay(
     size: number,
     window: number,
     out: Float64Array,
+    maxTurns = MAX_TURNS,
 ): Promise<{ messages: number; bytes: number }> {
     const buffer = message(size);
     const startMessages = lb.received;
@@ -248,7 +256,13 @@ export async function oneWay(
     let sent = 0;
     let mark = 0;
     let t0 = performance.now();
+    const cap = new TurnCap(
+        'one-way stream of ' + size + ' bytes',
+        () => 'received ' + (lb.received - startMessages) + '/' + total + ', sent ' + sent,
+        maxTurns,
+    );
     while (mark < out.length) {
+        cap.tick();
         for (let i = 0; i < 32 && sent < total; i++) {
             const result = lb.tryOffer(buffer, size);
             if (result > 0) {
@@ -271,6 +285,20 @@ export async function oneWay(
         }
     }
     return { messages: lb.received - startMessages, bytes: lb.receivedBytes - startBytes };
+}
+
+/**
+ * A promise that a datagram callback resolves, rejected after `WAIT_CAP_MS`: a datagram that is lost on the loopback would
+ * wait for ever otherwise.
+ */
+function withinCap<T = void>(what: string, start: (resolve: (value: T) => void) => void): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('no ' + what + ' after ' + WAIT_CAP_MS + ' ms')), WAIT_CAP_MS);
+        start((value) => {
+            clearTimeout(timer);
+            resolve(value);
+        });
+    });
 }
 
 /** The raw `dgram` floor: two sockets of the loopback, the echo in the 'message' handler of the second. */
@@ -315,7 +343,7 @@ export class DgramPair {
         const payload = buffer.subarray(0, size);
         for (let i = 0; i < out.length; i++) {
             const t0 = performance.now();
-            await new Promise<void>((resolve) => {
+            await withinCap('raw dgram round trip of ' + size + ' bytes', (resolve) => {
                 this.resolve = resolve;
                 this.one.send(payload, this.port2, '127.0.0.1');
             });
@@ -337,7 +365,7 @@ export class DgramPair {
         let sent = 0;
         let mark = 0;
         let t0 = performance.now();
-        await new Promise<void>((done) => {
+        await withinCap('raw dgram stream of ' + size + ' bytes', (done) => {
             this.credit = () => {
                 const read = this.receivedByTwo - start;
                 while (mark < out.length && read >= (mark + 1) * window) {
@@ -364,8 +392,8 @@ export class DgramPair {
     public firstMessage(size: number): Promise<number> {
         this.echoing = false;
         const payload = Buffer.alloc(Math.max(size, 8), 7).subarray(0, size);
-        return new Promise((resolve) => {
-            const t0 = performance.now();
+        const t0 = performance.now();
+        return withinCap<number>('raw dgram first message', (resolve) => {
             this.credit = () => {
                 this.credit = null;
                 resolve((performance.now() - t0) * 1e6);
@@ -431,7 +459,9 @@ export async function firstMessageAfterIdle(
             if (wake) {
                 lb.a.driver.wake();
             }
+            const cap = new TurnCap('first message after idle', () => 'received ' + lb.received + '/' + target);
             while (lb.received < target) {
+                cap.tick();
                 await turn();
                 lb.pollPing(1);
             }
@@ -524,7 +554,7 @@ export async function measureAllocation(run: () => Promise<number>): Promise<All
             scavengesPer1000: (scavenges * 1000) / messages,
             portSites: [...sites]
                 .sort((x, y) => y[1] - x[1])
-                .slice(0, 5)
+                .slice(0, 8)
                 .map(([site, bytes]) => ({ site, bytesPerMessage: bytes / messages })),
         };
     } finally {

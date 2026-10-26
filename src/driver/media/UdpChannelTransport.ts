@@ -268,7 +268,20 @@ export abstract class UdpChannelTransport implements AutoCloseable {
                     this._receiveDatagramChannel = this.newSocket(true);
                 }
 
-                this.bindChecked(this._receiveDatagramChannel, this.endPointAddress.getPort(), null);
+                // Java: bind(new InetSocketAddress(port)) on a channel with IP_MULTICAST_ALL off (spec D119). A node socket
+                // cannot turn the option off, so the socket is bound to the group instead and the kernel gives it that group
+                // only; it then no longer receives unicast to the port. This is unconditional except on Windows (which binds
+                // the wildcard address) and for an IPv6 link-local group (scope 2 or less) without an interface, which also
+                // binds the wildcard address; see multicastBindHost.
+                this.bindChecked(
+                    this._receiveDatagramChannel,
+                    this.endPointAddress.getPort(),
+                    UdpChannelTransport.multicastBindHost(
+                        this._udpChannel,
+                        this.endPointAddress,
+                        this.multicastInterface(),
+                    ),
+                );
                 this.join(this._receiveDatagramChannel);
             } else {
                 this.bindAddress = this.portManager.getManagedPort(this._udpChannel, this.bindAddress);
@@ -819,6 +832,34 @@ export abstract class UdpChannelTransport implements AutoCloseable {
         }
 
         return view;
+    }
+
+    /**
+     * The host a multicast receive socket is bound to: the group of the channel (D119), otherwise the wildcard (null). A
+     * group of interface-local or link-local scope (`ffx1`, `ffx2`) is bound with the scope of the channel's interface
+     * (`%name`), which the kernel needs for it; without an interface it cannot be bound, and the wildcard is kept.
+     */
+    private static multicastBindHost(
+        udpChannel: UdpChannel,
+        endPointAddress: InetSocketAddress,
+        multicastInterface: string | undefined,
+    ): string | null {
+        if ('win32' === process.platform) {
+            return null;
+        }
+
+        const address = endPointAddress.getAddress() as InetAddress;
+        const group = address.getHostAddress();
+        if (StandardProtocolFamily.INET !== udpChannel.protocolFamily()) {
+            const scope = (address.getAddress()[1] as number) & 0x0f;
+            if (scope > 2 || group.includes('%')) {
+                return group;
+            }
+
+            return undefined !== multicastInterface ? group + multicastInterface.substring(2) : null;
+        }
+
+        return group;
     }
 
     private newSocket(reuseAddress: boolean): Socket {
