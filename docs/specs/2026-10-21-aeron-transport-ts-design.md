@@ -119,12 +119,14 @@ Node event loop
   events therefore call `AgentRunner.wake()`, which schedules at most one `setImmediate` per loop turn:
   - a datagram arriving on any socket;
   - libuv's send queue draining (the send callback);
-  - a client call through the `Aeron` facade (`offer`, `tryClaim` commit, add or remove publication or
-    subscription, close).
+  - a command that a client call through the `Aeron` facade commits (add or remove publication or subscription,
+    close) and the end of a host name look-up.
 
   Otherwise a message would wait up to one sleep period. The ported classes are unchanged; the hooks sit in the
-  transport, the command proxy and the host name look-ups (D101). An `offer` or a `tryClaim` commit does not wake the
-  runner; the park is at most 1 ms with the default idle strategy, and `MediaDriver.wake()` cuts it short.
+  transport, the command proxy and the host name look-ups (D101). An `offer` or a `tryClaim` commit does **not** wake
+  the runner (D101): it is on the hot path and a hook would cost one call per message. The first message after an
+  idle period leaves within the park, at most 1 ms with the default idle strategy, and `MediaDriver.wake()` cuts it
+  short.
 
 ### 4.2 UDP I/O model (deviations D1, D2, D7)
 Aeron's driver calls non-blocking `recvfrom` / `sendto` and gets the answer at once. Node has no such calls:

@@ -1053,6 +1053,10 @@ The deviations of this port that touch these files (the full list is spec sectio
 
 | # | Deviation |
 |---|---|
+| D1 | Receive: `'message'` events fill a bounded per-transport ring (byte budget = `SO_RCVBUF`, overflow counted in `RECEIVE_RING_DROPS`); `receive()` pops one datagram per poll. See spec D1. |
+| D2 | Send: copy into a per-socket send slot; a non-empty libuv send queue returns 0; an asynchronous send error is reported at the next duty cycle and counts as a lost datagram. See spec D2. |
+| D3 | `INVOKER` threading, plus the event loop runner of D100 for the other modes; `DEDICATED` and `SHARED_NETWORK` have no threads of their own. See spec D3. |
+| D4 | Log buffers and counters live in memory; no CnC or `.logbuffer` files. See spec D4. |
 | D5 | Every Java `long` is a `number` in +/-(2^53 - 1). A result or stored value outside that range throws `RangeError` (`LongOverflowError` when it is a parsed or stored long, carrying the exact value) and writes nothing; it never wraps. It covers get / put / getAndAdd / add / compareAndSet of longs, `putLongAscii`, `parseLongAscii`, `parseSize` / `parseDuration` and the `BitUtil` long helpers. The one exception is a saturating function: Java's `parseDuration` saturates at `Long.MAX_VALUE`, here at 2^53 - 1. |
 | D5 (commands) | The `long` client, correlation, registration and position fields of the command flyweights are `number`s in +/-(2^53 - 1) (spec 5.2): they are allocated from `nextCorrelationId` and counted, so 2^53 needs 2^53 commands. `PublicationErrorFrameFlyweight.receiverId` and `groupTag` are the exception: Java's receiver id is a random 64-bit value (UUID bits XOR, incremented), so they are `bigint` as in `ErrorFlyweight`. The one flags word (`RemovePublicationFlyweight`) is read and written as its low `int` (bit 0), so a peer's word outside the range never throws and the high half stays byte-identical. |
 | D4, D15 (CnC) | `CncFileDescriptor` lays the CnC out in a `SharedArrayBuffer`; the file, `MappedByteBuffer` and file name members are not ported (see **Not ported**). |
@@ -1072,12 +1076,17 @@ The deviations of this port that touch these files (the full list is spec sectio
 | D18 | A `Throwable` is printed as `toString()` plus V8's frames (`\tat ...`) and the `Caused by:` chain, from `error.stack`; `DistinctErrorLog` compares errors by constructor, message, cause chain and frame text. See spec D18. |
 | D19 | The Agrona concurrent classes that Java makes thread safe (`DistinctErrorLog.record`, `ManyToOneConcurrentLinkedQueue`, `ConcurrentCountersManager`) are for one thread. See spec D19. |
 | D7 | Host names are resolved with `dns.lookup` before a command reaches the conductor; `DefaultNameResolver.resolve` stays synchronous and answers IP literals, `localhost` and the cache (`DefaultNameResolver.cache` / `clearCache`, stored in `InetAddress.nameCache`); an uncached name is `UnknownHostException` in `InetAddress.getByName` and `null` from `resolve`, as in Java. See spec D7. |
+| D8 | `AgentRunner.wake()` on datagram arrival, send-queue drain and facade calls (the hooks are D101). See spec D8. |
+| D15 | The client to driver command protocol runs in memory: the CnC is a `SharedArrayBuffer` handed from `MediaDriver` to `Aeron.Context`, and `LogBuffers` finds a log by name. See spec D15. |
+| D16 | Shared memory and 64-bit atomics: a `SharedArrayBuffer` with `Atomics` for `int` and smaller, a striped lock table (`LongStripes`) for `long`; plain `long` accesses stay plain and can tear. See spec D16. |
 | D20 | The `java.net` classes of the driver's address code are stand-ins in `src/driver/jdkNet.ts`. See spec D20. |
+| D21 | `VarHandle.releaseFence()` and `acquireFence()` are the empty function on x64 and `Atomics.add` on other architectures; the ordering that gives on ARM64 with and without LSE is stated there. See spec D21. |
 | D22 | System properties are a module-level `Map<string, string>` (`System` in `jdkLang.ts`, `systemProperties` in `jdk.ts`) that starts empty; `process.env` is never read. `Integer.getInteger`, `Long.getLong` and `Boolean.getBoolean` read it with Java's semantics. See spec D22. |
 | D23 | `multiplyExact(a, b)` (`Math.multiplyExact(long, long)`) computes with `bigint`: outside Java's `long` an `ArithmeticException("long overflow")`, inside it but outside +/-(2^53 - 1) a `LongOverflowError`. See spec D23. |
 | D24 | A type that is not ported yet, in a signature of a ported method, is a placeholder interface exported from the using file (`DriverConductor`, `PublicationLike`, `RawLog` in `PublicationParams.ts`); a member whose type is not ported is left out and added by the task that ports the type. See spec D24 and the **Sources** rows. |
 | D25 | `Class.forName(name).getConstructor().newInstance()` has no equivalent: `Configuration.agentIdleStrategy` maps the aliases and Agrona's class names and throws `ClassNotFoundException` for any other name. See spec D25. |
 | D26 | `CongestionControl.packOutcome`, `receiverWindowLength` and `shouldForceStatusMessage` pack the window length and the force bit as the `number` `receiverWindowLength * 2 + force`, where Java packs `(flags << 32) | receiverWindowLength` into a `long` (above 2^53). `packOutcome` throws `RangeError` for a window length that is not an `int` (Java would sign-extend it into the flag bits); `FORCE_STATUS_MESSAGE_BIT` is still `0x1`. See spec D26. |
+| D27 | `BroadcastReceiver.lappedCount` is a plain `number` field, not an `AtomicLong`. See spec D27. |
 | D28 | `UdpChannelTransport` wraps node `dgram` sockets: `receive(UnsafeBuffer)` and `receivedLength()`, `send` and `sendTo` on the transport, `setWakeUp`, one held receive error and one held send error per poll, a synchronous check of `connect`, multicast send options set after the connect, hooks that do nothing, idempotent `close()`. See spec D28. |
 | D29 | `RECEIVE_RING_DROPS`, a system counter of id 46 that Aeron does not have, and the sizing of the `ReceiveRing`. See spec D29. |
 | D30 | `TransportPoller` has no `Selector`: it is the list of registered transports. See spec D30. |
@@ -1127,14 +1136,24 @@ The deviations of this port that touch these files (the full list is spec sectio
 | D102 | The synchronous calls work because they run the driver inline; a DNS name needs the `async` calls. See spec D102. |
 | D103 | `EmbeddedAgent` is a `DynamicCompositeAgent` for one thread. See spec D103. |
 | D104 | The network simulation is a fake `dgram` socket under the real transports. See spec D104. |
+| D105 | The interop suite is not part of `npm test`: `npm run test:interop` runs it, and it skips every test without the C build. See spec D105. |
+| D106 | The C side of the interop tests is two small C programs, `interop_publisher.c` and `interop_subscriber.c`, built by `build-c.mjs` against `libaeron.so`. See spec D106. |
+| D107 | The loss of the interop tests is the `loss` interceptor of the C driver for incoming frames, and a seeded loopback relay for the frames a TS subscriber receives. See spec D107. |
+| D108 | The interop rows of 8.3 beyond unicast (MDC, multicast, MDS, loss, rejoin, sizes and term rotation) are covered by phase 3. See spec D108. |
+| D109 | A late joining subscriber reads from the join position of its image, and a message of 1 to 3 bytes is checked modulo 256 or by length. See spec D109. |
 | D110 | The bench harness additions of the gate: `RunBench` `setup` / `teardown` / `throughput`, `bench:gate --file` and `--inject`, and the injected delay of `bench/lib/inject.ts`. See spec D110. |
 | D111 | The end-to-end benches: two drivers and two clients in one process, polled by the bench, `MediaDriver.wake()` after an offer, the `dgram` floor apart. See spec D111. |
 | D112 | `bench:e2e`: allocation by the sampling heap profiler, the first message after idle, and what CI posts. See spec D112. |
 | D113 | `UdpChannelTransport.dispatch` sends with `send(view, callback)` / `send(view, port, address, callback)` over a cache of views of the send slot by length, so that node neither slices nor resolves a host for each datagram. See spec D113. |
 | D114 | `AgentRunner` runs up to 16 duty cycles per `setImmediate` while the agent reports work. See spec D114. |
+| D115 | The Aeron system tests of phase 3 are ported one to one with launch, wait and Mockito adaptations. See spec D115. |
+| D116 | The interop C programs take `-D <destination>` (manual MDC) and grow, rather than switching to the C samples. See spec D116. |
+| D117 | The network simulation has multicast groups (membership, TTL, loopback, per-copy loss draws). See spec D117. |
 | D118 | The multicast flow control strategies keep their receivers in a growable array and a count, receiver ids and group tags as `(high, low)` halves; the `PreferredMulticastFlowControl` statics are in `PreferredMulticastFlowControlAsf.ts`; `DriverLog` is not called; `FlowControlRegistry` stands for `Class.forName` of the strategies and suppliers; `ReceiverWindow` keeps `FlowControl` off `Configuration`. See spec D118. |
 | D119 | A multicast `UdpChannelTransport` (IPv4 and IPv6; a link-local IPv6 group with the interface scope) binds its receive socket to the group address and the port instead of the wildcard address (Java and the C driver turn `IP_MULTICAST_ALL` off, node cannot). The socket then receives no unicast sent to its port, which Java's does. See spec D119. |
 | D120 | `CloseHelper.closeAll(errorHandler, closeables)` takes a first argument with `onError` as the error handler even when it has `close` too (`CountedErrorHandler`), if closeables follow it. See spec D120. |
+| D121 | The fan-out benches of phase 3 measure one way, offer to the last subscriber, and a window of 100 messages for the stream. See spec D121. |
+| D125 | `MediaDriver.Context.resolverInterface` makes `conclude()` throw `ConfigurationException`, as driver name resolution is out of scope. See spec D125. |
 | D200 | A registration id is a `number` in the code and a `bigint` in the log metadata; the one conversion is `BigInt(...)` in `DriverConductor.initLogMetadata`, once per log, off the message path. See spec D200. |
 
 A V8 detail that follows from D5: a number outside the 32-bit small integers (a long above 2^31, a double) is boxed in a heap number when it is passed to or returned from a call that is not inlined. `test/extra/agrona/HotPathAllocationTest.test.ts` asserts that the int-sized paths allocate nothing and that the long paths allocate no more than those heap numbers.
