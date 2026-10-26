@@ -20,6 +20,7 @@ import { BitUtil } from '../agrona/BitUtil.js';
 import type { UnsafeBuffer } from '../agrona/concurrent/UnsafeBuffer.js';
 import type { ReadablePosition } from '../agrona/concurrent/status/ReadablePosition.js';
 import type { DirectBuffer } from '../agrona/DirectBuffer.js';
+import { INSPECT_CUSTOM } from '../agrona/inspect.js';
 import { ByteOrder, IllegalArgumentException, Long } from '../agrona/jdk.js';
 import type { ClientConductor } from './ClientConductor.js';
 import type { DirectBufferVector } from './DirectBufferVector.js';
@@ -708,6 +709,24 @@ export abstract class Publication {
         }
 
         return 'UNKNOWN';
+    }
+
+    /** A short form for pretty-format and JSON (issue #47): the identity, never the log buffers it holds. */
+    public toJSON(): object {
+        return {
+            type: 'Publication',
+            registrationId: this._registrationId,
+            originalRegistrationId: this._originalRegistrationId,
+            channel: this._channel,
+            streamId: this._streamId,
+            sessionId: this._sessionId,
+            isClosed: this._isClosed,
+        };
+    }
+
+    /** A short form for `util.inspect` (issue #47). */
+    public [INSPECT_CUSTOM](): string {
+        return this.toString();
     }
 
     public toString(): string {

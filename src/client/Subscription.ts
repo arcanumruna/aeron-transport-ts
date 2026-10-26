@@ -17,6 +17,7 @@
  */
 // Port of io/aeron/Subscription.java @ 1.53.3
 import { ArrayUtil } from '../agrona/collections/ArrayUtil.js';
+import { INSPECT_CUSTOM } from '../agrona/inspect.js';
 import { ArrayIndexOutOfBoundsException } from '../agrona/jdk.js';
 import type { AvailableImageHandler } from './AvailableImageHandler.js';
 import { ChannelUri } from './ChannelUri.js';
@@ -582,6 +583,22 @@ export class Subscription {
         }
 
         this.conductor.rejectImage(correlationId, position, reason);
+    }
+
+    /** A short form for pretty-format and JSON (issue #47): the identity, never the log buffers it holds. */
+    public toJSON(): object {
+        return {
+            type: 'Subscription',
+            registrationId: this._registrationId,
+            channel: this._channel,
+            streamId: this._streamId,
+            isClosed: this._isClosed,
+        };
+    }
+
+    /** A short form for `util.inspect` (issue #47). */
+    public [INSPECT_CUSTOM](): string {
+        return this.toString();
     }
 
     public toString(): string {
