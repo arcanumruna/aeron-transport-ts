@@ -21,6 +21,7 @@
 // dispatcher against a model of what was asked of it, and the real path: a `ReceiveChannelEndpoint` with the real
 // dispatcher and a `SendChannelEndpoint` over loopback, from the first data frame of an unknown session, through the
 // setup eliciting status message and the setup frame, to the data of the new image.
+import { readFileSync } from 'node:fs';
 import type { Socket } from 'node:dgram';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
@@ -987,5 +988,13 @@ describe('the real path: a receive endpoint with the dispatcher, a send endpoint
         expect(sm.flags()).toBe(StatusMessageFlyweight.SEND_SETUP_FLAG);
         expect([sm.sessionId(), sm.streamId()]).toEqual([7, 1001]);
         expect(receiver.addPendingSetupMessage).toHaveBeenCalledWith(7, 1001, 0, receive, false, expect.anything());
+    });
+});
+
+describe('DataPacketDispatcherInternalRegression', () => {
+    // issue #41; mutation: remove the @internal tag from removeSessionInterestByState
+    it('removeSessionInterestByStateIsMarkedInternalRegression', () => {
+        const source = readFileSync(new URL('../../../src/driver/DataPacketDispatcher.ts', import.meta.url), 'utf8');
+        expect(source).toMatch(/\/\*\* @internal [^\n]*\*\/\n\s*public removeSessionInterestByState\(/);
     });
 });

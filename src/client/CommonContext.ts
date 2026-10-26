@@ -676,7 +676,7 @@ export class CommonContext implements AutoCloseable {
             return CommonContext.checkDebugTimeout(this._driverTimeoutMs, TimeUnit.MILLISECONDS);
         }
 
-        this._driverTimeoutMs = driverTimeoutMs;
+        this._driverTimeoutMs = Long.checkSafe(driverTimeoutMs);
         return this;
     }
 

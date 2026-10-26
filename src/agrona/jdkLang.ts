@@ -56,11 +56,16 @@ export function requireNonNull<T>(obj: T | null | undefined, message?: string): 
  * map is the `systemProperties` of `jdk.ts`, which `Integer.getInteger`, `Long.getLong` and `Boolean.getBoolean`
  * read.
  */
+function getProperty(key: string): string | null;
+function getProperty(key: string, def: string): string;
+function getProperty(key: string, def: string | null): string | null;
+function getProperty(key: string, def: string | null = null): string | null {
+    return systemProperties.get(key) ?? def;
+}
+
 export const System = {
     /** `System.getProperty(key, def)`: the value of the property, or `def` (`null` if not given) if it is not set. */
-    getProperty<T extends string | null = null>(key: string, def: T = null as T): string | T {
-        return systemProperties.get(key) ?? def;
-    },
+    getProperty,
 
     /** `System.setProperty(key, value)`: the previous value of the property, or `null` if it was not set. */
     setProperty(key: string, value: string): string | null {

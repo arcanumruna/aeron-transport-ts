@@ -1349,7 +1349,7 @@ export class Configuration {
      * @return resolver name of the Media Driver used in name resolution.
      * @see #RESOLVER_NAME_PROP_NAME
      */
-    public static resolverName(): string {
+    public static resolverName(): string | null {
         return System.getProperty(Configuration.RESOLVER_NAME_PROP_NAME);
     }
 
@@ -1359,7 +1359,7 @@ export class Configuration {
      * @return resolver interface to which network connections are made, format is hostname:port.
      * @see #RESOLVER_INTERFACE_PROP_NAME
      */
-    public static resolverInterface(): string {
+    public static resolverInterface(): string | null {
         return System.getProperty(Configuration.RESOLVER_INTERFACE_PROP_NAME);
     }
 
@@ -1370,7 +1370,7 @@ export class Configuration {
      * @see #RESOLVER_BOOTSTRAP_NEIGHBOR_PROP_NAME
      * @see #RESOLVER_INTERFACE_PROP_NAME
      */
-    public static resolverBootstrapNeighbor(): string {
+    public static resolverBootstrapNeighbor(): string | null {
         return System.getProperty(Configuration.RESOLVER_BOOTSTRAP_NEIGHBOR_PROP_NAME);
     }
 
@@ -1841,7 +1841,7 @@ export class Configuration {
      *
      * @return port range as string with the format "low high"
      */
-    public static senderWildcardPortRange(): string {
+    public static senderWildcardPortRange(): string | null {
         return System.getProperty(Configuration.SENDER_WILDCARD_PORT_RANGE_PROP_NAME);
     }
 
@@ -1850,7 +1850,7 @@ export class Configuration {
      *
      * @return port range as string with the format "low high"
      */
-    public static receiverWildcardPortRange(): string {
+    public static receiverWildcardPortRange(): string | null {
         return System.getProperty(Configuration.RECEIVER_WILDCARD_PORT_RANGE_PROP_NAME);
     }
 
@@ -2305,7 +2305,7 @@ export class Configuration {
      * @return the length that should be used for the metadata buffer for counters.
      */
     public static countersMetadataBufferLength(counterValuesBufferLength: number): number {
-        return counterValuesBufferLength * (CountersReader.METADATA_LENGTH / CountersReader.COUNTER_LENGTH);
+        return (counterValuesBufferLength * (CountersReader.METADATA_LENGTH / CountersReader.COUNTER_LENGTH)) | 0;
     }
 
     /**

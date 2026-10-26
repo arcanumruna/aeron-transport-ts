@@ -21,7 +21,14 @@ const MAX_MESSAGE = TERM_LENGTH / 8;
 const LONG_CAP_MS = 90_000;
 const INT32_MAX = 2147483647;
 /** How long the slow C subscriber stops polling after its first message, in ms. */
-const PAUSE_MS = 500;
+const PAUSE_MS = 1500;
+/** The time after the start of the pause before the publication position is sampled, and between the two samples, in ms. */
+const PAUSE_SETTLE_MS = 300;
+const PAUSE_SAMPLE_MS = 400;
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /** The message sizes of spec 8.3: 1 B, MTU - 32, MTU - 31, 2 x MTU, term length / 8 (the maximum message). */
 const SIZES = [1, MTU - HEADER_LENGTH, MTU - HEADER_LENGTH + 1, 2 * MTU, MAX_MESSAGE];
@@ -189,7 +196,10 @@ describe.skipIf(!interopAvailable)(
         });
 
         it('slowCSubscriberBackPressuresTheTsPublisher', async () => {
-            // the C subscriber stops polling for a while after its first message (-P); the TS publisher offers flat out
+            // the C subscriber stops polling for a while after its first message (-P); the TS publisher offers flat out.
+            // Issue #56: the pause is what is asserted, not only that a flat out publisher is back pressured: between
+            // the C events paused and resumed the publication position stops moving, within the windows of the
+            // subscriber position at the pause. Mutation: drop -P and no paused event is ever printed.
             const sizes = [100, 1400, 3000];
             const count = 1500;
             const { node, publication, sub } = await open({ sizes, count }, undefined, undefined, count - 1, [
@@ -197,10 +207,30 @@ describe.skipIf(!interopAvailable)(
                 String(PAUSE_MS),
             ]);
 
-            const producer = await produce(publication, sizes, 0, count);
+            const producing = produce(publication, sizes, 0, count);
+            const paused = await env.waitForEvent(sub, 'paused');
+            const subscriberPosition = paused.position as number;
+
+            // let the frames in flight at the pause land, then sample the publication twice inside the pause
+            await sleep(PAUSE_SETTLE_MS);
+            const first = publication.position();
+            await sleep(PAUSE_SAMPLE_MS);
+            const second = publication.position();
+            expect(sub.count('resumed'), 'the samples were taken after the pause ended; raise PAUSE_MS').toBe(0);
+            expect(second).toBe(first);
+            // the receiver window (term length / 2: the default initial window is larger) and the publisher window
+            // (term length / 2) ahead of the subscriber, and the fragments that the subscriber had read but not yet
+            // handed over when it paused (a poll takes 16)
+            const bound = subscriberPosition + TERM_LENGTH / 2 + TERM_LENGTH / 2 + 16 * MTU;
+            expect(second).toBeLessThanOrEqual(bound);
+            expect(second).toBeGreaterThan(subscriberPosition);
+
+            const producer = await producing;
             const summary = await env.subscriberSummary(sub);
 
             expect(sub.count('paused')).toBe(1);
+            expect(sub.count('resumed')).toBe(1);
+            expect(publication.position()).toBeGreaterThan(second);
             expect(producer.backPressured).toBeGreaterThan(0);
             expectConsumed(summary, publication.sessionId(), 0, count);
             expectNoErrors(node);

@@ -14,6 +14,7 @@ import { NoOpIdleStrategy } from '../../../src/agrona/concurrent/NoOpIdleStrateg
 import { SleepingIdleStrategy } from '../../../src/agrona/concurrent/SleepingIdleStrategy.js';
 import { SleepingMillisIdleStrategy } from '../../../src/agrona/concurrent/SleepingMillisIdleStrategy.js';
 import { ConcurrentCountersManager } from '../../../src/agrona/concurrent/status/ConcurrentCountersManager.js';
+import { CountersReader } from '../../../src/agrona/concurrent/status/CountersReader.js';
 import { CountersManager } from '../../../src/agrona/concurrent/status/CountersManager.js';
 import { UnsafeBufferStatusIndicator } from '../../../src/agrona/concurrent/status/UnsafeBufferStatusIndicator.js';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
@@ -24,6 +25,7 @@ import {
     IllegalStateException,
     Integer,
     Long,
+    NullPointerException,
     RuntimeException,
     TimeUnit,
 } from '../../../src/agrona/jdk.js';
@@ -49,6 +51,8 @@ import {
     type RawLogMetaData as RawLog,
 } from '../../../src/driver/PublicationParams.js';
 import type { DriverConductor } from '../../../src/driver/DriverConductor.js';
+import type { NameResolverAgent } from '../../../src/driver/NameResolverAgent.js';
+import { SystemUtil } from '../../../src/agrona/SystemUtil.js';
 import { asConductor } from '../../support/ClientCommandConductor.js';
 import { SystemCounterDescriptor } from '../../../src/driver/status/SystemCounterDescriptor.js';
 import { SubscriptionParams } from '../../../src/driver/SubscriptionParams.js';
@@ -761,9 +765,23 @@ describe('MediaDriverContextExtraTest', () => {
     });
 
     it('theClientLivenessAndUnblockTimeoutsGoThroughCheckDebugTimeout', () => {
+        // mutation: a getter returns its field without checkDebugTimeout (issue #32: this test took no debugger path)
         context.clientLivenessTimeoutNs(77).publicationUnblockTimeoutNs(88);
         expect(context.clientLivenessTimeoutNs()).toBe(77);
         expect(context.publicationUnblockTimeoutNs()).toBe(88);
+        setProperty(CommonContext.DEBUG_TIMEOUT_PROP_NAME, '2s');
+        const spy = vi.spyOn(SystemUtil, 'isDebuggerAttached').mockReturnValue(true);
+        try {
+            expect(context.clientLivenessTimeoutNs()).toBe(2e9);
+            expect(context.publicationUnblockTimeoutNs()).toBe(3e9);
+            expect(context.driverTimeoutMs()).toBe(2000);
+            System.setProperty(CommonContext.DEBUG_TIMEOUT_PROP_NAME, 'garbage');
+            expect(context.clientLivenessTimeoutNs()).toBe(77);
+            expect(context.publicationUnblockTimeoutNs()).toBe(88);
+            expect(context.driverTimeoutMs()).toBe(CommonContext.DRIVER_TIMEOUT_MS);
+        } finally {
+            spy.mockRestore();
+        }
     });
 
     it('concludeBuildsTheCncInOneSharedArrayBufferAlignedToTheFilePageSize', () => {
@@ -805,8 +823,23 @@ describe('MediaDriverContextExtraTest', () => {
 
     it('theCncVersionIsTheLastThingWritten', () => {
         // mutation: signalCncReady is called before the counters and the ring buffer are set up (a client could see a
-        // half-built CnC). The version is 0 until conclude returns; here we check it is set after, and that a failed
-        // conclude leaves it unset.
+        // half-built CnC). The version is 0 until conclude returns; here we check it is set after, and that a conclude
+        // that fails once the CnC is allocated leaves it 0 (issue #32).
+        const failingResolver = new Context().nameResolver({
+            init: () => {
+                throw new RuntimeException('init fails after the CnC is allocated');
+            },
+        } as unknown as NameResolverAgent);
+        try {
+            expect(() => failingResolver.conclude()).toThrow('init fails after the CnC is allocated');
+            const cnc = failingResolver.cncByteBuffer();
+            expect(cnc).not.toBeNull();
+            expect(
+                CncFileDescriptor.createMetaDataBuffer(cnc!).getIntVolatile(CncFileDescriptor.CNC_VERSION_FIELD_OFFSET),
+            ).toBe(0);
+        } finally {
+            failingResolver.close();
+        }
         context.conclude();
         expect(
             CncFileDescriptor.createMetaDataBuffer(context.cncByteBuffer()!).getIntVolatile(
@@ -982,10 +1015,13 @@ describe('MediaDriverContextExtraTest', () => {
         expect(context.countersManager()).toBeNull();
     });
 
-    it('aNonEmptyResolverNameWithAnInterfaceConcludes', () => {
+    it('aNonEmptyResolverNameWithAnInterfaceFailsFastBecauseTheDriverNameResolverIsNotPorted', () => {
+        // spec D125 (issue #31); mutation: the interface is ignored again
         context.resolverInterface('127.0.0.1').resolverName('x');
-        context.conclude();
-        expect(context.nameResolver()).not.toBeNull();
+        const e = assertThrowsExactly(ConfigurationException, () => context.conclude());
+        expect(e.message).toBe(
+            'ERROR - resolverInterface is set but driver name resolution (DriverNameResolver) is not supported: spec section 3',
+        );
     });
 
     it.each([
@@ -1477,5 +1513,105 @@ describe('SubscriptionParamsExtraTest', () => {
         expect(
             text.endsWith('\n    untetheredRestingTimeoutNs=10000000000\n    untetheredLingerTimeoutNs=5000000000\n}'),
         ).toBe(true);
+    });
+});
+
+describe('ConfigurationContextBatchDRegression', () => {
+    const noConductor = (): DriverConductor =>
+        ({
+            findNetworkPublicationByTag: () => null,
+            findIpcPublicationByTag: () => null,
+            nextAvailableSessionId: () => 7,
+        }) as unknown as DriverConductor;
+
+    function params(uri: string) {
+        const channelUri = ChannelUri.parse(uri);
+        return PublicationParams.getPublicationParams(channelUri, new Context(), noConductor(), 1, channelUri.media());
+    }
+
+    // issue #30 item 1: mutation: remove the LongOverflowError catch in parseSizeAsInt or in getPublicationWindowLength
+    it('publicationParamsOf2Pow53PlusOneFollowJavasIntCastRegression', () => {
+        const termLength = assertThrowsExactly(IllegalStateException, () =>
+            params('aeron:udp?endpoint=localhost:1|term-length=9007199254740993'),
+        );
+        expect(termLength.message).toBe('Term length less than min length of 65536: length=1');
+        const mtu = assertThrowsExactly(ConfigurationException, () =>
+            params('aeron:udp?endpoint=localhost:1|mtu=9007199254740993'),
+        );
+        expect(mtu.message).toBe('ERROR - mtuLength=1 <= HEADER_LENGTH=32');
+        const pubWnd = assertThrowsExactly(InvalidChannelException, () =>
+            params('aeron:udp?endpoint=localhost:1|pub-wnd=9007199254740993'),
+        );
+        expect(pubWnd.message).toContain('pub-wnd=9007199254740993 must not exceed half the term-length=16777216');
+    });
+
+    // issue #30 item 4: mutation: remove Long.checkSafe from a setter
+    it.each([
+        ['nakUnicastDelayNs', 1500.5],
+        ['timerIntervalNs', 2 ** 53],
+        ['lowStorageWarningThreshold', Number.NaN],
+        ['flowControlGroupTag', 0.5],
+        ['receiverGroupTag', 1.5],
+    ])('theLongSetter %s rejects the unsafe or fractional value %s Regression', (name, value) => {
+        const ctx = new Context();
+        try {
+            expect(() => (ctx as unknown as Record<string, (v: number) => unknown>)[name]!(value)).toThrow(RangeError);
+        } finally {
+            ctx.close();
+        }
+    });
+
+    it('theDriverTimeoutSetterRejectsAFractionRegression', () => {
+        expect(() => new CommonContext().driverTimeoutMs(1.5)).toThrow(RangeError);
+    });
+
+    // issue #31 item 1: the build fails (typecheck) if a null can again be assigned to string
+    it('thePropertyReadersAreTypedNullableRegression', () => {
+        // @ts-expect-error getProperty without a default may be null
+        const s: string = System.getProperty('aeron.batch.d.unset');
+        expect(s).toBeNull();
+        // @ts-expect-error getInteger without a default may be null
+        const i: number = Integer.getInteger('aeron.batch.d.unset');
+        expect(i).toBeNull();
+        // @ts-expect-error getLong without a default may be null
+        const l: number = Long.getLong('aeron.batch.d.unset');
+        expect(l).toBeNull();
+        const t: string | null = Configuration.resolverName();
+        expect(t).toBeNull();
+        const d: string = System.getProperty('aeron.batch.d.unset', 'x');
+        expect(d).toBe('x');
+    });
+
+    // issue #31 item 4: mutation: drop a member from toString
+    it('toStringHasJavasShapeWithTheCountersAndTimeoutMembersRegression', () => {
+        const ctx = new Context();
+        try {
+            const text = ctx.toString();
+            const order = [
+                '\n    cncVersion=0.2.0\n',
+                '\n    enabledExperimentalFeatures=false\n',
+                '\n    countersMetaDataBuffer=null\n',
+                '\n    countersValuesBuffer=null\n',
+                '\n    driverTimeoutMs=10000\n',
+                '\n    printConfigurationOnStart=',
+            ].map((m) => text.indexOf(m));
+            expect(order.every((i) => i >= 0)).toBe(true);
+            expect([...order].sort((a, b) => a - b)).toEqual(order);
+        } finally {
+            ctx.close();
+        }
+    });
+
+    // issue #31 item 6
+    it('valueOfNullIsANullPointerExceptionRegression', () => {
+        const e = assertThrowsExactly(NullPointerException, () => ThreadingMode.valueOf(null as unknown as string));
+        expect(e.message).toBe('Name is null');
+    });
+
+    it('countersMetadataBufferLengthWrapsToAnIntRegression', () => {
+        const ratio = CountersReader.METADATA_LENGTH / CountersReader.COUNTER_LENGTH;
+        const length = Math.ceil((2 ** 31 + 2 ** 20) / ratio);
+        expect(Configuration.countersMetadataBufferLength(length)).toBe((length * ratio) | 0);
+        expect(Configuration.countersMetadataBufferLength(length)).toBeLessThan(0);
     });
 });
