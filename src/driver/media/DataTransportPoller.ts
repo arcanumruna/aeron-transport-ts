@@ -104,6 +104,10 @@ export class DataTransportPoller extends UdpTransportPoller<ChannelAndTransport>
         this.totalBytesReceived = 0;
 
         // Java polls the transports one by one up to ITERATION_THRESHOLD and then selects; there is no selector (D30)
+        // The loop reads the live array by index. If a callback during a poll cancels a read, `fastUnorderedRemove`
+        // moves the last entry into the freed slot, so the entry moved there is skipped for this cycle and the next
+        // cycle polls it (nothing is lost or polled twice). Java's for-each would throw ConcurrentModificationException;
+        // this port does not copy the list (it must not allocate per cycle).
         const transports = this.transports;
         for (let i = 0; i < transports.length; i++) {
             this.poll(transports[i] as ChannelAndTransport);
