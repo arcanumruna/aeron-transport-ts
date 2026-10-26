@@ -166,7 +166,7 @@ describe('MaxMulticastFlowControl and its supplier', () => {
         expect(flowControl.maxRetransmissionLength(0, 1 << 30, 65536, 1408)).toBe(65536);
     });
 
-    it('the supplier gives the max strategy by default and by fc=max, and refuses another', () => {
+    it('the supplier gives the max strategy by default and by fc=max, and refuses an unknown one', () => {
         const supplier = new DefaultMulticastFlowControlSupplier();
 
         expect(supplier.newInstance(channel('aeron:udp?endpoint=224.20.30.39:5555'), 1, 2)).toBeInstanceOf(
@@ -175,9 +175,9 @@ describe('MaxMulticastFlowControl and its supplier', () => {
         expect(
             supplier.newInstance(channel('aeron:udp?endpoint=224.20.30.39:5555|fc=max,rrwm:3'), 1, 2),
         ).toBeInstanceOf(MaxMulticastFlowControl);
-        expect(() => supplier.newInstance(channel('aeron:udp?endpoint=224.20.30.39:5555|fc=min'), 1, 2)).toThrowError(
-            'unsupported multicast flow control strategy: fc=min',
-        );
+        expect(() =>
+            supplier.newInstance(channel('aeron:udp?endpoint=224.20.30.39:5555|fc=foobar'), 1, 2),
+        ).toThrowError('unsupported multicast flow control strategy: fc=foobar');
         expect(supplier.toString()).toContain('DefaultMulticastFlowControlSupplier{flowControlClass=');
     });
 

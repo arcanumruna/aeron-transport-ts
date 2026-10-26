@@ -29,7 +29,7 @@ import type { MediaDriver } from './MediaDriver.js';
 const { computePosition } = LogBufferDescriptor;
 
 /**
- * Default multicast sender flow control strategy (pulled forward from phase 3 for the manual MDC tests of DriverConductorTest).
+ * Default multicast sender flow control strategy.
  * <p>
  * Max of right edges. No tracking of receivers.
  */

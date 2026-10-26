@@ -23,9 +23,9 @@ import { CommonContext } from '../client/CommonContext.js';
 import { type ErrorFlyweight } from '../client/protocol/ErrorFlyweight.js';
 import { type SetupFlyweight } from '../client/protocol/SetupFlyweight.js';
 import { type StatusMessageFlyweight } from '../client/protocol/StatusMessageFlyweight.js';
-import { Configuration } from './Configuration.js';
 import { type InetSocketAddress } from './jdkNet.js';
 import { type UdpChannel } from './media/UdpChannel.js';
+import { ReceiverWindow } from './ReceiverWindow.js';
 import type { MediaDriver } from './MediaDriver.js';
 
 /**
@@ -177,7 +177,7 @@ export const FlowControl = {
     ): number {
         const lengthToEndOfTerm = (termBufferLength - termOffset) | 0;
         const estimatedRetransmitLength = Math.imul(
-            Configuration.receiverWindowLength(termBufferLength, Configuration.INITIAL_WINDOW_LENGTH_DEFAULT),
+            ReceiverWindow.receiverWindowLength(termBufferLength, ReceiverWindow.INITIAL_WINDOW_LENGTH_DEFAULT),
             retransmitReceiverWindowMultiple,
         );
 

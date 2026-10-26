@@ -16,43 +16,60 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of io/aeron/driver/DefaultMulticastFlowControlSupplier.java @ 1.53.3
-import { ClassNotFoundException, IllegalArgumentException } from '../agrona/jdk.js';
-import { LangUtil } from '../agrona/LangUtil.js';
+import { IllegalArgumentException } from '../agrona/jdk.js';
 import { CommonContext } from '../client/CommonContext.js';
 import { Configuration } from './Configuration.js';
 import type { FlowControl } from './FlowControl.js';
+import { FlowControlRegistry } from './FlowControlRegistry.js';
 import type { FlowControlSupplier } from './FlowControlSupplier.js';
 import { MaxMulticastFlowControl } from './MaxMulticastFlowControl.js';
 import type { UdpChannel } from './media/UdpChannel.js';
+import { MinMulticastFlowControl } from './MinMulticastFlowControl.js';
+import { TaggedMulticastFlowControl } from './TaggedMulticastFlowControl.js';
 
 /**
  * Default supplier of {@link FlowControl} strategies for multicast streams which supports defining the strategy in
  * the channel URI as a priority over {@link Configuration#MULTICAST_FLOW_CONTROL_STRATEGY_PROP_NAME}.
  * <p>
- * Only the `max` strategy is ported (phase 3 adds `min` and `tagged`): another URI value is an
- * `IllegalArgumentException`, another property value a `ClassNotFoundException` (spec D25).
+ * The strategy named by the property is chosen by its Java class name from the static registry of
+ * {@link FlowControlRegistry} (spec D25, D118): another name is a `ClassNotFoundException`.
  */
 export class DefaultMulticastFlowControlSupplier implements FlowControlSupplier {
+    /**
+     * Default constructor.
+     */
+    public constructor() {}
+
+    /**
+     * {@inheritDoc}
+     */
     public newInstance(udpChannel: UdpChannel, _streamId: number, _registrationId: number): FlowControl {
         const fcStr = udpChannel.channelUri().get(CommonContext.FLOW_CONTROL_PARAM_NAME);
         if (null !== fcStr) {
             const delimiter = fcStr.indexOf(',');
             const strategyStr = -1 === delimiter ? fcStr : fcStr.substring(0, delimiter);
 
-            if (MaxMulticastFlowControl.FC_PARAM_VALUE === strategyStr) {
-                return new MaxMulticastFlowControl();
+            switch (strategyStr) {
+                case MaxMulticastFlowControl.FC_PARAM_VALUE:
+                    return new MaxMulticastFlowControl();
+
+                case MinMulticastFlowControl.FC_PARAM_VALUE:
+                    return new MinMulticastFlowControl();
+
+                case TaggedMulticastFlowControl.FC_PARAM_VALUE:
+                    return new TaggedMulticastFlowControl();
+
+                default:
+                    throw new IllegalArgumentException('unsupported multicast flow control strategy: fc=' + fcStr);
             }
-
-            throw new IllegalArgumentException('unsupported multicast flow control strategy: fc=' + fcStr);
         }
 
-        if ('io.aeron.driver.MaxMulticastFlowControl' === Configuration.MULTICAST_FLOW_CONTROL_STRATEGY) {
-            return new MaxMulticastFlowControl();
-        }
-
-        return LangUtil.rethrowUnchecked(new ClassNotFoundException(Configuration.MULTICAST_FLOW_CONTROL_STRATEGY));
+        return FlowControlRegistry.newFlowControl(Configuration.MULTICAST_FLOW_CONTROL_STRATEGY);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public toString(): string {
         return (
             'DefaultMulticastFlowControlSupplier{flowControlClass=' +
