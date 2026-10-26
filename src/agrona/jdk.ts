@@ -246,7 +246,7 @@ export const Integer = {
         return Math.clz32(i);
     },
 
-    /** `Integer.parseInt(String)`: decimal digits, ASCII or any Unicode `Nd` as `Character.digit` accepts (issue 17). */
+    /** `Integer.parseInt(String)`: decimal digits, ASCII or any BMP Unicode `Nd` as `Character.digit(char)` accepts (issue 17). */
     parseInt(s: string | null): number {
         if (null === s) {
             throw new NumberFormatException('Cannot parse null string: null');
@@ -378,7 +378,7 @@ export const Long = {
     SIZE: 64,
 
     /**
-     * `Long.parseLong(String)` (and `Long.valueOf(String)`): an optional sign and decimal digits (ASCII or any Unicode `Nd`, as `Character.digit`). A value outside
+     * `Long.parseLong(String)` (and `Long.valueOf(String)`): an optional sign and decimal digits (ASCII or any BMP Unicode `Nd`, as `Character.digit(char)`). A value outside
      * Java's `long` is a `NumberFormatException`; one inside it but outside +/-(2^53 - 1) is a {@link LongOverflowError}
      * carrying the exact value (spec D5).
      */
