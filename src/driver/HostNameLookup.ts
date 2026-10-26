@@ -61,10 +61,18 @@ export function hostToLookUp(endpoint: string): string | null {
  * the name then fails to resolve as in Java, and the command that uses it is answered with the error.
  *
  * @param host the host name, as {@link hostToLookUp} answers it.
- * @param done called when the look-up is over, whatever its result, on the event loop. A `dns.lookup` that throws
- *             at once (an argument it refuses) throws from here.
+ * @param done called when the look-up is over, whatever its result. A name that is in the cache is not looked up
+ *             again (unless `refresh`): `done` is called at once. Otherwise it is called on the event loop. A
+ *             `dns.lookup` that throws at once (an argument it refuses) throws from here.
+ * @param refresh true to look the name up even if it is in the cache: the re-resolution of the driver (D58) wants the
+ *                current address.
  */
-export function lookUpHost(host: string, done: () => void): void {
+export function lookUpHost(host: string, done: () => void, refresh = false): void {
+    if (!refresh && InetAddress.nameCache.has(host.toLowerCase())) {
+        done();
+        return;
+    }
+
     dns.lookup(host, { order: 'ipv4first' }, (err, address) => {
         if (null === err) {
             try {

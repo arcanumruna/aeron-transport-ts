@@ -126,8 +126,8 @@ export class DriverProxy {
         return correlationId;
     }
 
-    public removePublication(registrationId: number, revoke: boolean): number {
-        const correlationId = this.toDriverCommandBuffer.nextCorrelationId();
+    public removePublication(registrationId: number, revoke: boolean, correlationId?: number): number {
+        const id = correlationId ?? this.toDriverCommandBuffer.nextCorrelationId();
         const index = this.toDriverCommandBuffer.tryClaim(REMOVE_PUBLICATION, RemovePublicationFlyweight.length());
         if (index < 0) {
             throw new AeronException('failed to write remove publication command');
@@ -138,11 +138,11 @@ export class DriverProxy {
             .revoke(revoke)
             .registrationId(registrationId)
             .clientId(this.clientId)
-            .correlationId(correlationId);
+            .correlationId(id);
 
         this.toDriverCommandBuffer.commit(index);
 
-        return correlationId;
+        return id;
     }
 
     public addSubscription(channel: string, streamId: number, correlationId?: number): number {
@@ -167,8 +167,8 @@ export class DriverProxy {
         return id;
     }
 
-    public removeSubscription(registrationId: number): number {
-        const correlationId = this.toDriverCommandBuffer.nextCorrelationId();
+    public removeSubscription(registrationId: number, correlationId?: number): number {
+        const id = correlationId ?? this.toDriverCommandBuffer.nextCorrelationId();
         const index = this.toDriverCommandBuffer.tryClaim(REMOVE_SUBSCRIPTION, RemoveSubscriptionFlyweight.length());
         if (index < 0) {
             throw new AeronException('failed to write remove subscription command');
@@ -178,11 +178,11 @@ export class DriverProxy {
             .wrap(this.toDriverCommandBuffer.buffer(), index)
             .registrationId(registrationId)
             .clientId(this.clientId)
-            .correlationId(correlationId);
+            .correlationId(id);
 
         this.toDriverCommandBuffer.commit(index);
 
-        return correlationId;
+        return id;
     }
 
     public addDestination(registrationId: number, endpointChannel: string, correlationId?: number): number {

@@ -97,6 +97,8 @@ export class PendingSubscription {
 /**
  * A command that waits for the host names of its channel to resolve before it is written to the driver (spec D92).
  */
+const NO_HOSTS: readonly string[] = [];
+
 interface PendingCommand {
     readonly registrationId: number;
     readonly send: (registrationId: number) => void;
@@ -520,6 +522,7 @@ export class ClientConductor implements Agent {
             this.ensureActive();
             this.ensureNotReentrant();
 
+            this.flushPendingCommands();
             const registrationId = this.driverProxy.addPublication(channel, streamId);
             this.stashedChannelByRegistrationId.put(registrationId, channel);
             this.awaitResponse(registrationId);
@@ -537,6 +540,7 @@ export class ClientConductor implements Agent {
             this.ensureActive();
             this.ensureNotReentrant();
 
+            this.flushPendingCommands();
             const registrationId = this.driverProxy.addExclusivePublication(channel, streamId);
             this.stashedChannelByRegistrationId.put(registrationId, channel);
             this.awaitResponse(registrationId);
@@ -554,7 +558,7 @@ export class ClientConductor implements Agent {
             this.ensureActive();
             this.ensureNotReentrant();
 
-            const registrationId = this.sendOrWaitForHosts(channel, (id) =>
+            const registrationId = this.sendOrQueue(channel, (id) =>
                 undefined === id
                     ? this.driverProxy.addPublication(channel, streamId)
                     : this.driverProxy.addPublication(channel, streamId, id),
@@ -575,7 +579,7 @@ export class ClientConductor implements Agent {
             this.ensureActive();
             this.ensureNotReentrant();
 
-            const registrationId = this.sendOrWaitForHosts(channel, (id) =>
+            const registrationId = this.sendOrQueue(channel, (id) =>
                 undefined === id
                     ? this.driverProxy.addExclusivePublication(channel, streamId)
                     : this.driverProxy.addExclusivePublication(channel, streamId, id),
@@ -653,8 +657,14 @@ export class ClientConductor implements Agent {
                         publication.originalRegistrationId(),
                         EXPLICIT_CLOSE_LINGER_NS,
                     );
+                    const registrationId = publication.registrationId();
+                    const revoke = publication._revokeOnClose;
                     this.asyncCommandIdSet.add(
-                        this.driverProxy.removePublication(publication.registrationId(), publication._revokeOnClose),
+                        this.sendOrQueue(null, (id) =>
+                            undefined === id
+                                ? this.driverProxy.removePublication(registrationId, revoke)
+                                : this.driverProxy.removePublication(registrationId, revoke, id),
+                        ),
                     );
                 }
             }
@@ -699,7 +709,11 @@ export class ClientConductor implements Agent {
 
             if (this.asyncCommandIdSet.remove(publicationRegistrationId) || null !== publication) {
                 this.asyncCommandIdSet.add(
-                    this.driverProxy.removePublication(publicationRegistrationId, revokeOnClose),
+                    this.sendOrQueue(null, (id) =>
+                        undefined === id
+                            ? this.driverProxy.removePublication(publicationRegistrationId, revokeOnClose)
+                            : this.driverProxy.removePublication(publicationRegistrationId, revokeOnClose, id),
+                    ),
                 );
                 this.stashedChannelByRegistrationId.remove(publicationRegistrationId);
             }
@@ -720,6 +734,7 @@ export class ClientConductor implements Agent {
             this.ensureActive();
             this.ensureNotReentrant();
 
+            this.flushPendingCommands();
             const correlationId = this.driverProxy.addSubscription(channel, streamId);
             const subscription = new Subscription(
                 this,
@@ -751,7 +766,7 @@ export class ClientConductor implements Agent {
             this.ensureActive();
             this.ensureNotReentrant();
 
-            const registrationId = this.sendOrWaitForHosts(channel, (id) =>
+            const registrationId = this.sendOrQueue(channel, (id) =>
                 undefined === id
                     ? this.driverProxy.addSubscription(channel, streamId)
                     : this.driverProxy.addSubscription(channel, streamId, id),
@@ -819,7 +834,13 @@ export class ClientConductor implements Agent {
 
                 const registrationId = subscription.registrationId();
                 if (subscription === this.resourceByRegIdMap.remove(registrationId)) {
-                    this.asyncCommandIdSet.add(this.driverProxy.removeSubscription(registrationId));
+                    this.asyncCommandIdSet.add(
+                        this.sendOrQueue(null, (id) =>
+                            undefined === id
+                                ? this.driverProxy.removeSubscription(registrationId)
+                                : this.driverProxy.removeSubscription(registrationId, id),
+                        ),
+                    );
                 }
             }
         } finally {
@@ -856,7 +877,13 @@ export class ClientConductor implements Agent {
             }
 
             if (this.asyncCommandIdSet.remove(subscriptionRegistrationId) || null !== subscription) {
-                this.asyncCommandIdSet.add(this.driverProxy.removeSubscription(subscriptionRegistrationId));
+                this.asyncCommandIdSet.add(
+                    this.sendOrQueue(null, (id) =>
+                        undefined === id
+                            ? this.driverProxy.removeSubscription(subscriptionRegistrationId)
+                            : this.driverProxy.removeSubscription(subscriptionRegistrationId, id),
+                    ),
+                );
             }
         } finally {
             this.clientLock.unlock();
@@ -870,6 +897,7 @@ export class ClientConductor implements Agent {
             this.ensureActive();
             this.ensureNotReentrant();
 
+            this.flushPendingCommands();
             this.awaitResponse(this.driverProxy.addDestination(registrationId, endpointChannel));
         } finally {
             this.clientLock.unlock();
@@ -883,6 +911,7 @@ export class ClientConductor implements Agent {
             this.ensureActive();
             this.ensureNotReentrant();
 
+            this.flushPendingCommands();
             const correlationId = this.driverProxy.addDestination(registrationId, endpointChannel);
             this.awaitResponse(correlationId);
 
@@ -905,6 +934,7 @@ export class ClientConductor implements Agent {
             this.ensureActive();
             this.ensureNotReentrant();
 
+            this.flushPendingCommands();
             this.awaitResponse(this.driverProxy.removeDestination(registrationId, destination));
         } finally {
             this.clientLock.unlock();
@@ -918,6 +948,7 @@ export class ClientConductor implements Agent {
             this.ensureActive();
             this.ensureNotReentrant();
 
+            this.flushPendingCommands();
             this.awaitResponse(this.driverProxy.addRcvDestination(registrationId, endpointChannel));
         } finally {
             this.clientLock.unlock();
@@ -931,6 +962,7 @@ export class ClientConductor implements Agent {
             this.ensureActive();
             this.ensureNotReentrant();
 
+            this.flushPendingCommands();
             this.awaitResponse(this.driverProxy.removeRcvDestination(registrationId, endpointChannel));
         } finally {
             this.clientLock.unlock();
@@ -944,7 +976,7 @@ export class ClientConductor implements Agent {
             this.ensureActive();
             this.ensureNotReentrant();
 
-            const correlationId = this.sendOrWaitForHosts(endpointChannel, (id) =>
+            const correlationId = this.sendOrQueue(endpointChannel, (id) =>
                 undefined === id
                     ? this.driverProxy.addDestination(registrationId, endpointChannel)
                     : this.driverProxy.addDestination(registrationId, endpointChannel, id),
@@ -972,12 +1004,16 @@ export class ClientConductor implements Agent {
 
             const correlationId =
                 'string' === typeof destination
-                    ? this.sendOrWaitForHosts(destination, (id) =>
+                    ? this.sendOrQueue(destination, (id) =>
                           undefined === id
                               ? this.driverProxy.removeDestination(registrationId, destination)
                               : this.driverProxy.removeDestination(registrationId, destination, id),
                       )
-                    : this.driverProxy.removeDestination(registrationId, destination);
+                    : this.sendOrQueue(null, (id) =>
+                          undefined === id
+                              ? this.driverProxy.removeDestination(registrationId, destination)
+                              : this.driverProxy.removeDestination(registrationId, destination, id),
+                      );
             this.asyncCommandIdSet.add(correlationId);
 
             return correlationId;
@@ -993,7 +1029,7 @@ export class ClientConductor implements Agent {
             this.ensureActive();
             this.ensureNotReentrant();
 
-            const correlationId = this.sendOrWaitForHosts(endpointChannel, (id) =>
+            const correlationId = this.sendOrQueue(endpointChannel, (id) =>
                 undefined === id
                     ? this.driverProxy.addRcvDestination(registrationId, endpointChannel)
                     : this.driverProxy.addRcvDestination(registrationId, endpointChannel, id),
@@ -1013,7 +1049,7 @@ export class ClientConductor implements Agent {
             this.ensureActive();
             this.ensureNotReentrant();
 
-            const correlationId = this.sendOrWaitForHosts(endpointChannel, (id) =>
+            const correlationId = this.sendOrQueue(endpointChannel, (id) =>
                 undefined === id
                     ? this.driverProxy.removeRcvDestination(registrationId, endpointChannel)
                     : this.driverProxy.removeRcvDestination(registrationId, endpointChannel, id),
@@ -1175,6 +1211,7 @@ export class ClientConductor implements Agent {
             this.ensureActive();
             this.ensureNotReentrant();
 
+            this.flushPendingCommands();
             const registrationId = this.driverProxy.rejectImage(correlationId, position, reason);
             this.awaitResponse(registrationId);
         } finally {
@@ -1448,8 +1485,8 @@ export class ClientConductor implements Agent {
         try {
             handler.onUnavailableImage(image);
         } catch (ex) {
-            if (ex instanceof AgentTerminationException) {
-                if (!this._isTerminating) {
+            if (ex instanceof AgentTerminationException || ex instanceof JavaError) {
+                if (ex instanceof JavaError || !this._isTerminating) {
                     throw ex;
                 }
             }
@@ -1499,16 +1536,19 @@ export class ClientConductor implements Agent {
 
     /**
      * Write a command to the driver now (the registration id is the one the proxy allocates, as Java does) when its
-     * channel has no host name to look up. Otherwise allocate the registration id now, start the look-ups, and write the
-     * command when they are all done, from the duty cycle of the conductor: the conductor never waits for them.
+     * channel has no host name to look up and no earlier command is waiting. Otherwise allocate the registration id now,
+     * start the look-ups, and queue the command: it is written, in the order the commands were made, from the duty cycle
+     * of the conductor when it is at the head of the queue and its look-ups are all done. The conductor never waits for
+     * them. Every command that reaches the driver through an `async` call goes through here, so that none overtakes a
+     * command that is waiting (spec D92).
      *
-     * @param channel to look the host names of up.
+     * @param channel to look the host names of up, or null for a command that has none.
      * @param send    writes the command: with no registration id, the proxy allocates one; with one, it uses it.
      * @return the registration id of the command.
      */
-    private sendOrWaitForHosts(channel: string, send: (registrationId: number | undefined) => number): number {
-        const hosts = hostsToLookUp(channel);
-        if (0 === hosts.length) {
+    private sendOrQueue(channel: string | null, send: (registrationId: number | undefined) => number): number {
+        const hosts = null === channel ? NO_HOSTS : hostsToLookUp(channel);
+        if (0 === hosts.length && 0 === this.pendingCommands.length) {
             return send(undefined);
         }
 
@@ -1521,6 +1561,9 @@ export class ClientConductor implements Agent {
 
         for (const host of hosts) {
             const done = (): void => {
+                if (this._isClosed) {
+                    return;
+                }
                 command.remaining--;
                 this.wakeUp?.();
             };
@@ -1536,38 +1579,52 @@ export class ClientConductor implements Agent {
         return command.registrationId;
     }
 
+    /**
+     * Write the queued commands from the head, in order, and stop at the first one that still waits for a look-up.
+     *
+     * @return the number of commands written.
+     */
     private sendPendingCommands(): number {
         let workCount = 0;
 
-        for (let i = 0; i < this.pendingCommands.length;) {
-            const command = this.pendingCommands[i] as PendingCommand;
-            if (command.remaining > 0) {
-                i++;
-                continue;
-            }
-
-            this.pendingCommands.splice(i, 1);
+        while (this.pendingCommands.length > 0 && (this.pendingCommands[0] as PendingCommand).remaining <= 0) {
+            this.sendQueued(this.pendingCommands.shift() as PendingCommand);
             workCount++;
-            try {
-                command.send(command.registrationId);
-            } catch (ex) {
-                // the ring is full (or the command is too long): the command is answered with the error
-                this.asyncCommandIdSet.remove(command.registrationId);
-                this.stashedChannelByRegistrationId.remove(command.registrationId);
-                this.asyncExceptionByRegIdMap.put(
-                    command.registrationId,
-                    new RegistrationException(
-                        BigInt(command.registrationId),
-                        GENERIC_ERROR.value(),
-                        GENERIC_ERROR,
-                        (ex as Error).message,
-                    ),
-                );
-                this.handleError(ex as Error);
-            }
         }
 
         return workCount;
+    }
+
+    /**
+     * Write every queued command now, in order, without waiting for its look-ups, before a synchronous call writes its
+     * own: the call cannot wait for the event loop, so a name that is not in the cache by now is answered by the driver
+     * with its unknown host error, as for a synchronous call (spec D92). The command of the call stays behind them.
+     */
+    private flushPendingCommands(): void {
+        while (this.pendingCommands.length > 0) {
+            this.sendQueued(this.pendingCommands.shift() as PendingCommand);
+        }
+    }
+
+    private sendQueued(command: PendingCommand): void {
+        try {
+            command.send(command.registrationId);
+        } catch (ex) {
+            // the ring is full (or the command is too long): the command is answered with the error
+            this.asyncCommandIdSet.remove(command.registrationId);
+            this.stashedChannelByRegistrationId.remove(command.registrationId);
+            this.resourceByRegIdMap.remove(command.registrationId);
+            this.asyncExceptionByRegIdMap.put(
+                command.registrationId,
+                new RegistrationException(
+                    BigInt(command.registrationId),
+                    GENERIC_ERROR.value(),
+                    GENERIC_ERROR,
+                    (ex as Error).message,
+                ),
+            );
+            this.handleError(ex as Error);
+        }
     }
 
     private cancelPendingCommand(registrationId: number): boolean {
