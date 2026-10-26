@@ -10,8 +10,9 @@ import { expect, vi } from 'vitest';
 import vm from 'node:vm';
 
 // A calibrated test runs the control until it has resolution and then the loop up to MAX_ATTEMPTS times; on a loaded
-// host that can pass the 10 s default, which would turn a retry that rescued the test into a timeout.
-vi.setConfig({ testTimeout: 60_000 });
+// host that can pass the 10 s default, which would turn a retry that rescued the test into a timeout. Under full-suite
+// load the 32M-iteration LargePosition cases with 6 attempts can pass 60 s, hence 180 s.
+vi.setConfig({ testTimeout: 180_000 });
 
 v8.setFlagsFromString('--expose-gc');
 const gc = vm.runInNewContext('gc') as () => void;
