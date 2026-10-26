@@ -28,7 +28,7 @@ import { RttMeasurementFlyweight } from '../../client/protocol/RttMeasurementFly
 import { SetupFlyweight } from '../../client/protocol/SetupFlyweight.js';
 import { Configuration } from '../Configuration.js';
 import { ClosedChannelException } from '../jdkNet.js';
-import type { DriverConductorProxy } from './SendChannelEndpoint.js';
+import type { DriverConductorProxy } from '../DriverConductorProxy.js';
 import type { ReceiveChannelEndpoint } from './ReceiveChannelEndpoint.js';
 import type { UdpChannelTransport } from './UdpChannelTransport.js';
 import { UdpTransportPoller } from './UdpTransportPoller.js';

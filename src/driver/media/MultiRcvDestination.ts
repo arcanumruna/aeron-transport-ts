@@ -22,7 +22,7 @@ import { ArrayUtil } from '../../agrona/collections/ArrayUtil.js';
 import type { UnsafeBuffer } from '../../agrona/concurrent/UnsafeBuffer.js';
 import { CommonContext } from '../../client/CommonContext.js';
 import type { InetSocketAddress } from '../jdkNet.js';
-import type { DriverConductorProxy } from './SendChannelEndpoint.js';
+import type { DriverConductorProxy } from '../DriverConductorProxy.js';
 import type { DataTransportPoller } from './DataTransportPoller.js';
 import type { ImageConnection } from './ImageConnection.js';
 import { ReceiveChannelEndpoint } from './ReceiveChannelEndpoint.js';

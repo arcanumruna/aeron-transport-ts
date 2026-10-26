@@ -30,7 +30,8 @@ import { RttMeasurementFlyweight } from '../../client/protocol/RttMeasurementFly
 import { StatusMessageFlyweight } from '../../client/protocol/StatusMessageFlyweight.js';
 import { Configuration } from '../Configuration.js';
 import { ClosedChannelException } from '../jdkNet.js';
-import type { DriverConductorProxy, SendChannelEndpoint } from './SendChannelEndpoint.js';
+import type { DriverConductorProxy } from '../DriverConductorProxy.js';
+import type { SendChannelEndpoint } from './SendChannelEndpoint.js';
 import { UdpTransportPoller } from './UdpTransportPoller.js';
 
 const { HDR_TYPE_ERR, HDR_TYPE_NAK, HDR_TYPE_RSP_SETUP, HDR_TYPE_RTTM, HDR_TYPE_SM } = HeaderFlyweight;

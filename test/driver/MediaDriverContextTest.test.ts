@@ -197,8 +197,18 @@ describe('MediaDriverContextTest', () => {
         expect(errorCounter.get()).toBe(1);
     });
 
-    // ControlTransportPoller (T13) takes the DriverConductorProxy that T17 ports, and conclude creates it with it then.
-    it.skip('shouldCreateControlTransportPollerWithCountedErrorHandler', () => {});
+    it('shouldCreateControlTransportPollerWithCountedErrorHandler', () => {
+        context.controlTransportPoller(null);
+
+        context.conclude();
+
+        const controlTransportPoller = context.controlTransportPoller();
+        expect(controlTransportPoller).not.toBeNull();
+
+        // getErrorHandler(transportPoller): the protected field `errorHandler` of `UdpTransportPoller`, read by reflection
+        const errorHandler = (controlTransportPoller as unknown as { errorHandler: unknown }).errorHandler;
+        expect(errorHandler).toBe(context.countedErrorHandler());
+    });
 
     it('shouldCreateDataTransportPollerWithCountedErrorHandler', () => {
         context.dataTransportPoller(null);

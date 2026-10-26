@@ -20,6 +20,7 @@ import { MediaDriver } from '../../src/driver/MediaDriver.js';
 import { ControlTransportPoller } from '../../src/driver/media/ControlTransportPoller.js';
 import { DataTransportPoller } from '../../src/driver/media/DataTransportPoller.js';
 import { ImageConnection } from '../../src/driver/media/ImageConnection.js';
+import type { DriverConductorProxy } from '../../src/driver/DriverConductorProxy.js';
 import { ReceiveChannelEndpoint } from '../../src/driver/media/ReceiveChannelEndpoint.js';
 import type { NetworkPublication } from '../../src/driver/media/SendChannelEndpoint.js';
 import { SendChannelEndpoint } from '../../src/driver/media/SendChannelEndpoint.js';
@@ -27,6 +28,16 @@ import { UdpChannel } from '../../src/driver/media/UdpChannel.js';
 import type { SyncBench } from '../lib/types.js';
 
 const OPS_PER_SAMPLE = 1_000;
+
+/** A `DriverConductorProxy` whose members do nothing (the real class queues a closure per call). */
+function noOpConductorProxy(): DriverConductorProxy {
+    return {
+        reResolveEndpoint: () => {},
+        reResolveControl: () => {},
+        responseSetup: () => {},
+        createPublicationImage: () => {},
+    } as unknown as DriverConductorProxy;
+}
 const MTU = 1408;
 const rinfo = { address: '127.0.0.1', family: 'IPv4' as const, port: 5000, size: 128 };
 
@@ -198,12 +209,7 @@ function dispatchBench(): SyncBench {
         setup: () => {
             context = newContext();
             const dispatcher = new RealDataPacketDispatcher(
-                {
-                    reResolveEndpoint: () => {},
-                    reResolveControl: () => {},
-                    responseSetup: () => {},
-                    createPublicationImage: () => {},
-                },
+                noOpConductorProxy(),
                 { addPendingSetupMessage: () => {} },
                 10,
             );
@@ -266,12 +272,7 @@ function controlPollBench(): SyncBench {
                 context,
             );
             endpoint.openDatagramChannel(null);
-            poller = new ControlTransportPoller(context.countedErrorHandler() as ErrorHandler, {
-                reResolveEndpoint: () => {},
-                reResolveControl: () => {},
-                responseSetup: () => {},
-                createPublicationImage: () => {},
-            });
+            poller = new ControlTransportPoller(context.countedErrorHandler() as ErrorHandler, noOpConductorProxy());
             poller.registerForRead(endpoint);
             endpoint.registerForSend(publication);
             const sm = new StatusMessageFlyweight(new UnsafeBuffer(frame));

@@ -45,10 +45,11 @@ import { MediaDriver } from '../../../src/driver/MediaDriver.js';
 import { ControlTransportPoller } from '../../../src/driver/media/ControlTransportPoller.js';
 import { DataTransportPoller } from '../../../src/driver/media/DataTransportPoller.js';
 import { ReceiveChannelEndpoint } from '../../../src/driver/media/ReceiveChannelEndpoint.js';
-import type { DriverConductorProxy, NetworkPublication } from '../../../src/driver/media/SendChannelEndpoint.js';
+import type { NetworkPublication } from '../../../src/driver/media/SendChannelEndpoint.js';
 import { SendChannelEndpoint } from '../../../src/driver/media/SendChannelEndpoint.js';
 import { UdpChannel } from '../../../src/driver/media/UdpChannel.js';
 import { PendingSetupMessageFromSource } from '../../../src/driver/PendingSetupMessageFromSource.js';
+import { newFakeConductorProxy, type FakeConductorProxy } from '../../support/ConductorProxyFake.js';
 import { assertThrows } from '../../support/Assertions.js';
 import { type Fake, calledMembers, mock } from '../../support/Mockito.js';
 import { mulberry32 } from '../../support/Random.js';
@@ -76,13 +77,8 @@ function newImage(sessionId: number, streamId: number, correlationId: number): F
     };
 }
 
-function newProxy(): Fake<DriverConductorProxy> {
-    return {
-        reResolveEndpoint: vi.fn<DriverConductorProxy['reResolveEndpoint']>(),
-        reResolveControl: vi.fn<DriverConductorProxy['reResolveControl']>(),
-        responseSetup: vi.fn<DriverConductorProxy['responseSetup']>(),
-        createPublicationImage: vi.fn<DriverConductorProxy['createPublicationImage']>(),
-    };
+function newProxy(): FakeConductorProxy {
+    return newFakeConductorProxy();
 }
 
 function newReceiver(): Fake<Receiver> {
@@ -135,7 +131,7 @@ function packet(endOfStream: boolean): UnsafeBuffer {
 }
 
 interface Fixture {
-    proxy: Fake<DriverConductorProxy>;
+    proxy: FakeConductorProxy;
     receiver: Fake<Receiver>;
     dispatcher: DataPacketDispatcher;
     endpoint: ReceiveChannelEndpoint;
