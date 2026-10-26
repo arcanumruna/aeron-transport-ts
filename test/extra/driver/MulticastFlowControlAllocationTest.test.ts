@@ -6,11 +6,13 @@ import { describe, expect, it } from 'vitest';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { CountersManager } from '../../../src/agrona/concurrent/status/CountersManager.js';
 import { CountersReader } from '../../../src/agrona/concurrent/status/CountersReader.js';
+import { ErrorFlyweight } from '../../../src/client/protocol/ErrorFlyweight.js';
 import { StatusMessageFlyweight } from '../../../src/client/protocol/StatusMessageFlyweight.js';
 import type { FlowControl } from '../../../src/driver/FlowControl.js';
 import { MediaDriver } from '../../../src/driver/MediaDriver.js';
 import { UdpChannel } from '../../../src/driver/media/UdpChannel.js';
 import { MinMulticastFlowControl } from '../../../src/driver/MinMulticastFlowControl.js';
+import { TaggedMulticastFlowControl } from '../../../src/driver/TaggedMulticastFlowControl.js';
 import { expectNoAllocation } from '../../support/Allocation.js';
 
 const ITERATIONS = 1_000_000;
@@ -51,6 +53,7 @@ function newTracking(
 }
 
 const MIN_URI = 'aeron:udp?endpoint=224.20.30.39:24326|interface=localhost|fc=min';
+const TAGGED_URI = 'aeron:udp?endpoint=224.20.30.39:24326|interface=localhost|fc=tagged,g:123/1';
 
 describe('MulticastFlowControlAllocationTest', () => {
     describe('MinMulticastFlowControl', () => {
@@ -74,6 +77,88 @@ describe('MulticastFlowControlAllocationTest', () => {
         it.each([1, 8, 64])('onIdle with %i receivers allocates nothing', async (receivers) => {
             const flowControl = new MinMulticastFlowControl();
             newTracking(flowControl, MIN_URI, receivers, null);
+            let limit = 0;
+
+            await expectNoAllocation((n) => {
+                for (let i = 0; i < n; i++) {
+                    limit = flowControl.onIdle(i & 0xffff, limit & 0xffff, 0, false);
+                }
+            }, ITERATIONS);
+
+            expect(limit).toBe(TERM_OFFSET + WINDOW_LENGTH);
+        });
+    });
+
+    describe('TaggedMulticastFlowControl', () => {
+        it('onStatusMessage from a known tagged receiver allocates nothing', async () => {
+            const flowControl = new TaggedMulticastFlowControl();
+            const flyweight = newTracking(flowControl, TAGGED_URI, 8, 123n);
+            let limit = 0;
+
+            await expectNoAllocation((n) => {
+                for (let i = 0; i < n; i++) {
+                    flyweight.receiverIdLow((i & 7) + 1);
+                    limit = flowControl.onStatusMessage(flyweight, null as never, limit & 0xffff, 0, 0, 0);
+                }
+            }, ITERATIONS);
+
+            expect(limit).toBe(TERM_OFFSET + WINDOW_LENGTH);
+        });
+
+        it('onStatusMessage from an untagged receiver allocates nothing', async () => {
+            const flowControl = new TaggedMulticastFlowControl();
+            const tagged = newTracking(flowControl, TAGGED_URI, 8, 123n);
+            const flyweight = newStatusMessage();
+            flyweight.groupTag(null);
+            let limit = 0;
+
+            await expectNoAllocation((n) => {
+                for (let i = 0; i < n; i++) {
+                    flyweight.receiverIdLow(100 + (i & 7));
+                    limit = flowControl.onStatusMessage(flyweight, null as never, limit & 0xffff, 0, 0, 0);
+                }
+            }, ITERATIONS);
+
+            expect(limit).toBe(TERM_OFFSET + WINDOW_LENGTH);
+            expect(tagged.groupTagLow()).toBe(123);
+        });
+
+        it('onStatusMessage and onTriggerSendSetup from a receiver with the wrong tag allocate nothing', async () => {
+            const flowControl = new TaggedMulticastFlowControl();
+            newTracking(flowControl, TAGGED_URI, 8, 123n);
+            const flyweight = newStatusMessage();
+            flyweight.groupTag(124n);
+            let limit = 0;
+
+            await expectNoAllocation((n) => {
+                for (let i = 0; i < n; i++) {
+                    flyweight.receiverIdLow(100 + (i & 7));
+                    limit = flowControl.onStatusMessage(flyweight, null as never, limit & 0xffff, 0, 0, 0);
+                    flowControl.onTriggerSendSetup(flyweight, null as never, 0);
+                }
+            }, ITERATIONS);
+
+            expect(limit).toBe(TERM_OFFSET + WINDOW_LENGTH);
+        });
+
+        it('onError with a tag allocates nothing', async () => {
+            const flowControl = new TaggedMulticastFlowControl();
+            newTracking(flowControl, TAGGED_URI, 8, 123n);
+            const error = new ErrorFlyweight(new Uint8Array(ErrorFlyweight.MAX_ERROR_FRAME_LENGTH));
+            error.receiverIdHigh(0).receiverIdLow(1000).groupTag(123n);
+
+            await expectNoAllocation((n) => {
+                for (let i = 0; i < n; i++) {
+                    flowControl.onError(error, null as never, 0);
+                }
+            }, ITERATIONS);
+
+            expect(flowControl.hasRequiredReceivers()).toBe(true);
+        });
+
+        it.each([1, 8, 64])('onIdle with %i receivers allocates nothing', async (receivers) => {
+            const flowControl = new TaggedMulticastFlowControl();
+            newTracking(flowControl, TAGGED_URI, receivers, 123n);
             let limit = 0;
 
             await expectNoAllocation((n) => {

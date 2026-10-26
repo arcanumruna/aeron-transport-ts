@@ -4,8 +4,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { System } from '../../../src/agrona/jdkLang.js';
 import { ErrorFlyweight } from '../../../src/client/protocol/ErrorFlyweight.js';
 import { StatusMessageFlyweight } from '../../../src/client/protocol/StatusMessageFlyweight.js';
+import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
+import { CountersManager } from '../../../src/agrona/concurrent/status/CountersManager.js';
+import { CountersReader } from '../../../src/agrona/concurrent/status/CountersReader.js';
 import { Configuration } from '../../../src/driver/Configuration.js';
 import { MediaDriver } from '../../../src/driver/MediaDriver.js';
+import { UdpChannel } from '../../../src/driver/media/UdpChannel.js';
+import { TaggedMulticastFlowControl } from '../../../src/driver/TaggedMulticastFlowControl.js';
 
 const TAGS: bigint[] = [0n, 1n, -1n, 123n, 3_000_000_000n, -3_000_000_000n, 0x1fffffffffffffn, -0x1fffffffffffffn];
 
@@ -58,5 +63,101 @@ describe('MulticastFlowControlExtraTest', () => {
 
         expect(context.flowControlGroupTag()).toBe(42);
         expect(context.toString()).toContain('flowControlGroupTag=42');
+    });
+
+    describe('TaggedMulticastFlowControl', () => {
+        const WINDOW = 16 * 1024;
+
+        function newTagged(uri: string): TaggedMulticastFlowControl {
+            const flowControl = new TaggedMulticastFlowControl();
+            const countersManager = new CountersManager(
+                new UnsafeBuffer(
+                    new ArrayBuffer(16 * 1024 * (CountersReader.METADATA_LENGTH / CountersReader.COUNTER_LENGTH)),
+                ),
+                new UnsafeBuffer(new ArrayBuffer(16 * 1024)),
+            );
+            flowControl.initialize(
+                new MediaDriver.Context().tempBuffer(new UnsafeBuffer(new ArrayBuffer(8192))),
+                countersManager,
+                UdpChannel.parse(uri),
+                0,
+                0,
+                0,
+                0,
+                0,
+            );
+            return flowControl;
+        }
+
+        /** A status message with an application specific feedback of `asf.length` bytes after the header. */
+        function statusMessage(receiverId: number, asf: number[]): StatusMessageFlyweight {
+            const flyweight = new StatusMessageFlyweight(new Uint8Array(1024));
+            flyweight.receiverId(BigInt(receiverId));
+            flyweight.consumptionTermId(0);
+            flyweight.consumptionTermOffset(0);
+            flyweight.receiverWindowLength(WINDOW);
+            flyweight.frameLength(StatusMessageFlyweight.HEADER_LENGTH + asf.length);
+            asf.forEach((b, i) => flyweight.putByte(StatusMessageFlyweight.groupTagFieldOffset() + i, b));
+            return flyweight;
+        }
+
+        const URI = 'aeron:udp?endpoint=224.20.30.39:24326|interface=localhost|fc=tagged,g:7/1';
+
+        it('a status message with a legacy ASF of 4 to 7 or more than 8 bytes starting with the preferred ASF is tracked', () => {
+            for (const length of [4, 5, 6, 7, 9, 12]) {
+                const flowControl = newTagged(URI);
+                const asf = new Array<number>(length).fill(0xff);
+
+                expect(flowControl.onStatusMessage(statusMessage(1, asf), null as never, 0, 0, 0, 0)).toBe(WINDOW);
+                expect(flowControl.hasRequiredReceivers()).toBe(true);
+            }
+        });
+
+        it('a status message whose ASF does not start with the preferred ASF, or has no ASF, is not tracked', () => {
+            for (const asf of [
+                [0xff, 0xff, 0xff, 0xfe],
+                [0xfe, 0xff, 0xff, 0xff],
+                [0xff, 0xff, 0xff],
+                [0, 0, 0, 0],
+                [],
+            ]) {
+                const flowControl = newTagged(URI);
+
+                expect(flowControl.onStatusMessage(statusMessage(1, asf), null as never, 5, 0, 0, 0)).toBe(5);
+                expect(flowControl.hasRequiredReceivers()).toBe(false);
+            }
+        });
+
+        it.each([7n, 0x7fffffffn, 0x80000000n, -1n, 0x1fffffffffffffn])(
+            'a status message and an error frame with the tag %d are matched as the tag of the strategy',
+            (tag) => {
+                const flowControl = newTagged(
+                    'aeron:udp?endpoint=224.20.30.39:24326|interface=localhost|fc=tagged,g:' + tag + '/1',
+                );
+                const sm = statusMessage(1, []);
+
+                sm.groupTag(tag);
+                expect(flowControl.onStatusMessage(sm, null as never, 0, 0, 0, 0)).toBe(WINDOW);
+                const other = statusMessage(2, []);
+                other.groupTag(tag + 1n);
+                expect(flowControl.onStatusMessage(other, null as never, 0, 0, 0, 0)).toBe(WINDOW);
+
+                const wrongError = new ErrorFlyweight(new Uint8Array(ErrorFlyweight.MAX_ERROR_FRAME_LENGTH));
+                wrongError.receiverId(1n).groupTag(tag + 1n);
+                flowControl.onError(wrongError, null as never, 0);
+                expect(flowControl.onIdle(0, 0, 0, false)).toBe(WINDOW);
+
+                const noTagError = new ErrorFlyweight(new Uint8Array(ErrorFlyweight.MAX_ERROR_FRAME_LENGTH));
+                noTagError.receiverId(1n);
+                flowControl.onError(noTagError, null as never, 0);
+                expect(flowControl.hasRequiredReceivers()).toBe(true);
+
+                const error = new ErrorFlyweight(new Uint8Array(ErrorFlyweight.MAX_ERROR_FRAME_LENGTH));
+                error.receiverId(1n).groupTag(tag);
+                flowControl.onError(error, null as never, 0);
+                flowControl.onIdle(0, 0, 0, false);
+                expect(flowControl.hasRequiredReceivers()).toBe(false);
+            },
+        );
     });
 });

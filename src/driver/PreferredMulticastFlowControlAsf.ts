@@ -49,6 +49,6 @@ export const PREFERRED_ASF: string = System.getProperty(
 );
 
 /**
- * The ASF bytes.
+ * The ASF bytes. An `Int8Array`, as Java's `byte[]` is signed: they are compared with `getByte`, which is signed too.
  */
-export const PREFERRED_ASF_BYTES: Uint8Array = BitUtil.fromHex(PREFERRED_ASF);
+export const PREFERRED_ASF_BYTES: Int8Array = new Int8Array(BitUtil.fromHex(PREFERRED_ASF).buffer);
