@@ -3,6 +3,20 @@
 Where the Phase 2 (unicast) work stands, so a new session can pick it up.
 Plan: [2026-10-22-phase-2-unicast.md](2026-10-22-phase-2-unicast.md). Draft PR: #9 (`feature/phase-2-unicast`).
 
+## Status: Phase 2 done (T25, 2026-10-26)
+
+T1–T25 are merged into `feature/phase-2-unicast`. The phase was checked as follows:
+- **Checks:** typecheck, lint, format, mapping check and the full suite are green, apart from the known flakes #46 and
+  #48.
+- **Interop:** 29 of 30 tests pass against C Aeron. The one failure is #51, which fails only under full-suite load and
+  passes 6 of 6 runs alone.
+- **Review:** one Opus whole-branch review against the Java sources found no urgent items, so there was no fix round.
+  Its minor findings are #58 (a SETUP over 2^53 reallocates the image log on every SETUP) and #59 (the RTT BigInt,
+  the timeout message, the catch scope and `cbrt`).
+- **Not sampled deeply:** `Image`/`TermReader`, and the DriverConductor linger and cleanup paths.
+
+Open follow-ups: #19, #20, #25–#32, #46, #48, #51, #52 (about 91 B/msg still allocated), #58, #59.
+
 ## Workflow (unchanged)
 
 One implementer per task with an exact recipe, then a review (spec compliance + code quality), then one fix round.
