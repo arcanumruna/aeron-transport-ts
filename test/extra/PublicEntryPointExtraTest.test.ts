@@ -9,8 +9,15 @@ import * as api from '../../src/index.js';
 
 const ROOT = new URL('../../', import.meta.url).pathname;
 
-function read(path: string): Record<string, any> {
-    return JSON.parse(readFileSync(join(ROOT, path), 'utf8')) as Record<string, any>;
+interface Json {
+    main?: string;
+    types?: string;
+    exports: Record<string, unknown>;
+    compilerOptions: { stripInternal?: boolean };
+}
+
+function read(path: string): Json {
+    return JSON.parse(readFileSync(join(ROOT, path), 'utf8')) as Json;
 }
 
 function files(dir: string): string[] {
