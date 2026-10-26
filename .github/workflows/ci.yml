@@ -23,6 +23,7 @@ jobs:
           key: refs-aeron-1.53.3-agrona-2.6.1
       - run: npm ci
       - run: npm run fetch:refs
+      - run: npm run probe:multicast
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
