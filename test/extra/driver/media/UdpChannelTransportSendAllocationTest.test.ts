@@ -7,9 +7,9 @@
 //
 // The measure is the sampling heap profiler, as `bench:e2e` has it (spec D112): the bytes allocated under a frame of
 // `src/` or of node's send, with the objects already freed counted. The loop yields to the event loop every BATCH
-// sends, since the ticks of the completion callbacks run there. Measures of the transport and of the control alternate,
-// and the least of each is taken: a heap profile of a run is noisy by a few tens of bytes per send (what V8 had
-// optimized when), the slice and the lookup that the test is after are about 100.
+// sends, since the ticks of the completion callbacks run there. Each round measures the control and then the transport,
+// and the median over the rounds of their difference is asserted: a heap profile of a run is noisy by a few tens of
+// bytes per send (what V8 had optimized when), the slice and the lookup that the test is after are about 100.
 import dgram from 'node:dgram';
 import inspector from 'node:inspector/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -26,10 +26,17 @@ const SENDS = 40_000;
 const WARM_UP_SENDS = 30_000;
 const BATCH = 100;
 const LENGTH = 1408;
-const ROUNDS = 5;
+const ROUNDS = 7;
 
-/** What the transport may allocate per send above the control: the closures of a call shape are 60 to 100 bytes. */
-const SLACK_BYTES = 40;
+/**
+ * What the transport may allocate per send above the control. The heap profile is bimodal in exact steps of 40 bytes
+ * (570 or 610 bytes per send, by what V8 had optimized when), so the median of the paired differences is 0 or about
+ * 40.5 at most, and a slack of 40 is borderline by construction. The slice of `Socket.send` that this test guards
+ * measures a median of about 97 bytes above the control (mutation: `send(slot, 0, length, cb)`), so 60 sits between the
+ * noise step and the defect, with margin on both sides. Allocations inlined into the caller (e.g. in `dispatch`) are
+ * not attributed to a frame of `src/` or of node's send, so this test guards node's send slice specifically.
+ */
+const SLACK_BYTES = 60;
 
 interface ProfileNode {
     callFrame: { url: string; functionName: string };
@@ -135,19 +142,30 @@ async function bytesPerSend(send: () => number): Promise<number> {
     return bytesUnderSend(profile.head as ProfileNode, false) / SENDS;
 }
 
-/** The least bytes per send of the transport and of the control, measured alternately. */
-async function compare(
-    transport: () => number,
-    control: () => number,
-): Promise<{ transport: number; control: number }> {
-    let transportBytes = Infinity;
-    let controlBytes = Infinity;
+/** The median of `values`. */
+function median(values: number[]): number {
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = sorted.length >> 1;
+    return 1 === (sorted.length & 1)
+        ? (sorted[middle] as number)
+        : ((sorted[middle - 1] as number) + (sorted[middle] as number)) / 2;
+}
+
+/**
+ * The median over ROUNDS paired rounds of the bytes per send of the transport minus those of the control, each round
+ * measuring the control and then the transport, so that a drift of the heap profile hits both of a pair.
+ */
+async function compare(transport: () => number, control: () => number): Promise<{ delta: number; control: number }> {
+    const deltas: number[] = [];
+    const controls: number[] = [];
     for (let round = 0; round < ROUNDS; round++) {
-        controlBytes = Math.min(controlBytes, await bytesPerSend(control));
-        transportBytes = Math.min(transportBytes, await bytesPerSend(transport));
+        const controlBytes = await bytesPerSend(control);
+        const transportBytes = await bytesPerSend(transport);
+        controls.push(controlBytes);
+        deltas.push(transportBytes - controlBytes);
     }
 
-    return { transport: transportBytes, control: controlBytes };
+    return { delta: median(deltas), control: median(controls) };
 }
 
 describe('UdpChannelTransportSendAllocationTest', () => {
@@ -156,7 +174,7 @@ describe('UdpChannelTransportSendAllocationTest', () => {
         const view = new Uint8Array(LENGTH);
         const done = (): void => {};
 
-        const { transport, control } = await compare(
+        const { delta, control } = await compare(
             () => endpoint.send(buffer, 0, LENGTH),
             () => {
                 controlConnected.send(view, done);
@@ -164,7 +182,7 @@ describe('UdpChannelTransportSendAllocationTest', () => {
             },
         );
 
-        expect(transport, `bytes per connected send (node: ${control})`).toBeLessThan(control + SLACK_BYTES);
+        expect(delta, `median bytes per connected send above node's (node: ${control})`).toBeLessThan(SLACK_BYTES);
     }, 120_000);
 
     it('Regression: a send to an address allocates what node does for the datagram and no more (no slice, no lookup)', async () => {
@@ -174,7 +192,7 @@ describe('UdpChannelTransportSendAllocationTest', () => {
         const port = receiver.address().port;
         const target = new InetSocketAddress('127.0.0.1', port);
 
-        const { transport, control } = await compare(
+        const { delta, control } = await compare(
             () => unconnected.sendTo(buffer, 0, LENGTH, target),
             () => {
                 controlUnconnected.send(view, port, '127.0.0.1', done);
@@ -182,6 +200,6 @@ describe('UdpChannelTransportSendAllocationTest', () => {
             },
         );
 
-        expect(transport, `bytes per sendTo (node: ${control})`).toBeLessThan(control + SLACK_BYTES);
+        expect(delta, `median bytes per sendTo above node's (node: ${control})`).toBeLessThan(SLACK_BYTES);
     }, 120_000);
 });
