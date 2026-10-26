@@ -23,6 +23,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
+    "test:interop": "vitest run --config vitest.interop.config.ts",
     "fetch:refs": "sh scripts/fetch-refs.sh",
     "check:mapping": "node scripts/check-test-mapping.mjs",
     "bench:micro": "node --expose-gc --experimental-transform-types --import ./test/support/workerRegister.mjs --no-warnings bench/lib/runMicro.ts",
