@@ -1,31 +1,23 @@
-// The producer side of a log, as far as the tests of the sender need it: what `ConcurrentPublication.offer` and
-// `tryClaim` do to the term buffers (T20 ports the publications, `TermAppender` among them). One claim of the tail by a
-// `getAndAddRawTailOffset` (phase 2 decision 5), the frames written with the `HeaderWriter` and published by the
-// ordered store of their length, a padding frame and a `rotateLog` when the claim crosses the end of the term. It
-// makes the logs that a publication makes, so a test of the sender, the retransmit or the cap runs on them.
-import { BitUtil } from '../../src/agrona/BitUtil.js';
-import type { UnsafeBuffer } from '../../src/agrona/concurrent/UnsafeBuffer.js';
-import { IllegalArgumentException } from '../../src/agrona/jdk.js';
+// The producer side of a log, as far as the tests of the sender need it. Since T20 it is a real `ConcurrentPublication`
+// over the log: `offer` and `tryClaim` are the publication's, with the appends, the padding frame at the end of the term
+// and the `rotateLog` of Java, with a position limit that never back pressures and a conductor that is a fake (spec D80),
+// and a rotation (`ADMIN_ACTION`) is retried as a caller does. `initialiseLog` is what the conductor does to the meta
+// data of a new log (`DriverConductor.initialiseLogMetadata` and `initialiseTailWithTermId`).
+import { UnsafeBuffer } from '../../src/agrona/concurrent/UnsafeBuffer.js';
+import { IllegalArgumentException, Long } from '../../src/agrona/jdk.js';
+import { ConcurrentPublication } from '../../src/client/ConcurrentPublication.js';
 import { BufferClaim } from '../../src/client/logbuffer/BufferClaim.js';
 import { FrameDescriptor } from '../../src/client/logbuffer/FrameDescriptor.js';
-import { HeaderWriter } from '../../src/client/logbuffer/HeaderWriter.js';
 import { LogBufferDescriptor } from '../../src/client/logbuffer/LogBufferDescriptor.js';
 import { DataHeaderFlyweight } from '../../src/client/protocol/DataHeaderFlyweight.js';
+import { Publication } from '../../src/client/Publication.js';
 import type { RawLog } from '../../src/driver/buffer/RawLog.js';
+import { newFakeLogBuffers, newFakePublicationConductor } from './ClientFakes.js';
+import { MockPosition } from './MockPosition.js';
 
-const { align, SIZE_OF_LONG } = BitUtil;
 const { HEADER_LENGTH } = DataHeaderFlyweight;
-const { FRAME_ALIGNMENT, frameLengthOrdered } = FrameDescriptor;
-const {
-    PARTITION_COUNT,
-    TERM_TAIL_COUNTERS_OFFSET,
-    activeTermCount,
-    indexByTermCount,
-    computePosition,
-    getAndAddRawTailOffset,
-    rotateLog,
-    initialiseTailWithTermId,
-} = LogBufferDescriptor;
+const { PARTITION_COUNT, indexByTermCount, initialiseTailWithTermId } = LogBufferDescriptor;
+const { ADMIN_ACTION, MAX_POSITION_EXCEEDED } = Publication;
 
 export interface LogStart {
     readonly sessionId: number;
@@ -42,29 +34,34 @@ export class TestLogProducer {
     public readonly termLength: number;
     public readonly maxPayloadLength: number;
     public readonly maxMessageLength: number;
-    private readonly positionBitsToShift: number;
-    private readonly metaData: UnsafeBuffer;
-    private readonly termBuffers: UnsafeBuffer[];
-    private readonly headerWriter: HeaderWriter;
-    private readonly initialTermId: number;
-    private readonly termIdHolder = new Int32Array(1);
-    private readonly bufferClaim = new BufferClaim();
+    private readonly publication: ConcurrentPublication;
+    private readonly source = new UnsafeBuffer();
 
     public constructor(
         rawLog: RawLog,
         private readonly start: LogStart,
     ) {
-        this.metaData = rawLog.metaData();
-        this.termBuffers = rawLog.termBuffers();
         this.termLength = rawLog.termLength();
-        this.initialTermId = start.initialTermId;
-        this.positionBitsToShift = LogBufferDescriptor.positionBitsToShift(this.termLength);
         this.maxPayloadLength = start.mtuLength - HEADER_LENGTH;
         this.maxMessageLength = FrameDescriptor.computeMaxMessageLength(this.termLength);
-        this.headerWriter = HeaderWriter.newInstance(
+        TestLogProducer.initialiseLog(rawLog, start);
+        LogBufferDescriptor.storeDefaultFrameHeader(
+            rawLog.metaData(),
             DataHeaderFlyweight.createDefaultHeader(start.sessionId, start.streamId, start.initialTermId),
         );
-        TestLogProducer.initialiseLog(rawLog, start);
+        const limit = new MockPosition();
+        limit.value = Long.MAX_VALUE;
+        this.publication = new ConcurrentPublication(
+            newFakePublicationConductor(),
+            'aeron:udp?endpoint=localhost:40124',
+            start.streamId,
+            start.sessionId,
+            limit,
+            -1,
+            newFakeLogBuffers(rawLog.termBuffers(), this.termLength, rawLog.metaData()),
+            0,
+            0,
+        );
     }
 
     /**
@@ -94,12 +91,7 @@ export class TestLogProducer {
 
     /** The position of the producers: the position after the last append. */
     public position(): number {
-        const count = activeTermCount(this.metaData);
-        const index = indexByTermCount(count);
-        const termId = LogBufferDescriptor.rawTailTermId(this.metaData, index);
-        const termOffset = LogBufferDescriptor.rawTailTermOffset(this.metaData, index, this.termLength);
-
-        return computePosition(termId, termOffset, this.positionBitsToShift, this.initialTermId);
+        return this.publication.position();
     }
 
     /**
@@ -109,49 +101,15 @@ export class TestLogProducer {
      * @return the position after the message.
      */
     public offer(message: Uint8Array): number {
-        const length = message.length;
-        if (length > this.maxMessageLength) {
-            throw new IllegalArgumentException(
-                'message length ' + length + ' > maxMessageLength=' + this.maxMessageLength,
-            );
+        this.source.wrap(message);
+        for (let attempt = 0; attempt < 8; attempt++) {
+            const position = this.publication.offer(this.source, 0, message.length);
+            if (ADMIN_ACTION !== position) {
+                return TestLogProducer.checked(position);
+            }
         }
 
-        if (length <= this.maxPayloadLength) {
-            const frameLength = length + HEADER_LENGTH;
-            return this.append(align(frameLength, FRAME_ALIGNMENT), (termBuffer, termOffset, termId) => {
-                this.headerWriter.write(termBuffer, termOffset, frameLength, termId);
-                termBuffer.putBytes(termOffset + HEADER_LENGTH, message, 0, length);
-                frameLengthOrdered(termBuffer, termOffset, frameLength);
-            });
-        }
-
-        const framedLength = LogBufferDescriptor.computeFragmentedFrameLength(length, this.maxPayloadLength);
-        return this.append(framedLength, (termBuffer, termOffset, termId) => {
-            let flags = FrameDescriptor.BEGIN_FRAG_FLAG;
-            let remaining = length;
-            let frameOffset = termOffset;
-            let sourceOffset = 0;
-            do {
-                const bytesToWrite = Math.min(remaining, this.maxPayloadLength);
-                const frameLength = bytesToWrite + HEADER_LENGTH;
-                const alignedLength = align(frameLength, FRAME_ALIGNMENT);
-
-                this.headerWriter.write(termBuffer, frameOffset, frameLength, termId);
-                termBuffer.putBytes(frameOffset + HEADER_LENGTH, message, sourceOffset, bytesToWrite);
-
-                if (remaining <= this.maxPayloadLength) {
-                    flags |= FrameDescriptor.END_FRAG_FLAG;
-                }
-
-                FrameDescriptor.frameFlags(termBuffer, frameOffset, flags & 0xff);
-                frameLengthOrdered(termBuffer, frameOffset, frameLength);
-
-                flags = 0;
-                frameOffset += alignedLength;
-                sourceOffset += bytesToWrite;
-                remaining -= bytesToWrite;
-            } while (remaining > 0);
-        });
+        throw new Error('the log did not rotate');
     }
 
     /**
@@ -160,54 +118,25 @@ export class TestLogProducer {
      * @return the claim and the position after it.
      */
     public tryClaim(length: number): { claim: BufferClaim; position: number } {
-        if (length > this.maxPayloadLength) {
-            throw new IllegalArgumentException('claim exceeds maxPayloadLength of ' + this.maxPayloadLength);
-        }
-
-        const frameLength = length + HEADER_LENGTH;
-        const position = this.append(align(frameLength, FRAME_ALIGNMENT), (termBuffer, termOffset, termId) => {
-            this.headerWriter.write(termBuffer, termOffset, frameLength, termId);
-            this.bufferClaim.wrap(termBuffer, termOffset, frameLength);
-        });
-
-        return { claim: this.bufferClaim, position };
-    }
-
-    private append(
-        alignedLength: number,
-        write: (termBuffer: UnsafeBuffer, termOffset: number, termId: number) => void,
-    ): number {
+        const claim = new BufferClaim();
         for (let attempt = 0; attempt < 8; attempt++) {
-            const termCount = activeTermCount(this.metaData);
-            const index = indexByTermCount(termCount);
-            const termLength = this.termLength;
-            const unsignedOffset = getAndAddRawTailOffset(
-                this.metaData,
-                TERM_TAIL_COUNTERS_OFFSET + SIZE_OF_LONG * index,
-                alignedLength,
-                this.termIdHolder,
-            );
-            const termId = this.termIdHolder[0] as number;
-            const termOffset = Math.min(unsignedOffset, termLength);
-            const resultingOffset = termOffset + alignedLength;
-            const termBuffer = this.termBuffers[index] as UnsafeBuffer;
-
-            if (resultingOffset > termLength) {
-                // the claim crosses the end of the term: pad what is left of it and rotate to the next
-                if (termOffset < termLength) {
-                    const paddingLength = termLength - termOffset;
-                    this.headerWriter.write(termBuffer, termOffset, paddingLength, termId);
-                    FrameDescriptor.frameType(termBuffer, termOffset, FrameDescriptor.PADDING_FRAME_TYPE);
-                    frameLengthOrdered(termBuffer, termOffset, paddingLength);
-                }
-                rotateLog(this.metaData, termCount, termId);
-                continue;
+            const position = this.publication.tryClaim(length, claim);
+            if (ADMIN_ACTION !== position) {
+                return { claim, position: TestLogProducer.checked(position) };
             }
-
-            write(termBuffer, termOffset, termId);
-            return computePosition(termId, resultingOffset, this.positionBitsToShift, this.initialTermId);
         }
 
         throw new Error('the log did not rotate');
+    }
+
+    private static checked(position: number): number {
+        if (MAX_POSITION_EXCEEDED === position) {
+            throw new Error('MAX_POSITION_EXCEEDED');
+        }
+        if (position < 0) {
+            throw new IllegalArgumentException('the offer failed: ' + Publication.errorString(position));
+        }
+
+        return position;
     }
 }
