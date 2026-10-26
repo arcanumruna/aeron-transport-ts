@@ -1,0 +1,199 @@
+diff --git a/src/agrona/BufferUtil.ts b/src/agrona/BufferUtil.ts
+index 342b49c..6c8e31b 100644
+--- a/src/agrona/BufferUtil.ts
++++ b/src/agrona/BufferUtil.ts
+@@ -87,6 +87,6 @@ export class BufferUtil {
+             throw new IllegalArgumentException('Must be a power of 2: alignment=' + alignment);
+         }
+ 
+-        return new SharedArrayBuffer(length);
++        return (process.env.PLAIN ? new ArrayBuffer(length) : new SharedArrayBuffer(length)) as SharedArrayBuffer;
+     }
+ }
+diff --git a/src/agrona/concurrent/AgentRunner.ts b/src/agrona/concurrent/AgentRunner.ts
+index 748b6c3..41202f3 100644
+--- a/src/agrona/concurrent/AgentRunner.ts
++++ b/src/agrona/concurrent/AgentRunner.ts
+@@ -105,10 +105,12 @@ export class AgentRunner implements AutoCloseable {
+     private idleNs = 0;
+     private workCount = 0;
+     private hasTimer = false;
++    private hasImmediate = false;
+     private timerHandle: unknown = null;
+ 
+     // One function each for the life of the runner, so scheduling a duty cycle creates no closure.
+     private readonly onImmediate = (): void => {
++        this.hasImmediate = false;
+         this.dutyCycle();
+     };
+ 
+@@ -304,13 +306,16 @@ export class AgentRunner implements AutoCloseable {
+      * datagram arriving, a send completing or a client call (spec D8) calls this, so that I/O does not wait for the
+      * park to end. It schedules at most one {@code setImmediate}, and does nothing if the runner is not parked.
+      */
+-    public wake(): void {
++    public wake(maxCycles: number = AgentRunner.MAX_BATCHED_DUTY_CYCLES): void {
++        if (this._isClosed || this.isInAgent || null === this.runnerThread) {
++            return;
++        }
+         if (this.hasTimer) {
+             this.scheduler.clearTimeout(this.timerHandle);
+             this.hasTimer = false;
+             this.timerHandle = null;
+-            this.scheduleNext(0);
+         }
++        this.dutyCycle(maxCycles);
+     }
+ 
+     private failAction(closeFailAction: ((thread: Thread) => void) | null, thread: Thread, message: string): void {
+@@ -334,7 +339,7 @@ export class AgentRunner implements AutoCloseable {
+      * The task of the runner: the {@code while (isRunning)} of Java's {@code workLoop} for as many turns as the batch
+      * allows, then the next task is scheduled.
+      */
+-    private dutyCycle(): void {
++    private dutyCycle(maxCycles: number = AgentRunner.MAX_BATCHED_DUTY_CYCLES): void {
+         for (let batched = 1; ; batched++) {
+             if (this._isClosed) {
+                 return;
+@@ -352,7 +357,7 @@ export class AgentRunner implements AutoCloseable {
+                 return;
+             }
+ 
+-            if (this.idleNs > 0 || this.workCount <= 0 || batched >= AgentRunner.MAX_BATCHED_DUTY_CYCLES) {
++            if (this.idleNs > 0 || this.workCount <= 0 || batched >= maxCycles) {
+                 this.scheduleNext(this.idleNs);
+                 return;
+             }
+@@ -363,6 +368,10 @@ export class AgentRunner implements AutoCloseable {
+      * One turn of Java's {@code workLoop}: one duty cycle.
+      */
+     private runDutyCycle(): void {
++        const __g = globalThis as any; __g.__xhop?.("dc"); const __t = performance.now();
++        try { this.runDutyCycle0(); } finally { __g.__dcT = (__g.__dcT ?? 0) + performance.now() - __t; __g.__dcN = (__g.__dcN ?? 0) + 1; }
++    }
++    private runDutyCycle0(): void {
+         const previous = Thread.switchTo(this.runnerThread!);
+         this.isInAgent = true;
+         this.idleNs = 0;
+@@ -382,10 +391,14 @@ export class AgentRunner implements AutoCloseable {
+     }
+ 
+     private scheduleNext(delayNs: number): void {
++        if (this.hasImmediate || this.hasTimer) {
++            return;
++        }
+         if (delayNs > 0) {
+             this.hasTimer = true;
+             this.timerHandle = this.scheduler.setTimeout(this.onTimer, Math.max(1, Math.ceil(delayNs / 1_000_000)));
+         } else {
++            this.hasImmediate = true;
+             this.scheduler.setImmediate(this.onImmediate);
+         }
+     }
+diff --git a/src/agrona/jdkLang.ts b/src/agrona/jdkLang.ts
+index 4fd83c4..1a07ae7 100644
+--- a/src/agrona/jdkLang.ts
++++ b/src/agrona/jdkLang.ts
+@@ -157,31 +157,49 @@ export class Thread {
+ }
+ 
+ /**
+- * Stand-in for `java.util.concurrent.locks.ReentrantLock` on the one JS thread (spec D3): the lock can always be taken,
+- * by the thread that holds it or by any other (there is no other), and is counted so that an `unlock` without a `lock`
+- * is the error that Java reports (`IllegalMonitorStateException`, here an {@link IllegalStateException}).
++ * Stand-in for `java.util.concurrent.locks.ReentrantLock` on the one JS thread (spec D3, D121): the lock is counted and
++ * owned by the {@link Thread} that took it, as in Java. The thread that holds it takes it again. Another thread (a
++ * runner's duty cycle that runs inline, nested in a call that holds the lock) fails `tryLock`, as Java's agent thread
++ * does while the application is in a synchronous call; its `lock` would wait forever on one JS thread, so it is an
++ * error. An `unlock` by a thread that does not hold the lock is the error that Java reports
++ * (`IllegalMonitorStateException`, here an {@link IllegalStateException}).
+  */
+ export class ReentrantLock implements Lock {
+     private holdCount = 0;
++    private owner: Thread | null = null;
+ 
+     public lock(): void {
++        const thread = Thread.currentThread();
++        if (0 !== this.holdCount && this.owner !== thread) {
++            throw new IllegalStateException(
++                'the lock is held by ' + this.owner + ': ' + thread + ' would wait for it forever on the one JS thread',
++            );
++        }
++        this.owner = thread;
+         this.holdCount++;
+     }
+ 
+     public lockInterruptibly(): void {
+-        this.holdCount++;
++        this.lock();
+     }
+ 
+     public tryLock(): boolean {
++        const thread = Thread.currentThread();
++        if (0 !== this.holdCount && this.owner !== thread) {
++            return false;
++        }
++        this.owner = thread;
+         this.holdCount++;
+         return true;
+     }
+ 
+     public unlock(): void {
+-        if (0 === this.holdCount) {
++        if (0 === this.holdCount || this.owner !== Thread.currentThread()) {
+             throw new IllegalStateException('the lock is not held');
+         }
+-        this.holdCount--;
++        if (0 === --this.holdCount) {
++            this.owner = null;
++        }
+     }
+ 
+     public newCondition(): never {
+diff --git a/src/driver/MediaDriver.ts b/src/driver/MediaDriver.ts
+index 0dc63fc..1b04dc2 100644
+--- a/src/driver/MediaDriver.ts
++++ b/src/driver/MediaDriver.ts
+@@ -385,7 +385,7 @@ export class MediaDriverContext extends CommonContext {
+ 
+         Configuration.validateValueRange(cncFileLength, 0, Integer.MAX_VALUE, 'CnC file length');
+ 
+-        this._cncByteBuffer = new SharedArrayBuffer(cncFileLength);
++        this._cncByteBuffer = (process.env.PLAIN ? new ArrayBuffer(cncFileLength) : new SharedArrayBuffer(cncFileLength)) as SharedArrayBuffer;
+         this._cncMetaDataBuffer = CncFileDescriptor.createMetaDataBuffer(this._cncByteBuffer);
+ 
+         CncFileDescriptor.fillMetaData(
+@@ -4151,9 +4151,31 @@ export class MediaDriver implements AutoCloseable {
+                 const applicationWakeUp = ctx.wakeUp();
+                 this.embeddedAgent = embeddedAgent;
+                 this.agentRunner = runner;
++                // a wake from inside a wake (the application's hook offers and wakes again) is not nested: it is
++                // run by the loop of the outer one, so the hook never re-enters itself (spec D120)
++                let isWaking = false;
++                let isWakePending = false;
+                 this.wakeRunner = (): void => {
+-                    runner.wake();
+-                    applicationWakeUp?.();
++                    if (isWaking) {
++                        isWakePending = true;
++                        return;
++                    }
++                    isWaking = true;
++                    try {
++                        let turns = 0;
++                        do {
++                            isWakePending = false;
++                            runner.wake(process.env.ONE ? 1 : AgentRunner.MAX_BATCHED_DUTY_CYCLES);
++                            applicationWakeUp?.();
++                        } while (isWakePending && ++turns < AgentRunner.MAX_BATCHED_DUTY_CYCLES);
++                    } finally {
++                        isWaking = false;
++                    }
++                    if (isWakePending) {
++                        // the bound is reached: the rest is a task of the event loop, so that I/O gets its turn
++                        isWakePending = false;
++                        setImmediate(this.wakeRunner);
++                    }
+                 };
+                 ctx.wakeUp(this.wakeRunner);
+                 nativeResourceAgent.setWakeUp(this.wakeRunner);

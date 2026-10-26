@@ -17,5 +17,5 @@
     "rootDir": "."
   },
   "include": ["src", "test", "scripts", "bench", "vitest.config.ts"],
-  "exclude": ["test/scripts/fixtures"]
+  "exclude": ["test/scripts/fixtures", "bench/latency"]
 }
