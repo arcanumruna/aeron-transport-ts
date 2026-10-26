@@ -996,6 +996,15 @@ Members of ported files left out because they serve only out-of-scope features (
 | `DriverConductor.onStart`'s `DriverLog.logStart`, the `DriverLog` calls of the cleanup methods | The logging agents are out of scope (spec section 3). |
 | `ExclusivePublicationLhsPadding`, `ExclusivePublicationValues`, `SubscriptionLhsPadding`, `SubscriptionFields` (the padding bytes `p000`..`p127`) | They keep the fields of two threads off one cache line; there is no field layout in JS and the client and the driver share one thread (spec D11, D19, D39). The fields are declared in `ExclusivePublication` and `Subscription`. |
 | The `reverseBytes` / big-endian branches of the appends | The platform is little-endian (as `BufferClaim.commit`). |
+| `CollectionUtilTest` (9) | The class is ported whole, but its own test is not: `validateLoadFactor`, `getOrDefault` and `add` are exercised through the ported map and set tests (issue #5). |
+| `Int2NullableObjectHashMapTest` (31) | The map is ported for `Int2ObjectHashMapTest.putAllThrowsNullPointerException` only; its own test is not ported (issue #5). |
+| `IntArrayListTest` (60) | `IntArrayList` is a partial port for the `CountersManager` free list (see the member row above); the members it tests are mostly not ported, and the ported ones are exercised through `CountersManagerTest` (issue #5). |
+| `LogUtilTest` (1) | Only `appendIpV6Address` is ported (see the Sources row), and `ResolutionEntryFlyweightTest` exercises it. |
+| `PrintBufferUtilTest` (2) | Only `byteToHexStringPadded` is ported (see the Sources row), and `LogUtilTest`'s subject `appendIpV6Address` uses it; the hex dump methods the test covers are not ported (see above). |
+| `Int2IntCounterMapTest` (37) | `Int2IntCounterMap` is a subset over a built-in `Map` (spec D34); its behaviour is covered by the receive channel endpoint tests and `test/extra/agrona/CollectionsExtraTest.test.ts`. |
+| `StorageSpaceExceptionTest` (4) | The `IOException` is the stand-in of `jdkNet.ts`; `isStorageSpaceError` is exercised by the `ClientCommandAdapter` tests and the extra tests. |
+| `LossReportTest` (2) | Needs the mapped loss report file (spec D50); the in-memory `LossReport` is exercised by the driver tests. |
+| `ExclusivePublicationTest` (9), `SystemCountersTest` (2) | Aeron system tests that need a running driver and client; the equivalents are in `test/system/` and the interop tests (spec section 8). |
 
 ## Golden wire vectors
 
