@@ -164,6 +164,43 @@ describe('Long', () => {
     });
 });
 
+describe('Unicode decimal digits (issue 17)', () => {
+    // Character.digit(ch, 10) accepts every Nd code point: fullwidth, Arabic-Indic, Devanagari, mathematical bold.
+    const ZEROS = [0xff10, 0x0660, 0x06f0, 0x0966, 0x09e6, 0x1d7ce, 0x1d7d8, 0x1d7ec].map((c) =>
+        String.fromCodePoint(c),
+    );
+    const spell = (zero: string, n: string): string =>
+        [...n].map((d) => (/\d/.test(d) ? String.fromCodePoint(zero.codePointAt(0)! + Number(d)) : d)).join('');
+
+    it('parseIntAcceptsUnicodeDecimalDigitsRegression', () => {
+        for (const zero of ZEROS) {
+            expect(Integer.parseInt(spell(zero, '5'))).toBe(5);
+            expect(Integer.parseInt(spell(zero, '-2147483648'))).toBe(-2147483648);
+            expect(Integer.parseInt(spell(zero, '+1234567890'))).toBe(1234567890);
+        }
+        expect(Integer.parseInt('1' + spell(ZEROS[0]!, '2') + '3')).toBe(123);
+    });
+
+    it('parseLongAcceptsUnicodeDecimalDigitsRegression', () => {
+        for (const zero of ZEROS) {
+            expect(Long.parseLong(spell(zero, '5'))).toBe(5);
+            expect(Long.parseLong(spell(zero, '-9007199254740991'))).toBe(-9007199254740991);
+        }
+        const big = spell(ZEROS[0]!, '9007199254740993');
+        expect(assertThrows(LongOverflowError, () => Long.parseLong(big)).value).toBe(9007199254740993n);
+    });
+
+    it('theMessageKeepsTheOriginalInputRegression', () => {
+        const bad = spell(ZEROS[0]!, '12') + 'x';
+        expect(assertThrows(NumberFormatException, () => Integer.parseInt(bad)).message).toBe(
+            'For input string: "' + bad + '"',
+        );
+        expect(assertThrows(NumberFormatException, () => Long.parseLong(bad)).message).toBe(
+            'For input string: "' + bad + '"',
+        );
+    });
+});
+
 describe('Integer', () => {
     it('parseIntAcceptsADecimalWithAnOptionalSign', () => {
         expect(Integer.parseInt('0')).toBe(0);

@@ -191,6 +191,23 @@ export const Character = {
 /**
  * Stand-in for `java.lang.Integer`.
  */
+/**
+ * The ASCII spelling of a string whose decimal digits may be any Unicode `Nd` code point, which is what
+ * `Character.digit(ch, 10)` accepts (a run of `Nd` code points is made of sets of ten, the first of which is zero).
+ * Not on a hot path: the ASCII case is answered by the caller's own test.
+ */
+function toAsciiDigits(s: string): string {
+    return s.replace(/\p{Nd}/gu, (ch) => {
+        let cp = ch.codePointAt(0)!;
+        const here = cp;
+        while (cp > 0 && /^\p{Nd}$/u.test(String.fromCodePoint(cp - 1))) {
+            cp--;
+        }
+
+        return String((here - cp) % 10);
+    });
+}
+
 export const Integer = {
     MIN_VALUE: -2147483648,
     MAX_VALUE: 2147483647,
@@ -200,17 +217,18 @@ export const Integer = {
         return Math.clz32(i);
     },
 
-    /** `Integer.parseInt(String)`: decimal ASCII digits only. */
+    /** `Integer.parseInt(String)`: decimal digits, ASCII or any Unicode `Nd` as `Character.digit` accepts (issue 17). */
     parseInt(s: string | null): number {
         if (null === s) {
             throw new NumberFormatException('Cannot parse null string: null');
         }
 
-        if (!/^[+-]?[0-9]+$/.test(s)) {
+        const text = /^[+-]?[0-9]+$/.test(s) ? s : toAsciiDigits(s);
+        if (!/^[+-]?[0-9]+$/.test(text)) {
             throw new NumberFormatException('For input string: "' + s + '"');
         }
 
-        const result = Number(s);
+        const result = Number(text);
         if (result < Integer.MIN_VALUE || result > Integer.MAX_VALUE) {
             throw new NumberFormatException('For input string: "' + s + '"');
         }
@@ -326,7 +344,7 @@ export const Long = {
     SIZE: 64,
 
     /**
-     * `Long.parseLong(String)` (and `Long.valueOf(String)`): an optional sign and decimal ASCII digits. A value outside
+     * `Long.parseLong(String)` (and `Long.valueOf(String)`): an optional sign and decimal digits (ASCII or any Unicode `Nd`, as `Character.digit`). A value outside
      * Java's `long` is a `NumberFormatException`; one inside it but outside +/-(2^53 - 1) is a {@link LongOverflowError}
      * carrying the exact value (spec D5).
      */
@@ -335,11 +353,12 @@ export const Long = {
             throw new NumberFormatException('Cannot parse null string: null');
         }
 
-        if (!/^[+-]?[0-9]+$/.test(s)) {
+        const text = /^[+-]?[0-9]+$/.test(s) ? s : toAsciiDigits(s);
+        if (!/^[+-]?[0-9]+$/.test(text)) {
             throw new NumberFormatException('For input string: "' + s + '"');
         }
 
-        const value = BigInt(s);
+        const value = BigInt(text);
         if (value < -(2n ** 63n) || value > 2n ** 63n - 1n) {
             throw new NumberFormatException('For input string: "' + s + '"');
         }
