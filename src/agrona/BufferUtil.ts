@@ -71,4 +71,22 @@ export class BufferUtil {
 
         return new ArrayBuffer(capacity);
     }
+
+    /**
+     * Port-only: allocate a new `SharedArrayBuffer` of `length` bytes, for memory that two agents (worker threads)
+     * share (spec D16). The alignment is checked to be a power of 2, then ignored, as in
+     * {@link allocateDirectAligned}.
+     *
+     * @param length    of the new buffer.
+     * @param alignment to be applied.
+     * @return the new buffer.
+     * @throws IllegalArgumentException if the alignment is not a power of 2.
+     */
+    public static allocateShared(length: number, alignment: number): SharedArrayBuffer {
+        if (!isPowerOfTwo(alignment)) {
+            throw new IllegalArgumentException('Must be a power of 2: alignment=' + alignment);
+        }
+
+        return new SharedArrayBuffer(length);
+    }
 }

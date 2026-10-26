@@ -10,14 +10,17 @@ import { expect, vi } from 'vitest';
 import vm from 'node:vm';
 
 // A calibrated test runs the control until it has resolution and then the loop up to MAX_ATTEMPTS times; on a loaded
-// host that can pass the 10 s default, which would turn a retry that rescued the test into a timeout.
-vi.setConfig({ testTimeout: 60_000 });
+// host that can pass the 10 s default, which would turn a retry that rescued the test into a timeout. Under full-suite
+// load the 32M-iteration LargePosition cases with 6 attempts can pass 60 s, hence 180 s.
+vi.setConfig({ testTimeout: 180_000 });
 
 v8.setFlagsFromString('--expose-gc');
 const gc = vm.runInNewContext('gc') as () => void;
 
 export const ITERATIONS = 2_000_000;
 const WARM_UP = 100_000;
+/** The pause after the warm up that lets a starved background compile finish (see measure). */
+const SETTLE_MS = 10;
 
 type Collection = { detail?: { kind: number } };
 
@@ -34,6 +37,12 @@ export async function measure(
 ): Promise<{ collections: number; heapGrowth: number }> {
     const warmUp = Math.min(WARM_UP, Math.max(1_000, iterations >> 3));
     run(warmUp);
+    run(warmUp);
+    // On a loaded host (vitest runs the test files in parallel) the optimizing compiler runs on a background thread
+    // that may not have installed the loop's optimized code yet: the loop would then run in the interpreter or the
+    // baseline tier, which boxes numbers and causes collections that are not the code's own (issue #33). Give that
+    // thread a moment, then warm up once more so that the optimized code is the one that is measured.
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
     run(warmUp);
 
     const observer = new PerformanceObserver(() => {});
@@ -69,7 +78,7 @@ export function control(n: number): number {
 
 const MAX_CALIBRATED_ITERATIONS = 32_000_000;
 const MIN_CONTROL_COLLECTIONS = 16;
-const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = 6;
 
 /** A failed attempt that grew the heap by more than this (or twice the control's growth) retained what it allocated. */
 const MIN_RETAINED_HEAP_GROWTH = 4 * 1024 * 1024;
@@ -110,7 +119,7 @@ async function minimumCollections(
  * collection of noise, when 0. Otherwise the iteration count is doubled until the control loop (one heap number per
  * iteration) causes at least 16 minor collections, so that the comparison has resolution, and the loop must cause no
  * more than `heapNumbers` times the control's collections, plus a slack of max(2, control / 8). The loop is measured
- * up to 3 times and the minimum is asserted (see minimumCollections); the control is measured once.
+ * up to 6 times and the minimum is asserted (see minimumCollections); the control is measured once.
  */
 export async function expectNoAllocation(
     run: (iterations: number) => void,

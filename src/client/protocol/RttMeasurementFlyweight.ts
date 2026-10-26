@@ -16,10 +16,12 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of io/aeron/protocol/RttMeasurementFlyweight.java @ 1.53.3
+import { BitUtil } from '../../agrona/BitUtil.js';
 import { UnsafeBuffer } from '../../agrona/concurrent/UnsafeBuffer.js';
 import { ByteOrder, Long } from '../../agrona/jdk.js';
 import { HeaderFlyweight } from './HeaderFlyweight.js';
 
+const { SIZE_OF_INT } = BitUtil;
 const { LITTLE_ENDIAN } = ByteOrder;
 
 /**
@@ -194,6 +196,60 @@ export class RttMeasurementFlyweight extends HeaderFlyweight {
         }
 
         this.putLongBigInt(RttMeasurementFlyweight.RECEIVER_ID_FIELD_OFFSET, Long.checkInt64(id), LITTLE_ENDIAN);
+
+        return this;
+    }
+
+    /**
+     * The upper 32 bits of the receiver id, without a `bigint`: the high half of the 8 byte little endian field.
+     * <p>
+     * Not in Java (spec D14).
+     *
+     * @return the upper half of the receiver id, an `int`.
+     */
+    public receiverIdHigh(): number;
+    /**
+     * Set the upper 32 bits of the receiver id, without a `bigint`.
+     * <p>
+     * Not in Java (spec D14).
+     *
+     * @param high the upper half of the receiver id, an `int`.
+     * @return this for a fluent API.
+     */
+    public receiverIdHigh(high: number): RttMeasurementFlyweight;
+    public receiverIdHigh(high?: number): number | RttMeasurementFlyweight {
+        if (undefined === high) {
+            return this.getInt(RttMeasurementFlyweight.RECEIVER_ID_FIELD_OFFSET + SIZE_OF_INT, LITTLE_ENDIAN);
+        }
+
+        this.putInt(RttMeasurementFlyweight.RECEIVER_ID_FIELD_OFFSET + SIZE_OF_INT, high, LITTLE_ENDIAN);
+
+        return this;
+    }
+
+    /**
+     * The lower 32 bits of the receiver id, without a `bigint`: the low half of the 8 byte little endian field.
+     * <p>
+     * Not in Java (spec D14).
+     *
+     * @return the lower half of the receiver id, an `int`.
+     */
+    public receiverIdLow(): number;
+    /**
+     * Set the lower 32 bits of the receiver id, without a `bigint`.
+     * <p>
+     * Not in Java (spec D14).
+     *
+     * @param low the lower half of the receiver id, an `int`.
+     * @return this for a fluent API.
+     */
+    public receiverIdLow(low: number): RttMeasurementFlyweight;
+    public receiverIdLow(low?: number): number | RttMeasurementFlyweight {
+        if (undefined === low) {
+            return this.getInt(RttMeasurementFlyweight.RECEIVER_ID_FIELD_OFFSET, LITTLE_ENDIAN);
+        }
+
+        this.putInt(RttMeasurementFlyweight.RECEIVER_ID_FIELD_OFFSET, low, LITTLE_ENDIAN);
 
         return this;
     }

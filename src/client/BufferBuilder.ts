@@ -20,14 +20,13 @@ import { UnsafeBuffer } from '../agrona/concurrent/UnsafeBuffer.js';
 import type { DirectBuffer } from '../agrona/DirectBuffer.js';
 import { ByteOrder, IllegalArgumentException, IllegalStateException } from '../agrona/jdk.js';
 import type { MutableDirectBuffer } from '../agrona/MutableDirectBuffer.js';
-import { Aeron } from './Aeron.js';
 import { FrameDescriptor } from './logbuffer/FrameDescriptor.js';
 import { Header } from './logbuffer/Header.js';
 import { LogBufferDescriptor } from './logbuffer/LogBufferDescriptor.js';
+import { NULL_VALUE } from './NullValue.js';
 import { DataHeaderFlyweight } from './protocol/DataHeaderFlyweight.js';
 import { HeaderFlyweight } from './protocol/HeaderFlyweight.js';
 
-const { NULL_VALUE } = Aeron;
 const { FLAGS_OFFSET } = FrameDescriptor;
 const { computeFragmentedFrameLength } = LogBufferDescriptor;
 const { HEADER_LENGTH } = DataHeaderFlyweight;

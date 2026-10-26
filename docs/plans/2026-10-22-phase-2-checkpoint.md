@@ -1,0 +1,111 @@
+# Phase 2 checkpoint — 2026-10-22
+
+Where the Phase 2 (unicast) work stands, so a new session can pick it up.
+Plan: [2026-10-22-phase-2-unicast.md](2026-10-22-phase-2-unicast.md). Draft PR: #9 (`feature/phase-2-unicast`).
+
+## Status: Phase 2 done (T25, 2026-10-26)
+
+T1–T25 are merged into `feature/phase-2-unicast`. The phase was checked as follows:
+- **Checks:** typecheck, lint, format, mapping check and the full suite are green, apart from the known flakes #46 and
+  #48.
+- **Interop:** 29 of 30 tests pass against C Aeron. The one failure is #51, which fails only under full-suite load and
+  passes 6 of 6 runs alone.
+- **Review:** one Opus whole-branch review against the Java sources found no urgent items, so there was no fix round.
+  Its minor findings are #58 (a SETUP over 2^53 reallocates the image log on every SETUP) and #59 (the RTT BigInt,
+  the timeout message, the catch scope and `cbrt`).
+- **Not sampled deeply:** `Image`/`TermReader`, and the DriverConductor linger and cleanup paths.
+
+Open follow-ups: #19, #20, #25–#32, #46, #48, #51, #52 (about 91 B/msg still allocated), #58, #59.
+
+## Workflow (unchanged)
+
+One implementer per task with an exact recipe, then a review (spec compliance + code quality), then one fix round.
+At most 3 agents at once. Test-first port; no silently weakened tests. Non-urgent findings go to GitHub issues.
+Owner rule: 64-bit values keep Aeron's exact layout and true 64-bit semantics (no layout changes).
+
+## Merged into `feature/phase-2-unicast`
+
+| Task | What | State |
+|---|---|---|
+| T1 | Position cap on a term boundary; iterator and allocation tests | merged |
+| T2 | Two-slot sequence lock, byte volatiles | merged |
+| T5 | Epoch-nanos halves (D17), hash sets, error log | merged |
+| T8 | `jdkNet` stand-ins (D20): `InetAddress`, `InetSocketAddress`, `NetworkInterface` | merged (4180569) |
+| T9 | `UdpChannel`, `ControlMode`, `InvalidChannelException` | merged (e43d6d2) |
+| T2b | True 64-bit atomics on shared buffers via a 1024-stripe lock table (D16); fast path, dead-holder spin cap, kill tests, zero heap numbers at 2^40 | merged (a4abb41) |
+| T6 | Command flyweights, CnC layout, client status (`receiverId`/`groupTag` as `bigint`) | merged (29105c6) |
+| T3 | Bench gate (PASS / FAIL / NO_VERDICT, exit codes 0/1/2/3), `releaseFence` (D21), ring buffers and large-position allocation tests | merged (this merge commit). `bench:gate` run after T7a: an A/A run fails on the shared cloud host (pair spread ±10–25% against a 5% limit), so its verdicts there are not trusted yet (#29) |
+| T7a | Driver `status/*` counters, `DutyCycleTracker`, `ThreadingMode`, `DriverManagedResource`, `SessionKey`, full `AeronCounters`, `SystemCounters`, `MediaDriverVersion` | merged after an Opus review (no urgent findings); review fixes in the same push, minors filed as #25–#28 |
+| — | Flaky allocation-test fix (consumer closure hoisted out of the measured loop) | merged (b59d4d9) |
+
+Run all checks after every merge:
+`npm run typecheck && npm run lint && npm run format:check && npm run check:mapping && npx vitest run`
+
+## In flight
+
+T7b (`Configuration`, `MediaDriver.Context`, `PublicationParams`, `SubscriptionParams`, `ThreadingMode.valueOf` #27)
+is in `0721b7e` and `3bc4d42` and has been reviewed (Opus, whole diff `0721b7e~1..3bc4d42`).
+- **Checks:** the reviewer re-ran them and all are green: typecheck, lint, format:check, check:mapping and the full
+  `npm test` (6241 passed, 62 skipped).
+- **No urgent findings.** The ports are faithful: the 250 `Configuration` constants match Java, the accessor order
+  matches, and the tests keep Java's names, order and values. Every skip is recorded.
+- **Non-urgent findings, filed per the scope rules:**
+  - #30: D5 gaps for values of 2^53 and above (`PublicationParams`, `getSizeAsInt`, `TimeUnit.convert`, `long`
+    setters, receiver gtag);
+  - #31: nullable `getProperty` typing, readers evaluated at module load, `resolverInterface` silently ignored,
+    `toString` gaps, D3/T18 note on rejecting non-`INVOKER` modes;
+  - #32: two vacuous tests.
+- The `CommonContext` members added outside the brief are faithful to Java and needed. The `DEDICATED` default is
+  acceptable; T18's `launch` must reject anything but `INVOKER` (#31).
+
+T7b is done. Next: T4 (see "Not started").
+
+Omitted members and the task that adds each are listed in `docs/mapping.md`.
+
+The allocation allowances at 2^40 (#19) are set to the minimum that passes:
+- many-to-one `size`, the positions and the heartbeat measure 3 or 4 heap numbers per iteration depending on the inlining, so the allowance is 4;
+- one-to-one gets 5 on a SharedArrayBuffer.
+
+Driving every allowance to 0 is #19.
+
+## Not started (dependency order)
+
+1. **T4** — broadcast and `ExpandableArrayBuffer`; then revert the workaround tracked in #20.
+2. **T10** — needs T7b (done); also port `CubicCongestionControl` (`DefaultCongestionControlSupplier` needs it).
+3. **T11**, then **T12–T25**. Plan edits already recorded from the T8 review:
+   - T12: reuse the last sender address and memoize `getHostAddress`.
+   - T18: `NativeResourceAgent` (#12).
+   - T19: `dns.lookup` with ipv4first; pre-resolve the hosts in `interface=` and `control=`, and for `addDestination`.
+
+## Key decisions so far (full text in the spec §6)
+
+- **D5:** `long` maps to `number` within ±(2^53−1). Opaque 64-bit wire values (`receiverId`, `groupTag`, the `correlationId` in log metadata) map to `bigint`. Command ids map to `number`.
+- **D16:** 64-bit shared-buffer values use striped 64-bit atomics:
+  - The writer locks the stripe with `Atomics.or`, stores the high half only if it changed, then stores the low half last.
+  - The reader takes 4× `Atomics.load` and retries if the stripe is odd or has changed.
+  - Never `terminate()` a worker that may be inside a buffer operation.
+- **D17:** Epoch nanos are stored as exact halves.
+- **D20:** `jdkNet` stand-ins replace the JDK network classes.
+- **D21:** `VarHandle.releaseFence` is a no-op on x64 and `Atomics.add` on a fence word elsewhere.
+
+## Open issues to know about
+
+- #11–#16 — earlier review findings. #15 (licensing) waits on the owner.
+- #17–#28 — findings from this segment:
+
+  | Issue | Finding |
+  |---|---|
+  | #17 | Unicode digits |
+  | #18 | `parse(null)` |
+  | #19 | Heap numbers at large positions |
+  | #20 | `ExpandableArrayBuffer` revert |
+  | #21 | 2^53 docs |
+  | #22 | Plain `putLong` tearing |
+  | #23 | `correlationId` bigint vs number |
+  | #24 | `ReadableCounter` cross-worker test |
+  | #25 | `TimeTrackingNameResolver` still takes `DutyCycleTrackerLike` |
+  | #26 | Driver status allocation tests on a SharedArrayBuffer |
+  | #27 | `ThreadingMode.valueOf` (for T7b) |
+  | #28 | Cosmetic: `SystemCounterDescriptor` order, `AeronCountersTest` count |
+
+- Open question for the owner: whether to add a race checker (a TSan-like tool) for the memory-ordering code.

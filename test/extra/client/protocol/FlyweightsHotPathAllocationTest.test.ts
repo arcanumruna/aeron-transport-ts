@@ -6,7 +6,9 @@ import { describe, expect, it } from 'vitest';
 import { UnsafeBuffer } from '../../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { DataHeaderFlyweight } from '../../../../src/client/protocol/DataHeaderFlyweight.js';
 import { HeaderFlyweight } from '../../../../src/client/protocol/HeaderFlyweight.js';
+import { ErrorFlyweight } from '../../../../src/client/protocol/ErrorFlyweight.js';
 import { NakFlyweight } from '../../../../src/client/protocol/NakFlyweight.js';
+import { RttMeasurementFlyweight } from '../../../../src/client/protocol/RttMeasurementFlyweight.js';
 import { StatusMessageFlyweight } from '../../../../src/client/protocol/StatusMessageFlyweight.js';
 import { expectNoAllocation } from '../../../support/Allocation.js';
 
@@ -111,10 +113,37 @@ describe('FlyweightsHotPathAllocationTest', () => {
         }, ITERATIONS);
     });
 
+    it('receiverIdHalvesAllocateNothing', async () => {
+        const statusMessage = new StatusMessageFlyweight(new Uint8Array(64));
+        const rttMeasurement = new RttMeasurementFlyweight(new Uint8Array(64));
+        const error = new ErrorFlyweight(new Uint8Array(128));
+
+        await expectNoAllocation((n) => {
+            for (let i = 0; i < n; i++) {
+                statusMessage.receiverIdHigh(i).receiverIdLow(i + 1);
+                rttMeasurement.receiverIdHigh(i + 2).receiverIdLow(i + 3);
+                error.receiverIdHigh(i + 4).receiverIdLow(i + 5);
+                sum[0] = (sum[0]! + statusMessage.receiverIdHigh() + statusMessage.receiverIdLow()) | 0;
+                sum[0] = (sum[0]! + rttMeasurement.receiverIdHigh() + rttMeasurement.receiverIdLow()) | 0;
+                sum[0] = (sum[0]! + error.receiverIdHigh() + error.receiverIdLow()) | 0;
+            }
+        }, ITERATIONS);
+    });
+
     it('theLoopsExerciseWhatTheyClaimTo', () => {
         const nak = new NakFlyweight(new Uint8Array(32));
         nak.sessionId(5).termOffset(64).length(8);
         expect(nak.sessionId()).toBe(5);
         expect(nak.isValid(65536)).toBe(true);
+
+        const statusMessage = new StatusMessageFlyweight(new Uint8Array(64));
+        const rttMeasurement = new RttMeasurementFlyweight(new Uint8Array(64));
+        const error = new ErrorFlyweight(new Uint8Array(128));
+        statusMessage.receiverIdHigh(-7).receiverIdLow(11);
+        rttMeasurement.receiverIdHigh(-8).receiverIdLow(12);
+        error.receiverIdHigh(-9).receiverIdLow(13);
+        expect([statusMessage.receiverIdHigh(), statusMessage.receiverIdLow()]).toEqual([-7, 11]);
+        expect([rttMeasurement.receiverIdHigh(), rttMeasurement.receiverIdLow()]).toEqual([-8, 12]);
+        expect([error.receiverIdHigh(), error.receiverIdLow()]).toEqual([-9, 13]);
     });
 });

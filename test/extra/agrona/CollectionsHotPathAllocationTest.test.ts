@@ -98,6 +98,10 @@ describe('CollectionsHotPathAllocationTest', () => {
         for (let i = 0; i < 64; i++) {
             map.put(i, values[i & 3]!);
         }
+        // Created once (see HashSetsHotPathAllocationTest): a closure per pass allocates unless V8 inlines forEachInt.
+        const consumer = (k: number, v: string): void => {
+            sum[0] = sum[0]! + k + v.length;
+        };
         await expectNoAllocation((n) => {
             for (let i = 0; i < n; i += 64) {
                 for (const it = map.keySet().iterator(); it.hasNext();) {
@@ -106,9 +110,7 @@ describe('CollectionsHotPathAllocationTest', () => {
                 for (const it = map.entrySet().iterator(); it.hasNext();) {
                     sum[0] = sum[0]! + it.next().getKey();
                 }
-                map.forEachInt((k, v) => {
-                    sum[0] = sum[0]! + k + v.length;
-                });
+                map.forEachInt(consumer);
             }
         });
     });

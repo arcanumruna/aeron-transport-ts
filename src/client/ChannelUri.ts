@@ -21,7 +21,7 @@ import { Object2ObjectHashMap } from '../agrona/collections/Object2ObjectHashMap
 import { IllegalArgumentException, IllegalStateException, Long } from '../agrona/jdk.js';
 import { hashCodeOf, objectsEquals, requireNonNull } from '../agrona/jdkUtil.js';
 import { Strings } from '../agrona/Strings.js';
-import { Aeron } from './Aeron.js';
+import { NULL_VALUE } from './NullValue.js';
 import { CommonContext } from './CommonContext.js';
 import { FrameDescriptor } from './logbuffer/FrameDescriptor.js';
 import { LogBufferDescriptor } from './logbuffer/LogBufferDescriptor.js';
@@ -95,7 +95,7 @@ export class ChannelUri {
     /**
      * Invalid tag value returned when calling {@link #getTag(String)} and the channel is not tagged.
      */
-    public static readonly INVALID_TAG: number = Aeron.NULL_VALUE;
+    public static readonly INVALID_TAG: number = NULL_VALUE;
 
     /**
      * Max length in characters for the URI string.

@@ -16,7 +16,24 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of io/aeron/CommonContext.java @ 1.53.3
-import { Aeron } from './Aeron.js';
+import { CloseHelper } from '../agrona/CloseHelper.js';
+import type { ErrorHandler } from '../agrona/ErrorHandler.js';
+import type { UnsafeBuffer } from '../agrona/concurrent/UnsafeBuffer.js';
+import { LoggingErrorHandler } from '../agrona/concurrent/errors/LoggingErrorHandler.js';
+import type { DistinctErrorLog } from '../agrona/concurrent/errors/DistinctErrorLog.js';
+import {
+    Boolean,
+    doubleToLong,
+    IllegalArgumentException,
+    Long,
+    NumberFormatException,
+    TimeUnit,
+} from '../agrona/jdk.js';
+import { System, type AutoCloseable } from '../agrona/jdkLang.js';
+import { SystemErr, SystemOut, type PrintStream } from '../agrona/jdkThrowable.js';
+import { SystemUtil } from '../agrona/SystemUtil.js';
+import { NULL_VALUE } from './NullValue.js';
+import { ConcurrentConcludeException } from './exceptions/ConcurrentConcludeException.js';
 
 /**
  * Condition to specify a triple state conditional of always override to be true, always override to be false,
@@ -83,10 +100,12 @@ export class InferableBoolean {
 /**
  * This class provides the Media Driver and client with common configuration for the Aeron directory.
  * <p>
- * Only the static constants are ported so far (see `docs/mapping.md`, "Not ported"); phase 2 adds the rest, in Java
- * order.
+ * The static constants, and the instance members that `MediaDriver.Context` needs (T7b: `conclude`, `close`, `clone`,
+ * `driverTimeoutMs`, the counters buffers, `enableExperimentalFeatures`, `checkDebugTimeout` and the error handler
+ * set-up) are ported so far (see `docs/mapping.md`, "Not ported"); the task that ports `Aeron.Context` adds the rest,
+ * in Java order. The fluent setters return `this`, which is the covariant override of Java's subclasses.
  */
-export class CommonContext {
+export class CommonContext implements AutoCloseable {
     /**
      * The nested enum `CommonContext.InferableBoolean`.
      */
@@ -111,9 +130,18 @@ export class CommonContext {
     public static readonly DEFAULT_DRIVER_TIMEOUT_MS: number = 10_000;
 
     /**
+     * Timeout in which the driver is expected to respond or heartbeat, from the {@link DRIVER_TIMEOUT_PROP_NAME}
+     * system property (`Long.getLong`) or {@link DEFAULT_DRIVER_TIMEOUT_MS}.
+     */
+    public static readonly DRIVER_TIMEOUT_MS: number = Long.getLong(
+        CommonContext.DRIVER_TIMEOUT_PROP_NAME,
+        CommonContext.DEFAULT_DRIVER_TIMEOUT_MS,
+    );
+
+    /**
      * Value to represent a sessionId that is not to be used.
      */
-    public static readonly NULL_SESSION_ID: number = Aeron.NULL_VALUE;
+    public static readonly NULL_SESSION_ID: number = NULL_VALUE;
 
     /**
      * The top level Aeron directory used for communication between a Media Driver and client.
@@ -481,6 +509,25 @@ export class CommonContext {
     public static readonly THREAD_NAMING_DEFAULT: string = CommonContext.THREAD_NAMING_CLASSIC;
 
     /**
+     * The name of a thread for the thread naming mode set by {@link THREAD_NAMING_PROP_NAME}.
+     *
+     * @param newName     the name of the thread in the mode {@link THREAD_NAMING_NEW}.
+     * @param classicName the name of the thread in the mode {@link THREAD_NAMING_CLASSIC}.
+     * @return the name for the mode of the system property.
+     */
+    public static threadName(newName: string, classicName: string): string {
+        const mode = System.getProperty(CommonContext.THREAD_NAMING_PROP_NAME, CommonContext.THREAD_NAMING_DEFAULT);
+        switch (mode) {
+            case CommonContext.THREAD_NAMING_CLASSIC:
+                return classicName;
+            case CommonContext.THREAD_NAMING_NEW:
+                return newName;
+            default:
+                throw new IllegalArgumentException('Unknown thread naming mode: ' + mode);
+        }
+    }
+
+    /**
      * Event Buffer length system property name. If not set then output will default to {@link System#out}.
      */
     public static readonly EVENT_LOG_FILENAME_PROP_NAME: string = 'aeron.event.log.filename';
@@ -495,6 +542,263 @@ export class CommonContext {
      * of fields that are not part of the header information.
      */
     public static readonly EVENT_LOG_RENDER_DATA_PROP_NAME: string = 'aeron.event.log.render.data';
+
+    /**
+     * Should the configuration be printed on start?
+     *
+     * @return true if the {@link PRINT_CONFIGURATION_ON_START_PROP_NAME} system property is "true".
+     */
+    public static shouldPrintConfigurationOnStart(): boolean {
+        return 'true' === System.getProperty(CommonContext.PRINT_CONFIGURATION_ON_START_PROP_NAME);
+    }
+
+    /**
+     * The logger for errors that cannot be recorded in the error log, from the {@link FALLBACK_LOGGER_PROP_NAME}
+     * system property: "stdout", "no_op", or (the default) "stderr".
+     *
+     * @return the fallback logger.
+     */
+    public static fallbackLogger(): PrintStream {
+        const fallbackLoggerName = System.getProperty(CommonContext.FALLBACK_LOGGER_PROP_NAME, 'stderr');
+        switch (fallbackLoggerName) {
+            case 'stdout':
+                return SystemOut;
+            case 'no_op':
+                return NO_OP_LOGGER;
+            default:
+                return SystemErr;
+        }
+    }
+
+    private _isConcluded = false;
+    private _driverTimeoutMs: number = CommonContext.DRIVER_TIMEOUT_MS;
+    private _countersMetaDataBuffer: UnsafeBuffer | null = null;
+    private _countersValuesBuffer: UnsafeBuffer | null = null;
+    private _enableExperimentalFeatures: boolean = Boolean.getBoolean(
+        CommonContext.ENABLE_EXPERIMENTAL_FEATURES_PROP_NAME,
+    );
+
+    /**
+     * Perform a shallow copy of the object.
+     *
+     * @return a shallow copy of the object.
+     */
+    public clone(): this {
+        return Object.assign(Object.create(Object.getPrototypeOf(this) as object) as this, this);
+    }
+
+    /**
+     * This method is used to conclude the context, so it cannot be changed after. Calling it twice throws a
+     * {@link ConcurrentConcludeException}.
+     * <p>
+     * The Aeron directory and the CnC file it resolves are not ported (spec D4: the CnC is a `SharedArrayBuffer`).
+     *
+     * @return this for a fluent API.
+     */
+    public conclude(): this {
+        if (this._isConcluded) {
+            throw new ConcurrentConcludeException();
+        }
+        this._isConcluded = true;
+
+        return this;
+    }
+
+    /**
+     * Has the context had the {@link conclude} method called.
+     *
+     * @return true of the {@link conclude} method has been called.
+     */
+    public isConcluded(): boolean {
+        return this._isConcluded;
+    }
+
+    /**
+     * The buffer in which the counters' metadata are kept.
+     *
+     * @return The buffer wrapping the metadata, or null if it has not been set.
+     */
+    public countersMetaDataBuffer(): UnsafeBuffer | null;
+    /**
+     * Set the buffer in which the counters' metadata are kept.
+     *
+     * @param countersMetaDataBuffer The new counters metadata buffer.
+     * @return this for a fluent API.
+     */
+    public countersMetaDataBuffer(countersMetaDataBuffer: UnsafeBuffer | null): this;
+    public countersMetaDataBuffer(countersMetaDataBuffer?: UnsafeBuffer | null): UnsafeBuffer | null | this {
+        if (undefined === countersMetaDataBuffer) {
+            return this._countersMetaDataBuffer;
+        }
+
+        this._countersMetaDataBuffer = countersMetaDataBuffer;
+        return this;
+    }
+
+    /**
+     * The buffer in which the counters' values are kept.
+     *
+     * @return The buffer wrapping the values, or null if it has not been set.
+     */
+    public countersValuesBuffer(): UnsafeBuffer | null;
+    /**
+     * Set the buffer in which the counters' values are kept.
+     *
+     * @param countersValuesBuffer The new counters values buffer.
+     * @return this for a fluent API.
+     */
+    public countersValuesBuffer(countersValuesBuffer: UnsafeBuffer | null): this;
+    public countersValuesBuffer(countersValuesBuffer?: UnsafeBuffer | null): UnsafeBuffer | null | this {
+        if (undefined === countersValuesBuffer) {
+            return this._countersValuesBuffer;
+        }
+
+        this._countersValuesBuffer = countersValuesBuffer;
+        return this;
+    }
+
+    /**
+     * Set the amount of time, in milliseconds, that this process will wait to determine if a driver is alive.
+     *
+     * @param driverTimeoutMs Number of milliseconds.
+     * @return this for a fluent API.
+     */
+    public driverTimeoutMs(driverTimeoutMs: number): this;
+    /**
+     * Get the amount of time, in milliseconds, that this process will wait to determine if a driver is alive, as
+     * adjusted by {@link checkDebugTimeout}.
+     *
+     * @return the timeout in milliseconds.
+     */
+    public driverTimeoutMs(): number;
+    public driverTimeoutMs(driverTimeoutMs?: number): number | this {
+        if (undefined === driverTimeoutMs) {
+            return CommonContext.checkDebugTimeout(this._driverTimeoutMs, TimeUnit.MILLISECONDS);
+        }
+
+        this._driverTimeoutMs = driverTimeoutMs;
+        return this;
+    }
+
+    /**
+     * Are experimental features enabled?
+     *
+     * @return true if experimental features are enabled.
+     */
+    public enableExperimentalFeatures(): boolean;
+    /**
+     * Set whether experimental features are enabled.
+     *
+     * @param enableExperimentalFeatures true to enable them.
+     * @return this for a fluent API.
+     */
+    public enableExperimentalFeatures(enableExperimentalFeatures: boolean): this;
+    public enableExperimentalFeatures(enableExperimentalFeatures?: boolean): boolean | this {
+        if (undefined === enableExperimentalFeatures) {
+            return this._enableExperimentalFeatures;
+        }
+
+        this._enableExperimentalFeatures = enableExperimentalFeatures;
+        return this;
+    }
+
+    /**
+     * Get the value of a timeout, replaced by the {@link DEBUG_TIMEOUT_PROP_NAME} duration (times `factor`) if that
+     * system property is set and a debugger is attached ({@link SystemUtil.isDebuggerAttached}).
+     * <p>
+     * Java prints a "Using debug timeout" message the first time each calling method is replaced; this port does not
+     * (a JS stack has no stable method name to key it by).
+     *
+     * @param timeout  the timeout value to use unless a debug timeout is in effect.
+     * @param timeUnit of the `timeout` and of the result.
+     * @param factor   to scale the debug timeout, 1.0 by default.
+     * @return the timeout value to use.
+     */
+    public static checkDebugTimeout(timeout: number, timeUnit: TimeUnit, factor = 1.0): number {
+        const debugTimeoutString = System.getProperty(CommonContext.DEBUG_TIMEOUT_PROP_NAME);
+        if (null === debugTimeoutString || !SystemUtil.isDebuggerAttached()) {
+            return timeout;
+        }
+
+        try {
+            const debugTimeoutNs = Math.min(
+                Long.MAX_VALUE,
+                doubleToLong(
+                    factor * SystemUtil.parseDuration(CommonContext.DEBUG_TIMEOUT_PROP_NAME, debugTimeoutString),
+                ),
+            );
+
+            return timeUnit.convert(debugTimeoutNs, TimeUnit.NANOSECONDS);
+        } catch (ex) {
+            if (ex instanceof NumberFormatException) {
+                return timeout;
+            }
+            throw ex;
+        }
+    }
+
+    /**
+     * Close the context: nothing to release here, the subclasses override it.
+     */
+    public close(): void {}
+
+    /**
+     * Set up the error handler: a {@link LoggingErrorHandler} that records in the error log and overflows to the
+     * fallback stream, which also calls the user's error handler if there is one.
+     *
+     * @param userErrorHandler  the handler of the application, or null.
+     * @param errorLog          to record the errors in.
+     * @param fallbackErrorStream for errors the log cannot hold; the {@link fallbackLogger} by default.
+     * @return the error handler to use.
+     */
+    public static setupErrorHandler(
+        userErrorHandler: ErrorHandler | null,
+        errorLog: DistinctErrorLog,
+        fallbackErrorStream: PrintStream = CommonContext.fallbackLogger(),
+    ): ErrorHandler {
+        const loggingErrorHandler = new LoggingErrorHandler(errorLog, fallbackErrorStream);
+        if (null === userErrorHandler) {
+            return loggingErrorHandler;
+        } else {
+            return new ErrorHandlerWrapper(loggingErrorHandler, userErrorHandler);
+        }
+    }
+}
+
+/**
+ * `CommonContext.NO_OP_LOGGER`: a stream that drops every line.
+ */
+const NO_OP_LOGGER: PrintStream = {
+    println(_line: string): void {},
+};
+
+/**
+ * `CommonContext.ErrorHandlerWrapper`: records in the error log, then calls the user's handler.
+ */
+class ErrorHandlerWrapper implements ErrorHandler, AutoCloseable {
+    private readonly loggingErrorHandler: LoggingErrorHandler;
+    private readonly userErrorHandler: ErrorHandler;
+
+    public constructor(loggingErrorHandler: LoggingErrorHandler, userErrorHandler: ErrorHandler) {
+        this.loggingErrorHandler = loggingErrorHandler;
+        this.userErrorHandler = userErrorHandler;
+    }
+
+    public close(): void {
+        this.loggingErrorHandler.close();
+        if (isAutoCloseable(this.userErrorHandler)) {
+            CloseHelper.quietClose(this.userErrorHandler);
+        }
+    }
+
+    public onError(throwable: Error): void {
+        this.loggingErrorHandler.onError(throwable);
+        this.userErrorHandler.onError(throwable);
+    }
+}
+
+function isAutoCloseable(value: unknown): value is AutoCloseable {
+    return typeof (value as AutoCloseable | null)?.close === 'function';
 }
 
 type InferableBooleanType = InferableBoolean;

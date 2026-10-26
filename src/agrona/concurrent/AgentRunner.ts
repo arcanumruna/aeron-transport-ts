@@ -103,6 +103,7 @@ export class AgentRunner implements AutoCloseable {
     private runnerThread: Thread | null = null;
     private isInAgent = false;
     private idleNs = 0;
+    private workCount = 0;
     private hasTimer = false;
     private timerHandle: unknown = null;
 
@@ -321,21 +322,51 @@ export class AgentRunner implements AutoCloseable {
     }
 
     /**
-     * One turn of Java's {@code workLoop}: the {@code while (isRunning)} test, then one duty cycle.
+     * Not in Java. The duty cycles that the runner runs one after the other, while the agent reports work and its idle
+     * strategy asks for no pause, before it yields to the event loop with one {@code setImmediate} (spec D114). A call
+     * of the task is as long as {@link AgentRunner.MAX_BATCHED_DUTY_CYCLES} duty cycles, so that the sockets still get
+     * their turn after a bounded time, and a {@code setImmediate} (an {@code Immediate} object, 23 bytes a message in
+     * the end-to-end bench) is paid once for the batch.
+     */
+    public static readonly MAX_BATCHED_DUTY_CYCLES = 16;
+
+    /**
+     * The task of the runner: the {@code while (isRunning)} of Java's {@code workLoop} for as many turns as the batch
+     * allows, then the next task is scheduled.
      */
     private dutyCycle(): void {
-        if (this._isClosed) {
-            return;
-        }
+        for (let batched = 1; ; batched++) {
+            if (this._isClosed) {
+                return;
+            }
 
-        if (!this._isRunning) {
-            this.terminate();
-            return;
-        }
+            if (!this._isRunning) {
+                this.terminate();
+                return;
+            }
 
+            this.runDutyCycle();
+
+            if (!this._isRunning) {
+                this.terminate();
+                return;
+            }
+
+            if (this.idleNs > 0 || this.workCount <= 0 || batched >= AgentRunner.MAX_BATCHED_DUTY_CYCLES) {
+                this.scheduleNext(this.idleNs);
+                return;
+            }
+        }
+    }
+
+    /**
+     * One turn of Java's {@code workLoop}: one duty cycle.
+     */
+    private runDutyCycle(): void {
         const previous = Thread.switchTo(this.runnerThread!);
         this.isInAgent = true;
         this.idleNs = 0;
+        this.workCount = 0;
         let failed = true;
         try {
             this.doWork(this.idleStrategy, this._agent);
@@ -347,12 +378,6 @@ export class AgentRunner implements AutoCloseable {
                 // an Error was rethrown: the thread ends without calling onClose
                 this.die();
             }
-        }
-
-        if (this._isRunning) {
-            this.scheduleNext(this.idleNs);
-        } else {
-            this.terminate();
         }
     }
 
@@ -402,6 +427,7 @@ export class AgentRunner implements AutoCloseable {
     private doWork(idleStrategy: IdleStrategy, agent: Agent): void {
         try {
             const workCount = agent.doWork();
+            this.workCount = workCount;
             this.idleNs = idleStrategy.idle(workCount);
             if (workCount <= 0 && Thread.currentThread().isInterrupted()) {
                 this._isRunning = false;

@@ -9,7 +9,7 @@ export class ByteBuffer {
     private lim: number;
 
     private constructor(
-        private readonly buffer: ArrayBuffer,
+        private readonly buffer: ArrayBufferLike,
         private readonly offset: number,
         private readonly cap: number,
     ) {
@@ -17,19 +17,19 @@ export class ByteBuffer {
         this.lim = cap;
     }
 
-    public static allocate(capacity: number): ByteBuffer {
-        return new ByteBuffer(new ArrayBuffer(capacity), 0, capacity);
+    public static allocate(capacity: number, shared = false): ByteBuffer {
+        return new ByteBuffer(shared ? new SharedArrayBuffer(capacity) : new ArrayBuffer(capacity), 0, capacity);
     }
 
-    public static allocateDirect(capacity: number): ByteBuffer {
-        return ByteBuffer.allocate(capacity);
+    public static allocateDirect(capacity: number, shared = false): ByteBuffer {
+        return ByteBuffer.allocate(capacity, shared);
     }
 
-    public static wrap(buffer: ArrayBuffer): ByteBuffer {
+    public static wrap(buffer: ArrayBufferLike): ByteBuffer {
         return new ByteBuffer(buffer, 0, buffer.byteLength);
     }
 
-    public arrayBuffer(): ArrayBuffer {
+    public arrayBuffer(): ArrayBufferLike {
         return this.buffer;
     }
 

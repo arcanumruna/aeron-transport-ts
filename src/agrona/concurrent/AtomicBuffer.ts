@@ -24,8 +24,16 @@ const { SIZE_OF_LONG } = BitUtil;
 /**
  * Abstraction over a range of buffer types that allows type to be accessed with memory ordering semantics.
  * <p>
- * JavaScript runs one thread, so the volatile, ordered, release, acquire and opaque operations and the atomic
- * compare-and-set, get-and-add and get-and-set operations are plain operations with the same names and results.
+ * Over an `ArrayBuffer` (one thread) the volatile, ordered, release, acquire and opaque operations and the atomic
+ * compare-and-set, get-and-add and get-and-set operations are plain operations with the same names and results. Over
+ * a `SharedArrayBuffer` the `byte` to `int` ones use `Atomics` and the `long` ones are 64-bit atomics on Java's word
+ * through the striped lock table `LongStripes`, allocating nothing (spec D16).
+ * <p>
+ * Rule of D16: a thread that uses shared buffers must never be `worker.terminate()`d while it can be inside a buffer
+ * operation, because a thread killed while it holds a stripe leaves it locked for ever. Agents stop cooperatively
+ * (`AgentRunner.close`); a dying producer is modelled by the worker exiting itself between operations. After 2^28 spins
+ * on a held stripe an operation throws `IllegalStateException`: a failure detector, not a timeout that anything
+ * depends on.
  */
 export interface AtomicBuffer extends MutableDirectBuffer {
     /**
@@ -72,6 +80,35 @@ export interface AtomicBuffer extends MutableDirectBuffer {
     putCharVolatile(index: number, value: number): void;
     getByteVolatile(index: number): number;
     putByteVolatile(index: number, value: number): void;
+
+    /**
+     * Port-only (spec D16): the 64-bit word at `index` as an `int` pair over the full 64-bit range, volatile (the raw
+     * tails of the log buffer, D12). Allocates nothing.
+     *
+     * @param out receives the low half at 0 and the high half at 1.
+     */
+    getLongVolatileHalves(index: number, out: Int32Array): void;
+
+    /** Port-only (spec D16): stores the 64-bit word at `index` from its `int` halves, volatile. */
+    putLongVolatileHalves(index: number, lo: number, hi: number): void;
+
+    /** Port-only (spec D16): compare-and-set of the 64-bit word at `index` over its `int` halves. */
+    compareAndSetLongHalves(
+        index: number,
+        expectedLo: number,
+        expectedHi: number,
+        updateLo: number,
+        updateHi: number,
+    ): boolean;
+
+    /**
+     * Port-only (spec D16): adds `delta`, an `int` in [0, 2^31 - 1], to the 64-bit word at `index` in one atomic step,
+     * carrying into the high half (`INT32_MAX` plus a carry wraps to `INT32_MIN`).
+     *
+     * @param out receives the OLD low half at 0 and the OLD high half at 1.
+     * @throws IllegalArgumentException if `delta` is out of range.
+     */
+    getAndAddLongHalves(index: number, delta: number, out: Int32Array): void;
 }
 
 export const AtomicBuffer = {

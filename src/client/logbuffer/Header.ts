@@ -19,7 +19,7 @@
 import { BitUtil } from '../../agrona/BitUtil.js';
 import type { DirectBuffer } from '../../agrona/DirectBuffer.js';
 import { ByteOrder } from '../../agrona/jdk.js';
-import { Aeron } from '../Aeron.js';
+import { NULL_VALUE } from '../NullValue.js';
 import { DataHeaderFlyweight } from '../protocol/DataHeaderFlyweight.js';
 import { FrameDescriptor } from './FrameDescriptor.js';
 import { LogBufferDescriptor } from './LogBufferDescriptor.js';
@@ -47,7 +47,7 @@ export class Header {
     private _initialTermId: number;
     private _offset = 0;
     private _buffer!: DirectBuffer;
-    private _fragmentedFrameLength: number = Aeron.NULL_VALUE;
+    private _fragmentedFrameLength: number = NULL_VALUE;
 
     /**
      * Construct a header that references a buffer for the log. The two constructors of Java are one.
@@ -280,9 +280,9 @@ export class Header {
     /**
      * Total amount of space occupied by this message when it is within the term buffer. When fragmented this
      * will include the length of the header for each fragment. Used when doing reassembly of fragmented packets. If
-     * the packet is not fragmented this will be {@link Aeron.NULL_VALUE}.
+     * the packet is not fragmented this will be {@link NULL_VALUE}.
      *
-     * @return total fragmented length of this message or `Aeron.NULL_VALUE` if not fragmented.
+     * @return total fragmented length of this message or `NULL_VALUE` if not fragmented.
      */
     public fragmentedFrameLength(): number;
     public fragmentedFrameLength(fragmentedFrameLength?: number): number | void {
@@ -294,6 +294,6 @@ export class Header {
     }
 
     private termOccupancyLength(): number {
-        return Aeron.NULL_VALUE === this._fragmentedFrameLength ? this.frameLength() : this._fragmentedFrameLength;
+        return NULL_VALUE === this._fragmentedFrameLength ? this.frameLength() : this._fragmentedFrameLength;
     }
 }

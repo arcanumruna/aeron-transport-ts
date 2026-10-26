@@ -3,3 +3,4 @@ dist/
 .refs/
 coverage/
 *.log
+test/interop/c/.build/
