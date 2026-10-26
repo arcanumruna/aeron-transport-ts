@@ -31,3 +31,27 @@ jobs:
           # the 1,000,000- and 10,000,000-iteration loops of the Java tests run in full on one job only
           AERON_TS_FULL_ITERATIONS: ${{ matrix.node == 24 && '1' || '' }}
       - run: npm run check:mapping
+
+  # Not a gate (plan, Performance gates): a shared runner is too noisy for a verdict. It runs the end-to-end benches once
+  # and posts the numbers to the summary of the run; `npm run bench:gate` on an idle machine is the gate.
+  bench-e2e:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: End-to-end benches (TS to TS on the loopback, with the dgram floor)
+        run: |
+          {
+            npm run --silent bench:e2e
+            echo
+            echo '#### The end-to-end benches as the gate runs them (`npm run bench:micro -- --file e2e`)'
+            echo
+            echo '```'
+            npm run --silent bench:micro -- --file e2e 2>&1 >/dev/null
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
