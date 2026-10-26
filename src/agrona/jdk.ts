@@ -188,6 +188,24 @@ export const Character = {
     },
 } as const;
 
+function getInteger(name: string): number | null;
+function getInteger(name: string, def: number): number;
+function getInteger(name: string, def: number | null): number | null;
+function getInteger(name: string, def: number | null = null): number | null {
+    const value = systemProperties.get(name);
+    if (undefined !== value) {
+        try {
+            return Number(decode(value, BigInt(-2147483648), BigInt(2147483647)));
+        } catch (ex) {
+            if (!(ex instanceof NumberFormatException)) {
+                throw ex;
+            }
+        }
+    }
+
+    return def;
+}
+
 /**
  * Stand-in for `java.lang.Integer`.
  */
@@ -261,20 +279,7 @@ export const Integer = {
      * `Integer.getInteger(String, Integer)`: the system property `name` decoded as an `int` (`Integer.decode`), or
      * `def` if there is no such property or it is not a number.
      */
-    getInteger<T extends number | null = null>(name: string, def: T = null as T): number | T {
-        const value = systemProperties.get(name);
-        if (undefined !== value) {
-            try {
-                return Number(decode(value, BigInt(-2147483648), BigInt(2147483647)));
-            } catch (ex) {
-                if (!(ex instanceof NumberFormatException)) {
-                    throw ex;
-                }
-            }
-        }
-
-        return def;
-    },
+    getInteger,
 } as const;
 
 /**
@@ -315,6 +320,24 @@ export const Short = {
 // on the path of every flyweight that writes a 64-bit field (the group tag of a status message, the RTT timestamps).
 const INT64_MIN = -(2n ** 63n);
 const INT64_MAX = 2n ** 63n - 1n;
+
+function getLong(name: string): number | null;
+function getLong(name: string, def: number): number;
+function getLong(name: string, def: number | null): number | null;
+function getLong(name: string, def: number | null = null): number | null {
+    const value = systemProperties.get(name);
+    if (undefined !== value) {
+        try {
+            return longToNumber(decode(value, -(2n ** 63n), 2n ** 63n - 1n));
+        } catch (ex) {
+            if (!(ex instanceof NumberFormatException)) {
+                throw ex;
+            }
+        }
+    }
+
+    return def;
+}
 
 /**
  * Stand-in for `java.lang.Long`. A Java `long` that is held in a `number` is exact to +/-(2^53 - 1) (spec 5.2), so
@@ -394,20 +417,7 @@ export const Long = {
      * is no such property or it is not a number. A value inside Java's `long` but outside +/-(2^53 - 1) is a
      * {@link LongOverflowError} (spec D5).
      */
-    getLong<T extends number | null = null>(name: string, def: T = null as T): number | T {
-        const value = systemProperties.get(name);
-        if (undefined !== value) {
-            try {
-                return longToNumber(decode(value, -(2n ** 63n), 2n ** 63n - 1n));
-            } catch (ex) {
-                if (!(ex instanceof NumberFormatException)) {
-                    throw ex;
-                }
-            }
-        }
-
-        return def;
-    },
+    getLong,
 
     /** The 64-bit `a & b` for two `number`s holding safe integers. */
     and(a: number, b: number): number {
@@ -509,16 +519,31 @@ export class TimeUnit {
 
     /** `toMillis(duration)`: truncated towards zero, saturating at {@link Long.MAX_VALUE} and {@link Long.MIN_VALUE}. */
     public toMillis(duration: number): number {
-        const nanos = this.toNanos(duration);
-        return Math.trunc(nanos / 1_000_000);
+        return TimeUnit.MILLISECONDS.convert(duration, this);
     }
 
     /**
      * `convert(sourceDuration, sourceUnit)`: `sourceDuration` of `sourceUnit` in this unit, truncated towards zero.
+     * It converts by the ratio of the two scales (every scale divides the larger ones exactly), as Java does, and
+     * not through nanoseconds, which would saturate early.
      */
     public convert(sourceDuration: number, sourceUnit: TimeUnit): number {
-        const nanos = sourceUnit.toNanos(sourceDuration);
-        return Math.trunc(nanos / this.scale);
+        const source = sourceUnit.scale;
+        const target = this.scale;
+        if (source < target) {
+            return Math.trunc(sourceDuration / (target / source));
+        }
+
+        const ratio = source / target;
+        const max = Math.floor(Long.MAX_VALUE / ratio);
+        if (sourceDuration > max) {
+            return Long.MAX_VALUE;
+        }
+        if (sourceDuration < -max) {
+            return Long.MIN_VALUE;
+        }
+
+        return sourceDuration * ratio;
     }
 
     public toNanos(duration: number | bigint): number {

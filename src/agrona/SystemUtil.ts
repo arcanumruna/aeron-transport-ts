@@ -71,7 +71,18 @@ export class SystemUtil {
     public static getSizeAsInt(propertyName: string, defaultValue: number): number {
         const propertyValue = System.getProperty(propertyName);
         if (null !== propertyValue) {
-            const value = SystemUtil.parseSize(propertyName, propertyValue);
+            let value: number;
+            try {
+                value = SystemUtil.parseSize(propertyName, propertyValue);
+            } catch (ex) {
+                if (ex instanceof LongOverflowError) {
+                    // D5: beyond 2^53 - 1 is beyond Integer.MAX_VALUE
+                    throw new NumberFormatException(
+                        propertyName + ' must positive and less than Integer.MAX_VALUE: ' + ex.value,
+                    );
+                }
+                throw ex;
+            }
             if (value < 0 || value > Integer.MAX_VALUE) {
                 throw new NumberFormatException(
                     propertyName + ' must positive and less than Integer.MAX_VALUE: ' + value,

@@ -10,6 +10,7 @@ import {
     LongOverflowError,
     multiplyExact,
     NumberFormatException,
+    TimeUnit,
 } from '../../../src/agrona/jdk.js';
 import { System } from '../../../src/agrona/jdkLang.js';
 import { SystemUtil } from '../../../src/agrona/SystemUtil.js';
@@ -261,5 +262,30 @@ describe('SystemPropertiesExtraTest', () => {
                 assertThrows(NumberFormatException, () => SystemUtil.getDurationInNanos(KEY, 17));
             }
         });
+    });
+});
+
+describe('SystemPropertiesBatchDRegression', () => {
+    afterEach(() => {
+        System.clearProperty(KEY);
+    });
+
+    // issue #30 item 2: mutation: remove the LongOverflowError catch in getSizeAsInt
+    it('getSizeAsIntOf2Pow53PlusOneIsAnAgronaNumberFormatExceptionRegression', () => {
+        System.setProperty(KEY, '9007199254740993');
+        const e = assertThrowsExactly(NumberFormatException, () => SystemUtil.getSizeAsInt(KEY, 1));
+        expect(e.message).toBe(KEY + ' must positive and less than Integer.MAX_VALUE: 9007199254740993');
+    });
+
+    // issue #30 item 3: mutation: go through toNanos again
+    it('timeUnitConvertsByTheRatioOfTheScalesRegression', () => {
+        expect(TimeUnit.SECONDS.toMillis(1e10)).toBe(1e13);
+        expect(TimeUnit.MILLISECONDS.convert(1e10, TimeUnit.SECONDS)).toBe(1e13);
+        expect(TimeUnit.SECONDS.convert(1e13, TimeUnit.MILLISECONDS)).toBe(1e10);
+        expect(TimeUnit.DAYS.toMillis(1e12)).toBe(Long.MAX_VALUE);
+        expect(TimeUnit.DAYS.toMillis(-1e12)).toBe(Long.MIN_VALUE);
+        expect(TimeUnit.NANOSECONDS.convert(-1e10, TimeUnit.SECONDS)).toBe(Long.MIN_VALUE);
+        expect(TimeUnit.SECONDS.convert(-1_999_999_999, TimeUnit.NANOSECONDS)).toBe(-1);
+        expect(TimeUnit.MILLISECONDS.toMillis(5)).toBe(5);
     });
 });
