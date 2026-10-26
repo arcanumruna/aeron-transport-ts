@@ -39,11 +39,11 @@ describe.skipIf(!interopAvailable)(
         const env = new InteropEnv();
         const nodes: SystemNode[] = [];
 
-        afterEach(() => {
+        afterEach((context) => {
             for (const node of nodes.splice(0)) {
                 node.close();
             }
-            env.dispose();
+            env.dispose(context.task.result?.state === 'fail');
         });
 
         function newNode(): SystemNode {

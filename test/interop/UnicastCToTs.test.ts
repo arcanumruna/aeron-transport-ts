@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Image } from '../../src/client/Image.js';
 import type { Subscription } from '../../src/client/Subscription.js';
 import type { MediaDriver } from '../../src/driver/MediaDriver.js';
+import { Configuration } from '../../src/driver/Configuration.js';
 import { SystemCounterDescriptor } from '../../src/driver/status/SystemCounterDescriptor.js';
 import type { SystemCounters } from '../../src/driver/status/SystemCounters.js';
 import { Consumed, SystemNode, sequences } from '../support/SystemRig.js';
@@ -46,8 +47,8 @@ describe.skipIf(!interopAvailable)(
     () => {
         const env = new InteropEnv();
 
-        afterEach(() => {
-            env.dispose();
+        afterEach((context) => {
+            env.dispose(context.task.result?.state === 'fail');
         });
 
         class Side {
@@ -254,23 +255,24 @@ describe.skipIf(!interopAvailable)(
             const pub = publish(stream, sizes, count);
             const received = (): number => counter(stream.side.node.driver, SystemCounterDescriptor.BYTES_RECEIVED);
 
-            let last = -1;
-            let still = 0;
+            // the stall is the full window, not quiet turns: a C process that is still starting sends nothing for a while,
+            // and a flow-blocked C sender still sends a heartbeat every 100 ms. When the window is full the C publisher
+            // can send nothing more, so the bytes then stay within a heartbeat of where they are
+            const window = Configuration.receiverWindowLength(TERM_LENGTH, Configuration.initialWindowLength());
             await driveUntil(
-                () => {
-                    const bytes = received();
-                    still = bytes === last ? still + 1 : 0;
-                    last = bytes;
-                    return bytes > 0 && still >= 5000;
-                },
-                'a stalled C publisher (bytes received ' + received() + ')',
+                () => stream.subscription.imageCount() === 1 && received() >= window - MTU,
+                'a full receiver window (bytes received ' + received() + ' of ' + window + ')',
             );
-            expect(pub.count('sent')).toBe(0);
+            const full = received();
             expect(stream.subscription.imageCount()).toBe(1);
+            // quiet afterwards: only heartbeats (a data frame header each, 100 ms apart) may arrive, no payload
+            const until = performance.now() + QUIET_MS;
+            await driveUntil(() => performance.now() >= until, 'the quiet time');
+            expect(received() - full).toBeLessThanOrEqual((HEADER_LENGTH + 8) * (Math.ceil(QUIET_MS / 100) + 1));
+            expect(pub.count('sent')).toBe(0);
             expect(stream.subscription.imageAtIndex(0).position()).toBe(0);
-            // the receiver took at most its window: half a term
-            expect(last).toBeLessThanOrEqual(TERM_LENGTH / 2 + MTU);
-            expect(last).toBeGreaterThan(0);
+            // the receiver took at most its window (plus the setup frame and heartbeats)
+            expect(full).toBeLessThanOrEqual(window + MTU);
 
             const consumed = new Consumed();
             await consume(stream.subscription, consumed, count);

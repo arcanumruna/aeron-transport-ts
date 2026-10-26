@@ -166,6 +166,18 @@ export class ChildHandle {
         }
     }
 
+    /** Everything the child printed: the exit status, every JSON line, the whole stderr. */
+    public dump(): string {
+        return (
+            'exit ' +
+            String(this.exitCode) +
+            '\nevents:\n' +
+            this.events.map((e) => JSON.stringify(e)).join('\n') +
+            '\nstderr:\n' +
+            this.stderr
+        );
+    }
+
     public describe(): string {
         return (
             this.name +
@@ -189,7 +201,7 @@ export class InteropEnv {
     private readonly children: ChildHandle[] = [];
     private readonly directories: string[] = [];
     private readonly closers: (() => void)[] = [];
-    private readonly root = mkdtempSync(join(tmpdir(), 'aeron-interop-'));
+    private root: string | null = null;
 
     /** Something to close at the end of the test (a relay, a node). */
     public onDispose(close: () => void): void {
@@ -197,6 +209,8 @@ export class InteropEnv {
     }
 
     private newDirectory(name: string): string {
+        // created on first use: a file or test that is filtered out must leave no directory behind
+        this.root ??= mkdtempSync(join(tmpdir(), 'aeron-interop-'));
         const dir = join(this.root, name + this.directories.length);
         this.directories.push(dir);
         return dir;
@@ -294,7 +308,18 @@ export class InteropEnv {
         return (await this.waitForEvent(pub, 'sent', capMs)) as unknown as PublisherSummary;
     }
 
-    public dispose(): void {
+    /**
+     * Ends the test's processes and removes its directories. With `failed`, first prints what every child said (all its
+     * JSON lines and its whole stderr, which for `aeronmd` carries the C driver's error log), so a flaky failure can be
+     * diagnosed from the output of the run.
+     */
+    public dispose(failed = false): void {
+        if (failed) {
+            for (const child of this.children) {
+                console.error('--- interop child ' + child.name + ' ---\n' + child.dump());
+            }
+        }
+
         for (const close of this.closers.splice(0)) {
             try {
                 close();
@@ -307,7 +332,11 @@ export class InteropEnv {
             child.kill();
         }
 
-        rmSync(this.root, { recursive: true, force: true });
+        if (this.root !== null) {
+            rmSync(this.root, { recursive: true, force: true });
+            this.root = null;
+        }
+        this.directories.length = 0;
     }
 }
 
