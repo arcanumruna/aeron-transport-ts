@@ -52,9 +52,9 @@ import type { LongLongPredicate } from './LongLongPredicate.js';
 export class Long2LongHashMap {
     static readonly MIN_CAPACITY = 8;
 
-    private readonly _loadFactor: number;
-    private readonly _missingValue: number;
-    private _resizeThreshold = 0;
+    private readonly loadFactorValue: number;
+    private readonly missingValueValue: number;
+    private resizeThresholdValue = 0;
     /** @internal accessed by the nested classes, which are in this file */
     public _size = 0;
     /** @internal */
@@ -63,9 +63,9 @@ export class Long2LongHashMap {
     /** @internal the keys at the even indexes, the values at the odd ones */
     public _entries: Float64Array = new Float64Array(0);
 
-    private _keySet: Long2LongHashMapKeySet | null = null;
-    private valueCollection: Long2LongHashMapValueCollection | null = null;
-    private _entrySet: Long2LongHashMapEntrySet | null = null;
+    private keySetValue: Long2LongHashMapKeySet | null = null;
+    private valuesValue: Long2LongHashMapValueCollection | null = null;
+    private entrySetValue: Long2LongHashMapEntrySet | null = null;
 
     /**
      * Construct a new map allowing a configuration for initial capacity and load factor, or copy-construct a new map
@@ -86,11 +86,11 @@ export class Long2LongHashMap {
     ) {
         if (typeof initialCapacity === 'object') {
             const mapToCopy = initialCapacity;
-            this._loadFactor = mapToCopy._loadFactor;
-            this._resizeThreshold = mapToCopy._resizeThreshold;
+            this.loadFactorValue = mapToCopy.loadFactorValue;
+            this.resizeThresholdValue = mapToCopy.resizeThresholdValue;
             this._size = mapToCopy._size;
             this._shouldAvoidAllocation = mapToCopy._shouldAvoidAllocation;
-            this._missingValue = mapToCopy._missingValue;
+            this.missingValueValue = mapToCopy.missingValueValue;
 
             this._entries = mapToCopy._entries.slice();
         } else {
@@ -104,8 +104,8 @@ export class Long2LongHashMap {
             loadFactor = Math.fround(loadFactor);
             CollectionUtil.validateLoadFactor(loadFactor);
 
-            this._loadFactor = loadFactor;
-            this._missingValue = Long.checkSafe(missingValue!) + 0; // + 0: -0 is stored as 0
+            this.loadFactorValue = loadFactor;
+            this.missingValueValue = Long.checkSafe(missingValue!) + 0; // + 0: -0 is stored as 0
             this._shouldAvoidAllocation = shouldAvoidAllocation;
 
             this.setCapacity(BitUtil.findNextPositivePowerOfTwo(Math.max(Long2LongHashMap.MIN_CAPACITY, capacity)));
@@ -118,7 +118,7 @@ export class Long2LongHashMap {
      * @returns value to be used as a null marker in the map.
      */
     public missingValue(): number {
-        return this._missingValue;
+        return this.missingValueValue;
     }
 
     /**
@@ -127,7 +127,7 @@ export class Long2LongHashMap {
      * @returns load factor for when the map should increase size.
      */
     public loadFactor(): number {
-        return this._loadFactor;
+        return this.loadFactorValue;
     }
 
     /**
@@ -146,7 +146,7 @@ export class Long2LongHashMap {
      * @returns the threshold when the map will resize.
      */
     public resizeThreshold(): number {
-        return this._resizeThreshold;
+        return this.resizeThresholdValue;
     }
 
     /**
@@ -173,7 +173,7 @@ export class Long2LongHashMap {
     public getOrDefault(key: number, defaultValue: number): number {
         const value = this.get(key);
 
-        return this._missingValue !== value ? value : defaultValue;
+        return this.missingValueValue !== value ? value : defaultValue;
     }
 
     /**
@@ -183,7 +183,7 @@ export class Long2LongHashMap {
      * @returns the value if found otherwise the missing value.
      */
     public get(key: number): number {
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         const entries = this._entries;
         const mask = entries.length - 1;
         let index = Hashing.evenHashLong(key, mask);
@@ -211,7 +211,7 @@ export class Long2LongHashMap {
     public put(key: number, value: number): number {
         key = Long.checkSafe(key) + 0; // + 0: -0 is stored as 0
         value = Long.checkSafe(value) + 0;
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         if (missingValue === value) {
             throw new IllegalArgumentException('cannot accept missingValue');
         }
@@ -252,7 +252,7 @@ export class Long2LongHashMap {
     public putIfAbsent(key: number, value: number): number {
         key = Long.checkSafe(key) + 0; // + 0: -0 is stored as 0
         value = Long.checkSafe(value) + 0;
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         if (missingValue === value) {
             throw new IllegalArgumentException('cannot accept missingValue');
         }
@@ -280,7 +280,7 @@ export class Long2LongHashMap {
     }
 
     private increaseCapacity(): void {
-        if (this._size > this._resizeThreshold) {
+        if (this._size > this.resizeThresholdValue) {
             // entries.length = 2 * capacity
             const newCapacity = this._entries.length;
             this.rehash(newCapacity);
@@ -288,7 +288,7 @@ export class Long2LongHashMap {
     }
 
     private rehash(newCapacity: number): void {
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         const oldEntries = this._entries;
         const length = oldEntries.length;
 
@@ -336,7 +336,7 @@ export class Long2LongHashMap {
     public forEachLong(consumer: LongLongConsumer): void {
         requireNonNull(consumer);
 
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         const entries = this._entries;
         const length = entries.length;
 
@@ -355,7 +355,7 @@ export class Long2LongHashMap {
      * @returns true if the map contains key as a key, false otherwise.
      */
     public containsKey(key: number): boolean {
-        return this._missingValue !== this.get(key);
+        return this.missingValueValue !== this.get(key);
     }
 
     /**
@@ -366,7 +366,7 @@ export class Long2LongHashMap {
      */
     public containsValue(value: number): boolean {
         let found = false;
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         if (missingValue !== value) {
             const entries = this._entries;
             const length = entries.length;
@@ -392,7 +392,7 @@ export class Long2LongHashMap {
      */
     public clear(): void {
         if (this._size > 0) {
-            this._entries.fill(this._missingValue);
+            this._entries.fill(this.missingValueValue);
             this._size = 0;
         }
     }
@@ -402,7 +402,7 @@ export class Long2LongHashMap {
      * and giving consideration to the load factor.
      */
     public compact(): void {
-        const idealCapacity = Math.round(this.size() * (1.0 / this._loadFactor));
+        const idealCapacity = Math.round(this.size() * (1.0 / this.loadFactorValue));
         this.rehash(BitUtil.findNextPositivePowerOfTwo(Math.max(Long2LongHashMap.MIN_CAPACITY, idealCapacity)));
     }
 
@@ -416,7 +416,7 @@ export class Long2LongHashMap {
     public computeIfAbsent(key: number, mappingFunction: (key: number) => number): number {
         requireNonNull(mappingFunction);
         key = Long.checkSafe(key) + 0; // + 0: -0 is stored as 0
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         const entries = this._entries;
         const mask = entries.length - 1;
         let index = Hashing.evenHashLong(key, mask);
@@ -449,7 +449,7 @@ export class Long2LongHashMap {
      */
     public computeIfPresent(key: number, remappingFunction: (key: number, value: number) => number): number {
         requireNonNull(remappingFunction);
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         const entries = this._entries;
         const mask = entries.length - 1;
         let index = Hashing.evenHashLong(key, mask);
@@ -485,7 +485,7 @@ export class Long2LongHashMap {
     public compute(key: number, remappingFunction: (key: number, value: number) => number): number {
         requireNonNull(remappingFunction);
         key = Long.checkSafe(key) + 0; // + 0: -0 is stored as 0
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         const entries = this._entries;
         const mask = entries.length - 1;
         let index = Hashing.evenHashLong(key, mask);
@@ -558,22 +558,22 @@ export class Long2LongHashMap {
      * {@inheritDoc}
      */
     public keySet(): Long2LongHashMapKeySet {
-        if (null === this._keySet) {
-            this._keySet = new Long2LongHashMapKeySet(this);
+        if (null === this.keySetValue) {
+            this.keySetValue = new Long2LongHashMapKeySet(this);
         }
 
-        return this._keySet;
+        return this.keySetValue;
     }
 
     /**
      * {@inheritDoc}
      */
     public values(): Long2LongHashMapValueCollection {
-        if (null === this.valueCollection) {
-            this.valueCollection = new Long2LongHashMapValueCollection(this);
+        if (null === this.valuesValue) {
+            this.valuesValue = new Long2LongHashMapValueCollection(this);
         }
 
-        return this.valueCollection;
+        return this.valuesValue;
     }
 
     /**
@@ -582,11 +582,11 @@ export class Long2LongHashMap {
      * This set's iterator also implements `Map.Entry` so the key and value can be retrieved by from the iterator.
      */
     public entrySet(): Long2LongHashMapEntrySet {
-        if (null === this._entrySet) {
-            this._entrySet = new Long2LongHashMapEntrySet(this);
+        if (null === this.entrySetValue) {
+            this.entrySetValue = new Long2LongHashMapEntrySet(this);
         }
 
-        return this._entrySet;
+        return this.entrySetValue;
     }
 
     /**
@@ -605,7 +605,7 @@ export class Long2LongHashMap {
     }
 
     private removeKey(key: number): number {
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         const entries = this._entries;
         const mask = entries.length - 1;
         let keyIndex = Hashing.evenHashLong(key, mask);
@@ -627,7 +627,7 @@ export class Long2LongHashMap {
     }
 
     private removeKeyValue(key: number, value: number): boolean {
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         const entries = this._entries;
         const mask = entries.length - 1;
         let keyIndex = Hashing.evenHashLong(key, mask);
@@ -663,7 +663,7 @@ export class Long2LongHashMap {
         requireNonNull(remappingFunction);
         key = Long.checkSafe(key) + 0; // + 0: -0 is stored as 0
         value = Long.checkSafe(value) + 0;
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         if (missingValue === value) {
             throw new IllegalArgumentException('cannot accept missingValue');
         }
@@ -700,7 +700,7 @@ export class Long2LongHashMap {
 
     /** @internal accessed by the nested classes */
     public compactChain(deleteKeyIndex: number): void {
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         const entries = this._entries;
         const mask = entries.length - 1;
         let keyIndex = deleteKeyIndex;
@@ -734,7 +734,7 @@ export class Long2LongHashMap {
      * @returns the minimum value stored in the map.
      */
     public minValue(): number {
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         let min = 0 === this._size ? missingValue : Long.MAX_VALUE;
 
         const entries = this._entries;
@@ -756,7 +756,7 @@ export class Long2LongHashMap {
      * @returns the maximum value stored in the map.
      */
     public maxValue(): number {
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         let max = 0 === this._size ? missingValue : Long.MIN_VALUE;
 
         const entries = this._entries;
@@ -819,7 +819,7 @@ export class Long2LongHashMap {
 
     private replaceValue(key: number, value: number): number {
         value = Long.checkSafe(value) + 0; // + 0: -0 is stored as 0
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         if (missingValue === value) {
             throw new IllegalArgumentException('cannot accept missingValue');
         }
@@ -843,7 +843,7 @@ export class Long2LongHashMap {
 
     private replaceOldNew(key: number, oldValue: number, newValue: number): boolean {
         newValue = Long.checkSafe(newValue) + 0; // + 0: -0 is stored as 0
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         if (missingValue === newValue) {
             throw new IllegalArgumentException('cannot accept missingValue');
         }
@@ -876,7 +876,7 @@ export class Long2LongHashMap {
      */
     public replaceAllLong(function_: LongLongFunction): void {
         requireNonNull(function_);
-        const missingValue = this._missingValue;
+        const missingValue = this.missingValueValue;
         const entries = this._entries;
         const length = entries.length;
 
@@ -928,8 +928,8 @@ export class Long2LongHashMap {
             throw new IllegalStateException('max capacity reached at size=' + this._size);
         }
 
-        this._resizeThreshold = Math.trunc(Math.fround(Math.fround(newCapacity) * this._loadFactor));
-        this._entries = new Float64Array(entriesLength).fill(this._missingValue);
+        this.resizeThresholdValue = Math.trunc(Math.fround(Math.fround(newCapacity) * this.loadFactorValue));
+        this._entries = new Float64Array(entriesLength).fill(this.missingValueValue);
     }
 }
 

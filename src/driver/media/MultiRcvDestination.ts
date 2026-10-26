@@ -41,7 +41,7 @@ export class MultiRcvDestination {
     private transports: (ReceiveDestinationTransport | null)[] = EMPTY_TRANSPORTS;
 
     public close(errorHandler: ErrorHandler | null): void {
-        CloseHelper.closeAllWith(errorHandler, this.transports);
+        CloseHelper.closeAll(errorHandler, this.transports);
     }
 
     public cancelRead(endpoint: ReceiveChannelEndpoint, poller: DataTransportPoller): void {

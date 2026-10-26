@@ -59,8 +59,8 @@ import type { LongObjPredicate } from './LongObjPredicate.js';
 export class Long2ObjectHashMap<V> {
     static readonly MIN_CAPACITY = 8;
 
-    private readonly _loadFactor: number;
-    private _resizeThreshold: number;
+    private readonly loadFactorValue: number;
+    private resizeThresholdValue: number;
     /** @internal accessed by the nested classes, which are in this file */
     public _size: number;
     /** @internal */
@@ -72,8 +72,8 @@ export class Long2ObjectHashMap<V> {
     public _values: unknown[];
 
     private valueCollection: Long2ObjectHashMapValueCollection<V> | null = null;
-    private _keySet: Long2ObjectHashMapKeySet<V> | null = null;
-    private _entrySet: Long2ObjectHashMapEntrySet<V> | null = null;
+    private keySetValue: Long2ObjectHashMapKeySet<V> | null = null;
+    private entrySetValue: Long2ObjectHashMapEntrySet<V> | null = null;
 
     /**
      * Construct a new map allowing a configuration for initial capacity and load factor, or copy-construct a new map
@@ -90,8 +90,8 @@ export class Long2ObjectHashMap<V> {
     ) {
         if (typeof initialCapacity === 'object') {
             const mapToCopy = initialCapacity;
-            this._loadFactor = mapToCopy._loadFactor;
-            this._resizeThreshold = mapToCopy._resizeThreshold;
+            this.loadFactorValue = mapToCopy.loadFactorValue;
+            this.resizeThresholdValue = mapToCopy.resizeThresholdValue;
             this._size = mapToCopy._size;
             this._shouldAvoidAllocation = mapToCopy._shouldAvoidAllocation;
 
@@ -101,14 +101,14 @@ export class Long2ObjectHashMap<V> {
             loadFactor = Math.fround(loadFactor);
             CollectionUtil.validateLoadFactor(loadFactor);
 
-            this._loadFactor = loadFactor;
+            this.loadFactorValue = loadFactor;
             this._shouldAvoidAllocation = shouldAvoidAllocation;
             this._size = 0;
 
             const capacity = BitUtil.findNextPositivePowerOfTwo(
                 Math.max(Long2ObjectHashMap.MIN_CAPACITY, initialCapacity),
             );
-            this._resizeThreshold = Math.trunc(Math.fround(Math.fround(capacity) * loadFactor));
+            this.resizeThresholdValue = Math.trunc(Math.fround(Math.fround(capacity) * loadFactor));
             this._keys = new Float64Array(capacity);
             this._values = new Array<unknown>(capacity).fill(null);
         }
@@ -120,7 +120,7 @@ export class Long2ObjectHashMap<V> {
      * @returns load factor for when the map should increase size.
      */
     public loadFactor(): number {
-        return this._loadFactor;
+        return this.loadFactorValue;
     }
 
     /**
@@ -139,7 +139,7 @@ export class Long2ObjectHashMap<V> {
      * @returns the threshold when the map will resize.
      */
     public resizeThreshold(): number {
-        return this._resizeThreshold;
+        return this.resizeThresholdValue;
     }
 
     /**
@@ -327,7 +327,7 @@ export class Long2ObjectHashMap<V> {
             values[index] = value;
             if (null === mappedValue) {
                 keys[index] = key;
-                if (++this._size > this._resizeThreshold) {
+                if (++this._size > this.resizeThresholdValue) {
                     this.increaseCapacity();
                 }
             }
@@ -396,7 +396,7 @@ export class Long2ObjectHashMap<V> {
             values[index] = newValue;
             if (null === mappedvalue) {
                 keys[index] = key;
-                if (++this._size > this._resizeThreshold) {
+                if (++this._size > this.resizeThresholdValue) {
                     this.increaseCapacity();
                 }
             }
@@ -437,7 +437,7 @@ export class Long2ObjectHashMap<V> {
             values[index] = newValue;
             if (null === mappedvalue) {
                 keys[index] = key;
-                if (++this._size > this._resizeThreshold) {
+                if (++this._size > this.resizeThresholdValue) {
                     this.increaseCapacity();
                 }
             }
@@ -484,7 +484,7 @@ export class Long2ObjectHashMap<V> {
 
         values[index] = val;
 
-        if (this._size > this._resizeThreshold) {
+        if (this._size > this.resizeThresholdValue) {
             this.increaseCapacity();
         }
 
@@ -576,7 +576,7 @@ export class Long2ObjectHashMap<V> {
      * and giving consideration to the load factor.
      */
     public compact(): void {
-        const idealCapacity = Math.round(this.size() * (1.0 / this._loadFactor));
+        const idealCapacity = Math.round(this.size() * (1.0 / this.loadFactorValue));
         this.rehash(BitUtil.findNextPositivePowerOfTwo(Math.max(Long2ObjectHashMap.MIN_CAPACITY, idealCapacity)));
     }
 
@@ -639,7 +639,7 @@ export class Long2ObjectHashMap<V> {
 
             values[index] = val;
 
-            if (this._size > this._resizeThreshold) {
+            if (this._size > this.resizeThresholdValue) {
                 this.increaseCapacity();
             }
         }
@@ -651,11 +651,11 @@ export class Long2ObjectHashMap<V> {
      * {@inheritDoc}
      */
     public keySet(): Long2ObjectHashMapKeySet<V> {
-        if (null === this._keySet) {
-            this._keySet = new Long2ObjectHashMapKeySet<V>(this);
+        if (null === this.keySetValue) {
+            this.keySetValue = new Long2ObjectHashMapKeySet<V>(this);
         }
 
-        return this._keySet;
+        return this.keySetValue;
     }
 
     /**
@@ -673,11 +673,11 @@ export class Long2ObjectHashMap<V> {
      * {@inheritDoc}
      */
     public entrySet(): Long2ObjectHashMapEntrySet<V> {
-        if (null === this._entrySet) {
-            this._entrySet = new Long2ObjectHashMapEntrySet<V>(this);
+        if (null === this.entrySetValue) {
+            this.entrySetValue = new Long2ObjectHashMapEntrySet<V>(this);
         }
 
-        return this._entrySet;
+        return this.entrySetValue;
     }
 
     /**
@@ -905,7 +905,7 @@ export class Long2ObjectHashMap<V> {
 
     private rehash(newCapacity: number): void {
         const mask = newCapacity - 1;
-        this._resizeThreshold = Math.trunc(Math.fround(Math.fround(newCapacity) * this._loadFactor));
+        this.resizeThresholdValue = Math.trunc(Math.fround(Math.fround(newCapacity) * this.loadFactorValue));
 
         const tempKeys = new Float64Array(newCapacity);
         const tempValues = new Array<unknown>(newCapacity).fill(null);

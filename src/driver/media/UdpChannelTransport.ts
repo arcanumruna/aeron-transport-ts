@@ -42,8 +42,8 @@ import {
     InetAddress,
     InetSocketAddress,
     IOException,
-    NetworkInterface,
     StandardProtocolFamily,
+    type NetworkInterface,
 } from '../jdkNet.js';
 import type { MediaDriverContext } from '../MediaDriver.js';
 import { SystemCounterDescriptor } from '../status/SystemCounterDescriptor.js';
@@ -184,8 +184,6 @@ export abstract class UdpChannelTransport implements AutoCloseable {
     // close() has run: it frees the managed port once. Not isClosed, which a failed open also sets (late socket errors).
     private closeDone = false;
     private connected = false;
-    private multicastInterfaceResolved = false;
-    private multicastInterfaceValue: string | undefined = undefined;
     private wakeUp: (() => void) | null;
     private readonly onMessageCallback: (message: Uint8Array, rinfo: RemoteInfo) => void;
     private readonly onSocketErrorCallback: (error: Error) => void;
@@ -275,8 +273,8 @@ export abstract class UdpChannelTransport implements AutoCloseable {
                 // Java: bind(new InetSocketAddress(port)) on a channel with IP_MULTICAST_ALL off (spec D119). A node socket
                 // cannot turn the option off, so the socket is bound to the group instead and the kernel gives it that group
                 // only; it then no longer receives unicast to the port. This is unconditional except on Windows (which binds
-                // the wildcard address) and for an IPv6 link-local group (scope 2 or less) on a host without any usable interface;
-                // see multicastBindHost.
+                // the wildcard address) and for an IPv6 link-local group (scope 2 or less) without an interface, which also
+                // binds the wildcard address; see multicastBindHost.
                 this.bindChecked(
                     this._receiveDatagramChannel,
                     this.endPointAddress.getPort(),
@@ -853,8 +851,7 @@ export abstract class UdpChannelTransport implements AutoCloseable {
     /**
      * The host a multicast receive socket is bound to: the group of the channel (D119), otherwise the wildcard (null). A
      * group of interface-local or link-local scope (`ffx1`, `ffx2`) is bound with the scope of the channel's interface
-     * (`%name`), which the kernel needs for it; a multicast channel always has an interface (`UdpChannel.parse`
-     * resolves one), so the wildcard is kept only when none is given.
+     * (`%name`), which the kernel needs for it; without an interface it cannot be bound, and the wildcard is kept.
      */
     private static multicastBindHost(
         udpChannel: UdpChannel,
@@ -935,16 +932,6 @@ export abstract class UdpChannelTransport implements AutoCloseable {
      * channel's family for IPv4, the scope (`::%name`) for IPv6; undefined (the OS chooses) without an interface.
      */
     private multicastInterface(): string | undefined {
-        // Resolved once per transport, on first use, so that the receive bind, the join and the send use the same interface.
-        if (!this.multicastInterfaceResolved) {
-            this.multicastInterfaceValue = this.resolveMulticastInterface();
-            this.multicastInterfaceResolved = true;
-        }
-
-        return this.multicastInterfaceValue;
-    }
-
-    private resolveMulticastInterface(): string | undefined {
         const networkInterface: NetworkInterface | null = this._udpChannel.localInterface();
         if (null === networkInterface) {
             return undefined;
