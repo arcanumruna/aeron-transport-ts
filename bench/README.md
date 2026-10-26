@@ -427,6 +427,24 @@ Aeron puts the small messages of one cycle in one datagram, so at 64 B it moves 
 datagrams. At 1376 B every message is a datagram and the port reaches 44% of the floor in messages per second, 21 us per
 message: the sender sends one frame per cycle and a cycle is a turn of the event loop (D11), the first place to look.
 
+Issue #53 looked at that: the sender sends one frame per publication per cycle as Java's does, a runner runs up to 16 cycles
+in one turn (D114), and raising the batch to 64 or 256 cycles changes nothing (medians of 10 interleaved streams: 86,250,
+86,771 and 88,267 msgs/s). What did cost throughput was the zeroing of the term behind the stream: V8's `fill` of a
+`SharedArrayBuffer` is 10 to 15 times slower than a copy, 0.6 us of every 1376 B frame (D123). Interleaved (base, candidate,
+base, ...), 12 pairs, one process each, 50,000 messages after a warm-up of 5,000, 2026-10-26, same Node and host (load average 3
+to 6 on 4 cores: the spread is the host's), medians:
+
+| bytes | path                           | base (before #52, #53) msgs/s | candidate msgs/s | min..max, base   | min..max, candidate |
+| ----- | ------------------------------ | ----------------------------- | ---------------- | ---------------- | ------------------- |
+| 64    | Aeron TS                       | 227,394                       | 253,985          | 164,045..303,003 | 191,210..291,457    |
+| 1376  | Aeron TS                       | 78,382                        | 85,275           | 48,705..88,326   | 70,703..92,464      |
+| 1376  | raw dgram floor (credit of 64) | 139,658                       | 139,386          | 116,102..156,481 | 123,809..150,624    |
+
+That is 56% and 61% of the floor at 1376 B. The rest is inherent to a single node thread and node's `dgram` (D124): the CPU
+profile of the stream is 33% in the `sendmsg` call of `dgram` (on the loopback it also delivers the datagram), 25% in the
+event loop's poll (`recvmsg` and the `'message'` callback), 24% in `src/` (4.2 us a message: four copies of the frame, the
+bounds checks, the counters) and the rest in the collector, timers and the harness.
+
 Allocation per message (estimates, bytes per message):
 
 | run                                       | port   | node   | harness | other | minor GCs per 1000 msgs |
