@@ -28,8 +28,9 @@ jobs:
       - name: Enable IPv6 multicast on loopback
         run: |
           sudo ip link set lo multicast on
-          sudo ip -6 route replace multicast ff00::/8 dev lo table local
-          sudo ip -6 route replace ff00::/8 dev lo
+          # an IPv6 route over lo that is not of type local becomes a reject route in the kernel, so the group route is local
+          sudo ip -6 route replace local ff00::/8 dev lo table local
+          ip -6 route show table all | grep -i 'ff00::/8' || true
       - run: npm run probe:multicast
         env:
           # a runner without IPv6 multicast fails here instead of skipping the IPv6 multicast tests silently (#64)
