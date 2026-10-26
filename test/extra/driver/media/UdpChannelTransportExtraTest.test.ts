@@ -39,7 +39,14 @@ import { WildcardPortManager } from '../../../../src/driver/media/WildcardPortMa
 import { SystemCounterDescriptor } from '../../../../src/driver/status/SystemCounterDescriptor.js';
 import { expectNoAllocation } from '../../../support/Allocation.js';
 import { assertThrows } from '../../../support/Assertions.js';
-import { Collector, FakeSocket, freeUdpPort, hasIpv6Loopback, waitUntil } from '../../../support/Udp.js';
+import {
+    Collector,
+    FakeSocket,
+    freeUdpPort,
+    hasIpv6Loopback,
+    skipUnlessRequired,
+    waitUntil,
+} from '../../../support/Udp.js';
 
 const LOOPBACK = '127.0.0.1';
 const RECEIVE_CAPACITY = 2048;
@@ -870,7 +877,7 @@ describe('open and close', () => {
 
     it('opens an IPv6 loopback transport', async (ctx) => {
         if (!hasIpv6Loopback()) {
-            ctx.skip('no IPv6 loopback on this host');
+            skipUnlessRequired(ctx, 'no IPv6 loopback on this host');
         }
 
         const udpChannel = channel('aeron:udp?endpoint=[::1]:0');

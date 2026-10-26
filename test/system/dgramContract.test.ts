@@ -4,7 +4,15 @@
 import type { RemoteInfo, Socket } from 'node:dgram';
 import { describe, expect, it } from 'vitest';
 import type { TestContext } from 'vitest';
-import { Collector, closeSocket, freeUdpPort, nextEvent, newSocket, waitUntil } from '../support/Udp.js';
+import {
+    Collector,
+    closeSocket,
+    freeUdpPort,
+    nextEvent,
+    newSocket,
+    skipUnlessRequired,
+    waitUntil,
+} from '../support/Udp.js';
 
 /** An address that no host owns (TEST-NET-1, RFC 5737), so a datagram to it goes to the default route if there is one. */
 const OFF_HOST = '192.0.2.1';
@@ -23,7 +31,7 @@ function datagram(text: string): Buffer {
 
 /**
  * Sends datagrams to the off-host address from an unconnected socket until BURST of them are queued. Returns the queue count, or skips the
- * test, with the reason logged, when the host has no route off the host (the sends fail instead of queueing).
+ * test (fails it under AERON_TS_REQUIRE_NET=1) when the host has no route off the host (the sends fail instead of queueing).
  */
 function offHostBurst(socket: Socket, ctx: TestContext): number {
     socket.bind(0, '0.0.0.0');
@@ -35,15 +43,13 @@ function offHostBurst(socket: Socket, ctx: TestContext): number {
         }
     } catch (e) {
         const reason = 'no route off the host (' + (e as Error).message + ')';
-        console.warn('dgramContract: skipping, ' + reason);
-        ctx.skip(reason);
+        skipUnlessRequired(ctx, reason);
     }
 
     const queued = socket.getSendQueueCount();
     if (0 === queued) {
         const reason = 'no route off the host (the kernel took all ' + BURST_CAP + ' datagrams or refused them)';
-        console.warn('dgramContract: skipping, ' + reason);
-        ctx.skip(reason);
+        skipUnlessRequired(ctx, reason);
     }
 
     return queued;

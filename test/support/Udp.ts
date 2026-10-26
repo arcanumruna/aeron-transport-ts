@@ -138,6 +138,17 @@ export class Collector {
     }
 }
 
+/**
+ * Skips a test that needs a host capability (IPv6 loopback, a route off the host) the host lacks, with the reason shown in the
+ * report. With AERON_TS_REQUIRE_NET=1 (set in CI) the missing capability fails the test instead, so CI never skips it silently.
+ */
+export function skipUnlessRequired(ctx: { skip: (note?: string) => void }, reason: string): void {
+    if ('1' === process.env['AERON_TS_REQUIRE_NET']) {
+        throw new Error('AERON_TS_REQUIRE_NET=1 but ' + reason);
+    }
+    ctx.skip(reason);
+}
+
 /** Whether the host can bind an IPv6 loopback socket. */
 export function hasIpv6Loopback(): boolean {
     const socket = dgram.createSocket({ type: 'udp6', lookup: syncLookup });
