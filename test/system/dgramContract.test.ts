@@ -14,6 +14,9 @@ const BURST = 2_000;
 const BURST_CAP = 50_000;
 const MTU_PAYLOAD = 1_400;
 
+/** The number of datagrams libuv reads from a socket in one loop iteration (`uv__udp_recvmsg`: 32 messages). */
+const UV_RECV_BATCH = 32;
+
 function datagram(text: string): Buffer {
     return Buffer.from(text, 'latin1');
 }
@@ -100,6 +103,20 @@ describe('dgram contract (spec 4.2)', () => {
         // (the measurement was 1,997 of 2,000 on the first host; here the loop runs until BURST are queued).
         expect(queued).toBeGreaterThanOrEqual(BURST);
         expect(sender.getSendQueueSize()).toBeGreaterThan(0);
+
+        // Each further send queues exactly one request that holds its datagram's bytes (queue count +1, queue size
+        // +length), and changing the caller's buffer afterwards neither errors nor changes that accounting: libuv keeps
+        // its own reference to the buffer, so the caller may not reuse it until the callback (spec D2, which is why the
+        // transport sends from a slot that it holds back).
+        const countBefore = sender.getSendQueueCount();
+        const sizeBefore = sender.getSendQueueSize();
+        const tail = Buffer.alloc(MTU_PAYLOAD, 0x41);
+        let completed = 0;
+        sender.send(tail, 0, tail.length, OFF_HOST_PORT, OFF_HOST, () => completed++);
+        tail.fill(0x42);
+        expect(sender.getSendQueueCount()).toBe(countBefore + 1);
+        expect(sender.getSendQueueSize()).toBe(sizeBefore + MTU_PAYLOAD);
+        expect(completed).toBe(0); // still queued behind the burst, not sent
     });
 
     // N4: a send error arrives only through the callback, on a later tick; with no callback it is dropped silently.
@@ -220,7 +237,10 @@ describe('dgram contract (spec 4.2)', () => {
         expect(new Set(rinfos).size).toBe(rinfos.length); // an rinfo object per message
         // the first buffer still holds its datagram: the handler owns it
         expect(receiver.bytes(0)).toMatch(/^m\d{4}$/);
-        expect(Math.max(...perTurn)).toBeGreaterThan(1); // delivered in bursts
+        // delivered in bursts of exactly libuv's batch of 32 datagrams per read loop, never more (a vacuous "> 1" would
+        // pass for a burst of two)
+        expect(Math.max(...perTurn)).toBe(UV_RECV_BATCH);
+        expect(perTurn.every((n) => n <= UV_RECV_BATCH)).toBe(true);
     });
 
     // N8: close() cancels queued sends; their callbacks get ECANCELED. Needs a route off the host.
