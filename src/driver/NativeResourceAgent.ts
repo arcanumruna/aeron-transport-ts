@@ -118,12 +118,16 @@ export class NativeResourceAgent implements Agent {
         }
 
         try {
-            lookUpHost(host, () => {
-                // A failed lookup leaves the cache as it is: the resolution then ends as Java's does when the name
-                // cannot be resolved, an unresolved address.
-                this.completeReResolution(result, endpoint, uriParamName);
-                this.wakeUp?.();
-            });
+            lookUpHost(
+                host,
+                () => {
+                    // A failed lookup leaves the cache as it is: the resolution then ends as Java's does when the name
+                    // cannot be resolved, an unresolved address.
+                    this.completeReResolution(result, endpoint, uriParamName);
+                    this.wakeUp?.();
+                },
+                true,
+            );
         } catch (ex) {
             result.error(ex as Error);
         }

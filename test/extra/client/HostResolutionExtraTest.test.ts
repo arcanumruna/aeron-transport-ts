@@ -276,7 +276,7 @@ describe('Host name resolution', () => {
         (lookups[0] as { callback: LookupCallback }).callback(null, '127.0.0.1', 4);
 
         expect(addPublication).not.toHaveBeenCalled();
-        expect(wakeUp).toHaveBeenCalledTimes(1); // told that the look-up is done, as for any
+        expect(wakeUp).not.toHaveBeenCalled(); // a closed conductor is not woken
         expect(rig.errors).toEqual([]);
     });
 

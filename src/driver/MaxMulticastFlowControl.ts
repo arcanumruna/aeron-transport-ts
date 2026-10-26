@@ -52,6 +52,30 @@ export class MaxMulticastFlowControl implements FlowControl {
     /**
      * {@inheritDoc}
      */
+    public initialize(
+        context: MediaDriver.Context,
+        _countersManager: CountersManager,
+        udpChannel: UdpChannel,
+        _streamId: number,
+        _sessionId: number,
+        _registrationId: number,
+        _initialTermId: number,
+        _termBufferLength: number,
+    ): void {
+        this.retransmitReceiverWindowMultiple = FlowControl.retransmitReceiverWindowMultiple(
+            udpChannel,
+            context.multicastFlowControlRetransmitReceiverWindowMultiple(),
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public close(): void {}
+
+    /**
+     * {@inheritDoc}
+     */
     public onStatusMessage(
         flyweight: StatusMessageFlyweight,
         _receiverAddress: InetSocketAddress,
@@ -95,38 +119,14 @@ export class MaxMulticastFlowControl implements FlowControl {
     /**
      * {@inheritDoc}
      */
-    public onError(_errorFlyweight: ErrorFlyweight, _receiverAddress: InetSocketAddress, _timeNs: number): void {}
-
-    /**
-     * {@inheritDoc}
-     */
-    public initialize(
-        context: MediaDriver.Context,
-        _countersManager: CountersManager,
-        udpChannel: UdpChannel,
-        _streamId: number,
-        _sessionId: number,
-        _registrationId: number,
-        _initialTermId: number,
-        _termBufferLength: number,
-    ): void {
-        this.retransmitReceiverWindowMultiple = FlowControl.retransmitReceiverWindowMultiple(
-            udpChannel,
-            context.multicastFlowControlRetransmitReceiverWindowMultiple(),
-        );
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    public close(): void {}
-
-    /**
-     * {@inheritDoc}
-     */
     public onIdle(_timeNs: number, senderLimit: number, _senderPosition: number, _isEos: boolean): number {
         return senderLimit;
     }
+
+    /**
+     * {@inheritDoc}
+     */
+    public onError(_errorFlyweight: ErrorFlyweight, _receiverAddress: InetSocketAddress, _timeNs: number): void {}
 
     /**
      * {@inheritDoc}
