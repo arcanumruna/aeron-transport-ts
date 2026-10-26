@@ -31,7 +31,7 @@ import { BroadcastBufferDescriptor } from '../agrona/concurrent/broadcast/Broadc
 import { RingBufferDescriptor } from '../agrona/concurrent/ringbuffer/RingBufferDescriptor.js';
 import { CountersReader } from '../agrona/concurrent/status/CountersReader.js';
 import type { StatusIndicator } from '../agrona/concurrent/status/StatusIndicator.js';
-import { ClassNotFoundException, Integer, Long, NumberFormatException, TimeUnit } from '../agrona/jdk.js';
+import { ByteOrder, ClassNotFoundException, Integer, Long, NumberFormatException, TimeUnit } from '../agrona/jdk.js';
 import { requireNonNull, System } from '../agrona/jdkLang.js';
 import { SystemErr } from '../agrona/jdkThrowable.js';
 import { LangUtil } from '../agrona/LangUtil.js';
@@ -49,6 +49,8 @@ import { DefaultCongestionControlSupplier } from './DefaultCongestionControlSupp
 import { DefaultDenyTerminationValidator } from './DefaultDenyTerminationValidator.js';
 import { DefaultMulticastFlowControlSupplier } from './DefaultMulticastFlowControlSupplier.js';
 import { DefaultUnicastFlowControlSupplier } from './DefaultUnicastFlowControlSupplier.js';
+import { PreferredMulticastFlowControlAsf } from './PreferredMulticastFlowControlAsf.js';
+import { UnsafeBuffer } from '../agrona/concurrent/UnsafeBuffer.js';
 import type { CongestionControlSupplier } from './CongestionControlSupplier.js';
 import type { FlowControlSupplier } from './FlowControlSupplier.js';
 import type { TerminationValidator } from './TerminationValidator.js';
@@ -1275,6 +1277,23 @@ export class Configuration {
      */
     public static groupTag(): number | null {
         return Long.getLong(Configuration.RECEIVER_GROUP_TAG_PROP_NAME, null);
+    }
+
+    /**
+     * Default group tag (gtag) used by the tagged flow control strategy to group receivers. The default is the legacy
+     * ASF of {@link PreferredMulticastFlowControlAsf.PREFERRED_ASF_PROP_NAME}, read as a little-endian long.
+     *
+     * @return group tag (gtag) used by the tagged flow control strategy to group receivers.
+     * @see #FLOW_CONTROL_GROUP_TAG_PROP_NAME
+     */
+    public static flowControlGroupTag(): number {
+        const propertyValue = System.getProperty(
+            PreferredMulticastFlowControlAsf.PREFERRED_ASF_PROP_NAME,
+            PreferredMulticastFlowControlAsf.PREFERRED_ASF_DEFAULT,
+        );
+        const legacyAsfValue = new UnsafeBuffer(BitUtil.fromHex(propertyValue)).getLong(0, ByteOrder.LITTLE_ENDIAN);
+
+        return Long.getLong(Configuration.FLOW_CONTROL_GROUP_TAG_PROP_NAME, legacyAsfValue);
     }
 
     /**
