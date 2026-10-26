@@ -24,12 +24,23 @@ jobs:
       - run: npm ci
       - run: npm run fetch:refs
       - run: npm run probe:multicast
+      # The runner's NIC drains every off-host send at once, so libuv never queues one and dgram contract tests N3 and
+      # N8 cannot see a full send buffer. Route TEST-NET-1 to a dummy interface behind a slow tbf qdisc, which holds the
+      # datagrams charged to the socket, then probe that the queue fills.
+      - name: Route the off-host address to a slow link
+        run: |
+          sudo ip link add rt0 type dummy
+          sudo ip link set rt0 up
+          sudo ip route add 192.0.2.0/24 dev rt0
+          sudo tc qdisc add dev rt0 root tbf rate 8kbit burst 1600 limit 100000000
+      - run: npm run probe:offhost
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
       - run: npm test
         env:
-          # a host without IPv6 loopback or a route off the host fails the tests that need them instead of skipping them (#38)
+          # a host without IPv6 loopback or a route off the host fails the tests that need them instead of skipping them (#38);
+          # the off-host route is the slow link set up above
           AERON_TS_REQUIRE_NET: '1'
           # the 1,000,000- and 10,000,000-iteration loops of the Java tests run in full on one job only
           AERON_TS_FULL_ITERATIONS: ${{ matrix.node == 24 && '1' || '' }}
