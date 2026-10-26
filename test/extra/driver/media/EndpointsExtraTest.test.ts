@@ -57,7 +57,10 @@ import { ImageConnection } from '../../../../src/driver/media/ImageConnection.js
 import { ReceiveChannelEndpoint } from '../../../../src/driver/media/ReceiveChannelEndpoint.js';
 import { ReceiveChannelEndpointThreadLocals } from '../../../../src/driver/media/ReceiveChannelEndpointThreadLocals.js';
 import { ReceiveDestinationTransport } from '../../../../src/driver/media/ReceiveDestinationTransport.js';
-import type { NetworkPublication } from '../../../../src/driver/media/SendChannelEndpoint.js';
+import {
+    asNetworkPublication,
+    type EndpointPublication as NetworkPublication,
+} from '../../../support/PublicationFakes.js';
 import { SendChannelEndpoint } from '../../../../src/driver/media/SendChannelEndpoint.js';
 import { UdpChannel } from '../../../../src/driver/media/UdpChannel.js';
 import { SystemCounterDescriptor } from '../../../../src/driver/status/SystemCounterDescriptor.js';
@@ -372,7 +375,7 @@ describe('SendChannelEndpoint', () => {
             [5, 1 << 21],
         ];
         const publications = ids.map(([sessionId, streamId]) => newPublication(sessionId, streamId));
-        publications.forEach((publication) => endpoint.registerForSend(publication));
+        publications.forEach((publication) => endpoint.registerForSend(asNetworkPublication(publication)));
 
         ids.forEach(([sessionId, streamId], i) => {
             const frame = smFrame(sessionId, streamId);
@@ -387,7 +390,7 @@ describe('SendChannelEndpoint', () => {
         });
 
         // unregistered: not found any more (mutation: unregisterForSend removes nothing)
-        endpoint.unregisterForSend(publications[0] as NetworkPublication);
+        endpoint.unregisterForSend(asNetworkPublication(publications[0] as NetworkPublication));
         const frame = smFrame(Integer.MIN_VALUE, Integer.MAX_VALUE);
         const sm = new StatusMessageFlyweight(new UnsafeBuffer(frame));
         endpoint.onStatusMessage(sm, sm, frame.length, new InetSocketAddress(LOOPBACK, 4000), proxy);
@@ -399,7 +402,7 @@ describe('SendChannelEndpoint', () => {
         const endpoint = newSendEndpoint();
         const proxy = newProxy();
         const publication = newPublication(7, 8);
-        endpoint.registerForSend(publication);
+        endpoint.registerForSend(asNetworkPublication(publication));
         const address = new InetSocketAddress(LOOPBACK, 4000);
 
         const setupFrame = smFrame(7, 8, StatusMessageFlyweight.SEND_SETUP_FLAG);
@@ -435,7 +438,7 @@ describe('SendChannelEndpoint', () => {
         const endpoint = newSendEndpoint();
         const proxy = newProxy();
         const publication = newPublication(7, 8);
-        endpoint.registerForSend(publication);
+        endpoint.registerForSend(asNetworkPublication(publication));
         const address = new InetSocketAddress(LOOPBACK, 4000);
 
         const nakBytes = nakFrame(7, 8);
@@ -474,7 +477,7 @@ describe('SendChannelEndpoint', () => {
     it('counts a NAK for a registered publication that is out of the term as invalid, and does not pass it on', () => {
         const endpoint = newSendEndpoint();
         const publication = newPublication(7, 8, 64 * 1024);
-        endpoint.registerForSend(publication);
+        endpoint.registerForSend(asNetworkPublication(publication));
 
         const bytes = nakFrame(7, 8, 64 * 1024); // an offset at the end of the term
         const nak = new NakFlyweight(new UnsafeBuffer(bytes));
@@ -490,7 +493,7 @@ describe('SendChannelEndpoint', () => {
         const proxy = newProxy();
         const publication = newPublication(7, 8);
         publication.timeOfLastStatusMessageNs.mockReturnValue(1_000_000_000);
-        endpoint.registerForSend(publication);
+        endpoint.registerForSend(asNetworkPublication(publication));
         const timeout = SendChannelEndpoint.DESTINATION_TIMEOUT;
         expect(timeout).toBe(5_000_000_000);
 
@@ -890,7 +893,7 @@ describe('MultiSndDestination (sending; the behaviour is tested again in phase 3
         endpoint.addDestination(destinationUri(50001), new InetSocketAddress(LOOPBACK, 50001), 100);
         endpoint.addDestination(destinationUri(50002), new InetSocketAddress(LOOPBACK, 50002), 101);
         const publication = newPublication(7, 8);
-        endpoint.registerForSend(publication);
+        endpoint.registerForSend(asNetworkPublication(publication));
         const proxy = newProxy();
 
         const frame = smFrame(7, 8);
@@ -1617,7 +1620,7 @@ describe('ControlTransportPoller', () => {
         endpoint.openDatagramChannel(null);
         poller.registerForRead(endpoint);
         const publication = newPublication(7, 8);
-        endpoint.registerForSend(publication);
+        endpoint.registerForSend(asNetworkPublication(publication));
         const send = (bytes: Uint8Array): number => {
             endpoint.onMessage(bytes, rinfo(40001));
             return poller.pollTransports();
@@ -1667,9 +1670,9 @@ describe('ControlTransportPoller', () => {
         failing.onNak.mockImplementation(() => {
             throw new Error('nak failed');
         });
-        bad.registerForSend(failing);
+        bad.registerForSend(asNetworkPublication(failing));
         const fine = newPublication(7, 8);
-        good.registerForSend(fine);
+        good.registerForSend(asNetworkPublication(fine));
         bad.onMessage(nakFrame(7, 8), rinfo(40001));
         good.onMessage(nakFrame(7, 8), rinfo(40001));
 
@@ -1733,7 +1736,7 @@ describe('endpoints over loopback (the real path)', () => {
                 context,
             ),
         );
-        send.registerForSend(publication);
+        send.registerForSend(asNetworkPublication(publication));
         receive.openDatagramChannel(null);
         send.openDatagramChannel(null);
         const dataPoller = track(new DataTransportPoller(context.countedErrorHandler() as ErrorHandler));

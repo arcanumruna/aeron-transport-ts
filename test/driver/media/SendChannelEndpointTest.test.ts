@@ -32,7 +32,10 @@ import { StatusMessageFlyweight } from '../../../src/client/protocol/StatusMessa
 import { InetSocketAddress } from '../../../src/driver/jdkNet.js';
 import { MediaDriver } from '../../../src/driver/MediaDriver.js';
 import { ReceiveChannelEndpointThreadLocals } from '../../../src/driver/media/ReceiveChannelEndpointThreadLocals.js';
-import type { NetworkPublication } from '../../../src/driver/media/SendChannelEndpoint.js';
+import {
+    asNetworkPublication,
+    type EndpointPublication as NetworkPublication,
+} from '../../support/PublicationFakes.js';
 import { DynamicSndMultiDestination, SendChannelEndpoint } from '../../../src/driver/media/SendChannelEndpoint.js';
 import { UdpChannel } from '../../../src/driver/media/UdpChannel.js';
 import { WildcardPortManager } from '../../../src/driver/media/WildcardPortManager.js';
@@ -177,7 +180,7 @@ describe('SendChannelEndpointTest', () => {
             context,
         );
         const publication = mockPublication();
-        endpoint.registerForSend(publication);
+        endpoint.registerForSend(asNetworkPublication(publication));
 
         const flyweight = new NakFlyweight(new UnsafeBuffer(new Uint8Array(NakFlyweight.HEADER_LENGTH)));
         flyweight.termOffset(-1);
@@ -210,7 +213,7 @@ describe('SendChannelEndpointTest', () => {
         const publication = mockPublication();
         const termLength = 128 * 1024;
         publication.termBufferLength.mockReturnValue(termLength);
-        endpoint.registerForSend(publication);
+        endpoint.registerForSend(asNetworkPublication(publication));
 
         const flyweight = new StatusMessageFlyweight(
             new UnsafeBuffer(new Uint8Array(StatusMessageFlyweight.HEADER_LENGTH)),

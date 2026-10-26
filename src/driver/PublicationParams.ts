@@ -17,7 +17,6 @@
  */
 // Port of io/aeron/driver/PublicationParams.java @ 1.53.3
 import { BitUtil } from '../agrona/BitUtil.js';
-import type { UnsafeBuffer } from '../agrona/concurrent/UnsafeBuffer.js';
 import {
     IllegalStateException,
     Integer,
@@ -34,6 +33,7 @@ import { FrameDescriptor } from '../client/logbuffer/FrameDescriptor.js';
 import { LogBufferDescriptor } from '../client/logbuffer/LogBufferDescriptor.js';
 import { Configuration } from './Configuration.js';
 import { InvalidChannelException } from './exceptions/InvalidChannelException.js';
+import type { RawLog } from './buffer/RawLog.js';
 import type { MediaDriver } from './MediaDriver.js';
 
 const {
@@ -84,13 +84,10 @@ export interface DriverConductor {
 }
 
 /**
- * The part of a `RawLog` that `PublicationParams.confirmMatch` reads. Placeholder for the class, which T15 ports; that
- * task replaces it with the class (a type-only import).
+ * The part of a {@link RawLog} that `PublicationParams.confirmMatch` reads, so that a test can pass the two members
+ * without the rest of the log.
  */
-export interface RawLog {
-    metaData(): UnsafeBuffer;
-    termLength(): number;
-}
+export type RawLogMetaData = Pick<RawLog, 'metaData' | 'termLength'>;
 
 /**
  * Publication parameters of a channel URI with their defaults from the {@link MediaDriver.Context}. The Java class is
@@ -420,7 +417,7 @@ export class PublicationParams {
     public static confirmMatch(
         channelUri: ChannelUri,
         params: PublicationParams,
-        rawLog: RawLog,
+        rawLog: RawLogMetaData,
         existingSessionId: number,
         existingChannel: string,
         existingInitialTermId: number,

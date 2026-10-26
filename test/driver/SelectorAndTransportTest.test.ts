@@ -36,7 +36,7 @@ import { ControlTransportPoller } from '../../src/driver/media/ControlTransportP
 import { DataTransportPoller } from '../../src/driver/media/DataTransportPoller.js';
 import { ReceiveChannelEndpoint } from '../../src/driver/media/ReceiveChannelEndpoint.js';
 import { ReceiveChannelEndpointThreadLocals } from '../../src/driver/media/ReceiveChannelEndpointThreadLocals.js';
-import type { NetworkPublication } from '../../src/driver/media/SendChannelEndpoint.js';
+import { asNetworkPublication, type EndpointPublication as NetworkPublication } from '../support/PublicationFakes.js';
 import { SendChannelEndpoint } from '../../src/driver/media/SendChannelEndpoint.js';
 import { UdpChannel } from '../../src/driver/media/UdpChannel.js';
 import type { UdpTransportPoller } from '../../src/driver/media/UdpTransportPoller.js';
@@ -318,7 +318,7 @@ describe('SelectorAndTransportTest', () => {
             context,
         );
         sendChannelEndpoint = new SendChannelEndpoint(SRC_DST, mockSendStatusIndicator, context);
-        sendChannelEndpoint.registerForSend(mockPublication);
+        sendChannelEndpoint.registerForSend(asNetworkPublication(mockPublication));
 
         receiveChannelEndpoint.openDatagramChannel(mockReceiveStatusIndicator);
         dataTransportPoller.registerForRead(receiveChannelEndpoint, receiveChannelEndpoint, 0);
