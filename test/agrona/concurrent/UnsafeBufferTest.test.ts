@@ -19,6 +19,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import type { DirectBuffer } from '../../../src/agrona/DirectBuffer.js';
+import { ExpandableArrayBuffer } from '../../../src/agrona/ExpandableArrayBuffer.js';
 import { ByteOrder, IllegalStateException, IndexOutOfBoundsException } from '../../../src/agrona/jdk.js';
 import type { MutableDirectBuffer } from '../../../src/agrona/MutableDirectBuffer.js';
 import { BACKINGS } from '../../support/Backing.js';
@@ -225,8 +226,8 @@ describe.each(BACKINGS)('UnsafeBufferTest over $name', (backing) => {
         buffer.verifyAlignment();
     });
 
-    // adapted: ExpandableArrayBuffer and ExpandableDirectByteBuffer are not ported, and the UnsafeBuffer over a heap
-    // ByteBuffer is over an ArrayBuffer; the byteBuffer() assertions are dropped as there is no byteBuffer()
+    // adapted: ExpandableDirectByteBuffer is not ported, and the UnsafeBuffer over a heap ByteBuffer is not repeated
+    // (the UnsafeBuffer over an ArrayBuffer is its row); the byteBuffer() assertions are dropped as there is no byteBuffer()
     it.each(directBuffers())('wrapDirectBuffer %s', (src) => {
         const buffer = new UnsafeBuffer(src);
 
@@ -272,7 +273,7 @@ describe.each(BACKINGS)('UnsafeBufferTest over $name', (backing) => {
             addressOffset: vi.fn(() => 0), // Mockito's default for a long that is not stubbed
         } as unknown as DirectBuffer;
         const mockByteArray = new Uint8Array(5);
-        return [new UnsafeBuffer(backing.arrayBuffer(64)), mockBuffer];
+        return [new ExpandableArrayBuffer(64), new UnsafeBuffer(backing.arrayBuffer(64)), mockBuffer];
     }
 
     it.skip('wrapForRawMemoryAddressShouldResetWrapAdjustment', () => {

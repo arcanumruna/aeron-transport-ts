@@ -21,6 +21,7 @@ import { expect, it } from 'vitest';
 import { AbstractMutableDirectBuffer } from '../../src/agrona/AbstractMutableDirectBuffer.js';
 import { AsciiNumberFormatException } from '../../src/agrona/AsciiNumberFormatException.js';
 import { UnsafeBuffer } from '../../src/agrona/concurrent/UnsafeBuffer.js';
+import { ExpandableArrayBuffer } from '../../src/agrona/ExpandableArrayBuffer.js';
 import {
     Integer,
     IndexOutOfBoundsException,
@@ -355,8 +356,8 @@ export function mutableDirectBufferTests(
         },
     );
 
-    // adapted: ExpandableArrayBuffer and ExpandableDirectByteBuffer are not ported, and the UnsafeBuffers over a heap
-    // and a direct ByteBuffer are over an ArrayBuffer
+    // adapted: ExpandableDirectByteBuffer is not ported, and the UnsafeBuffers over a heap and a direct ByteBuffer are
+    // over an ArrayBuffer
     it.each(mutableBuffers(backing))('getBytesShouldCopyIntoDestinationBuffer %s', (dest) => {
         const srcIndex = 20;
         const dstIndex = 13;
@@ -537,5 +538,9 @@ function nonParsableLongValues(): [string, number][] {
 }
 
 function mutableBuffers(backing: Backing): MutableDirectBuffer[] {
-    return [new UnsafeBuffer(backing.bytes(64)), new UnsafeBuffer(backing.arrayBuffer(64))];
+    return [
+        new ExpandableArrayBuffer(64),
+        new UnsafeBuffer(backing.bytes(64)),
+        new UnsafeBuffer(backing.arrayBuffer(64)),
+    ];
 }

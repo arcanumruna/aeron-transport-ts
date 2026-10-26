@@ -21,6 +21,7 @@ import type { AtomicBuffer } from '../../src/agrona/concurrent/AtomicBuffer.js';
 import { CountersManager } from '../../src/agrona/concurrent/status/CountersManager.js';
 import { CountersReader } from '../../src/agrona/concurrent/status/CountersReader.js';
 import { UnsafeBuffer } from '../../src/agrona/concurrent/UnsafeBuffer.js';
+import { ExpandableArrayBuffer } from '../../src/agrona/ExpandableArrayBuffer.js';
 import { IllegalArgumentException, Long, NullPointerException } from '../../src/agrona/jdk.js';
 import { StandardCharsets } from '../../src/agrona/jdkLang.js';
 import { AeronCounters } from '../../src/client/AeronCounters.js';
@@ -94,8 +95,7 @@ describe('AeronCountersTest', () => {
         ['1.43.0-SNAPSHOT', 'abc', 'version=1.43.0-SNAPSHOT commit=abc'],
     ])('shouldAppendVersionInfo %s', (fullVersion, commitHash, formatted) => {
         const expected = ' ' + formatted;
-        // ExpandableArrayBuffer(32) grows on the write; it is ported by a later task, so the buffer is big enough here
-        const buffer = new UnsafeBuffer(new ArrayBuffer(64));
+        const buffer = new ExpandableArrayBuffer(32);
         const offset = 5;
         buffer.setMemory(0, buffer.capacity(), 0xff);
 

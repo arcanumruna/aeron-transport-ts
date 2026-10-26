@@ -25,6 +25,7 @@ import { RecordDescriptor } from '../../../../src/agrona/concurrent/ringbuffer/R
 import { RingBuffer } from '../../../../src/agrona/concurrent/ringbuffer/RingBuffer.js';
 import { RingBufferDescriptor } from '../../../../src/agrona/concurrent/ringbuffer/RingBufferDescriptor.js';
 import { UnsafeBuffer } from '../../../../src/agrona/concurrent/UnsafeBuffer.js';
+import { ExpandableArrayBuffer } from '../../../../src/agrona/ExpandableArrayBuffer.js';
 import { IllegalArgumentException, IllegalStateException, Long } from '../../../../src/agrona/jdk.js';
 import { assertThrows } from '../../../support/Assertions.js';
 import { BACKINGS } from '../../../support/Backing.js';
@@ -643,10 +644,9 @@ describe.each(BACKINGS)('ManyToOneRingBufferTest over $name', (backing) => {
         inOrder0.verifyNoMoreInteractions();
     });
 
-    // ExpandableArrayBuffer is not ported (see docs/mapping.md): the source is an UnsafeBuffer that is large enough
     it('shouldContinueOnControlledRead', () => {
         const msg = 'Hello World';
-        const srcBuffer = newBuffer(64);
+        const srcBuffer = new ExpandableArrayBuffer();
         const srcLength = srcBuffer.putStringAscii(0, msg);
         const ringBuffer = new ManyToOneRingBuffer(newBuffer(1024));
 
@@ -670,7 +670,7 @@ describe.each(BACKINGS)('ManyToOneRingBufferTest over $name', (backing) => {
 
     it('shouldAbortOnControlledRead', () => {
         const msg = 'Hello World';
-        const srcBuffer = newBuffer(64);
+        const srcBuffer = new ExpandableArrayBuffer();
         const srcLength = srcBuffer.putStringAscii(0, msg);
         const ringBuffer = new ManyToOneRingBuffer(newBuffer(1024));
 
@@ -694,7 +694,7 @@ describe.each(BACKINGS)('ManyToOneRingBufferTest over $name', (backing) => {
 
     it('shouldAbortOnControlledReadOfSecondMessage', () => {
         const msg = 'Hello World';
-        const srcBuffer = newBuffer(64);
+        const srcBuffer = new ExpandableArrayBuffer();
         const srcLength = srcBuffer.putStringAscii(0, msg);
         const ringBuffer = new ManyToOneRingBuffer(newBuffer(1024));
         const counter = new MutableInteger();
@@ -717,7 +717,7 @@ describe.each(BACKINGS)('ManyToOneRingBufferTest over $name', (backing) => {
 
     it('shouldCommitOnEachMessage', () => {
         const msg = 'Hello World';
-        const srcBuffer = newBuffer(64);
+        const srcBuffer = new ExpandableArrayBuffer();
         const srcLength = srcBuffer.putStringAscii(0, msg);
         const ringBuffer = new ManyToOneRingBuffer(newBuffer(1024));
         const counter = new MutableInteger();

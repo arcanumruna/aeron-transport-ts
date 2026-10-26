@@ -599,4 +599,16 @@ export class VarHandle {
         : (): void => {
               Atomics.add(FENCE, 0, 0);
           };
+
+    /**
+     * `VarHandle.acquireFence()`: no earlier load is reordered with a later load or store. Chosen like
+     * `releaseFence()`: the empty function on x64 (loads are not reordered with later loads or stores, and V8 does not
+     * move a plain typed-array access across an `Atomics` operation), a sequentially consistent read-modify-write on
+     * any other architecture.
+     */
+    public static readonly acquireFence: () => void = RELEASE_FENCE_IS_NO_OP
+        ? (): void => {}
+        : (): void => {
+              Atomics.add(FENCE, 0, 0);
+          };
 }
