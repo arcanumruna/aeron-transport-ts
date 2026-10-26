@@ -7,7 +7,7 @@
 import dgram from 'node:dgram';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { UnsafeBuffer } from '../../../../src/agrona/concurrent/UnsafeBuffer.js';
-import { InetSocketAddress, InterfaceAddress, NetworkInterface } from '../../../../src/driver/jdkNet.js';
+import { InetSocketAddress } from '../../../../src/driver/jdkNet.js';
 import { MediaDriver } from '../../../../src/driver/MediaDriver.js';
 import type { PortManager } from '../../../../src/driver/media/PortManager.js';
 import { UdpChannel } from '../../../../src/driver/media/UdpChannel.js';
@@ -237,74 +237,44 @@ describe.skipIf(!IS_LINUX)('multicast transports on one port', () => {
             expect(bindHostOf('[ff02::11:87]', undefined)).toBeNull();
         });
     });
-    // Issue #61 (spec D132): a link-local group of a channel without an interface was bound to the wildcard address.
+    // Issue #61: a multicast channel always has an interface (`UdpChannel.parse` resolves one, D132 withdrawn), and the
+    // transport resolves it once, so that the receive bind, the join and the send use the same one.
     describe('a link-local group of a channel without an interface', () => {
-        const ethernet = (name: string, up: boolean, multicast: boolean, loopback = false): NetworkInterface =>
-            new NetworkInterface(name, name, [] as InterfaceAddress[], { loopback, up, multicast });
-        type Private = {
-            multicastInterface(): string | undefined;
-        };
-        const transportOf = (interfaces: NetworkInterface[]): TestTransport => {
-            const channel = UdpChannel.parse('aeron:udp?endpoint=[ff02::11:87]:' + PORT);
-            vi.spyOn(channel, 'localInterface').mockReturnValue(null);
-            vi.spyOn(NetworkInterface, 'getNetworkInterfaces').mockReturnValue(interfaces);
-            const transport = new TestTransport(channel, context);
-            transports.push(transport);
-            return transport;
-        };
-        const bindHostOf = (transport: TestTransport): string | null => {
-            const select = (
-                UdpChannelTransport as unknown as {
-                    multicastBindHost: (c: UdpChannel, a: InetSocketAddress, i: string | undefined) => string | null;
-                }
-            ).multicastBindHost;
-            return select(
-                transport.udpChannel(),
-                transport.udpChannel().remoteData(),
-                (transport as unknown as Private).multicastInterface(),
-            );
-        };
-
         afterEach(() => {
             vi.restoreAllMocks();
         });
 
-        it.skipIf(!IS_LINUX)('isBoundWithTheScopeOfTheFirstUpMulticastInterface Regression', () => {
-            const transport = transportOf([
-                ethernet('lo', true, false, true),
-                ethernet('down0', false, true),
-                ethernet('eth7', true, true),
-                ethernet('eth8', true, true),
-            ]);
+        it.skipIf(!IS_LINUX)('resolvesTheMulticastInterfaceOncePerTransport Regression', () => {
+            // IPv4 group: the bind, the join and the send of an open all ask for the interface of the channel
+            const channel = UdpChannel.parse('aeron:udp?endpoint=' + IPV4.groupA + ':' + PORT);
+            const lookup = vi.spyOn(channel, 'localInterface');
+            const transport = new TestTransport(channel, context);
+            transports.push(transport);
 
-            expect((transport as unknown as Private).multicastInterface()).toBe('::%eth7');
-            expect(bindHostOf(transport)).toBe('ff02:0:0:0:0:0:11:87%eth7');
+            transport.openDatagramChannel(null);
+            const privateOf = transport as unknown as { multicastInterface(): string | undefined };
+            privateOf.multicastInterface();
+
+            expect(lookup).toHaveBeenCalledTimes(1);
         });
 
-        it.skipIf(!IS_LINUX)('isBoundWithTheScopeOfTheLoopbackWhenItIsTheOnlyInterfaceThatIsUp Regression', () => {
-            const transport = transportOf([ethernet('eth7', false, true), ethernet('lo', true, false, true)]);
+        it.skipIf(!IS_LINUX)('doesNotSeeTheDatagramsOfAnotherGroupOnThePort Regression', async () => {
+            if (!ipv6WorksOverDefaultInterface) {
+                if ('1' === process.env['REQUIRE_IPV6_MULTICAST']) {
+                    throw new Error(
+                        'REQUIRE_IPV6_MULTICAST=1 but IPv6 multicast does not work over the default interface ' +
+                            String(defaultInterfaceName),
+                    );
+                }
+                return;
+            }
+            const a = open(IPV6_LINK_LOCAL, IPV6_LINK_LOCAL.groupA, false);
+            const b = open(IPV6_LINK_LOCAL, IPV6_LINK_LOCAL.groupB, false);
 
-            expect(bindHostOf(transport)).toBe('ff02:0:0:0:0:0:11:87%lo');
+            a.sendTo(bufferOf('to b'), 0, 4, new InetSocketAddress(IPV6_LINK_LOCAL.groupB, PORT));
+            expect(await receiveText(b)).toBe('to b');
+            a.sendTo(bufferOf('to a'), 0, 4, new InetSocketAddress(IPV6_LINK_LOCAL.groupA, PORT));
+            expect(await receiveText(a)).toBe('to a');
         });
-
-        it.skipIf(!IS_LINUX)('keepsTheWildcardOnlyOnAHostWithoutAnInterfaceThatIsUp Regression', () => {
-            const transport = transportOf([ethernet('eth7', false, true)]);
-
-            expect((transport as unknown as Private).multicastInterface()).toBeUndefined();
-            expect(bindHostOf(transport)).toBeNull();
-        });
-
-        it.skipIf(!IS_LINUX || !ipv6WorksOverDefaultInterface)(
-            'doesNotSeeTheDatagramsOfAnotherGroupOnThePort Regression',
-            async () => {
-                const a = open(IPV6_LINK_LOCAL, IPV6_LINK_LOCAL.groupA, false);
-                const b = open(IPV6_LINK_LOCAL, IPV6_LINK_LOCAL.groupB, false);
-
-                a.sendTo(bufferOf('to b'), 0, 4, new InetSocketAddress(IPV6_LINK_LOCAL.groupB, PORT));
-                expect(await receiveText(b)).toBe('to b');
-                a.sendTo(bufferOf('to a'), 0, 4, new InetSocketAddress(IPV6_LINK_LOCAL.groupA, PORT));
-                expect(await receiveText(a)).toBe('to a');
-            },
-        );
     });
 });
