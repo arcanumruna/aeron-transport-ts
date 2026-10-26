@@ -381,19 +381,21 @@ export abstract class InetAddress {
             throw new UnknownHostException('NUL character not allowed in hostname');
         }
 
+        const originalHost = host;
         let ipv6Expected = false;
         if ('[' === host.charAt(0)) {
             if (host.length > 2 && ']' === host.charAt(host.length - 1)) {
                 host = host.substring(1, host.length - 1);
                 ipv6Expected = true;
             } else {
-                throw new UnknownHostException(host + ': invalid IPv6 address');
+                throw new UnknownHostException(originalHost + ': invalid IPv6 address literal');
             }
         }
 
         if (-1 !== digit(host.charAt(0), 16) || ':' === host.charAt(0)) {
             let addr = textToNumericFormatV4(host);
-            if (null === addr && isBsdParsableV4(host)) {
+            // JDK: the BSD form is refused only where a name or an IPv4 literal is expected, not inside brackets
+            if (null === addr && !ipv6Expected && isBsdParsableV4(host)) {
                 throw new UnknownHostException(host);
             }
             let numericZone = -1;
@@ -407,14 +409,14 @@ export abstract class InetAddress {
                     }
                 }
                 addr = textToNumericFormatV6(host);
-                if (null === addr && host.includes(':')) {
-                    throw new UnknownHostException(host + ': invalid IPv6 address');
+                if (null === addr && (ipv6Expected || host.includes(':'))) {
+                    throw new UnknownHostException(originalHost + ': invalid IPv6 address literal');
                 }
                 if (null !== addr && INADDR4SZ === addr.length && (-1 !== numericZone || null !== ifname)) {
                     throw new UnknownHostException(host + ': invalid IPv4-mapped address');
                 }
             } else if (ipv6Expected) {
-                throw new UnknownHostException('[' + host + ']');
+                throw new UnknownHostException(originalHost + ': invalid IPv6 address literal');
             }
 
             if (null !== addr) {
@@ -431,7 +433,7 @@ export abstract class InetAddress {
                 return new Inet6Address(null, addr, -1 === numericZone ? null : numericZone, null);
             }
         } else if (ipv6Expected) {
-            throw new UnknownHostException('[' + host + ']');
+            throw new UnknownHostException(originalHost + ': invalid IPv6 address literal');
         }
 
         const key = host.toLowerCase();

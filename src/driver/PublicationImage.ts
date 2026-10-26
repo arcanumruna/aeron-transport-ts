@@ -1026,6 +1026,12 @@ export class PublicationImage implements LossHandler, DriverManagedResource, Sub
                         this.timeOfLastStateChangeNs + SM_EOS_MULTIPLE * this.smTimeoutNs - timeNs < 0) ||
                     isPublicationRevoked(this._rawLog.metaData())
                 ) {
+                    // the removal of the cool down and the close of the endpoint: with a full receiver queue (spec D42,
+                    // D55) nothing is changed or notified, and the next duty cycle asks again (issue #44)
+                    if (!conductor.receiverQueueHasRoom(2)) {
+                        break;
+                    }
+
                     if (isPublicationRevoked(this._rawLog.metaData())) {
                         this.isRebuilding = false;
                         this.isSendingEosSm = true;

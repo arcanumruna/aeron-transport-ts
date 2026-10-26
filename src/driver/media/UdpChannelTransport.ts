@@ -178,10 +178,8 @@ export abstract class UdpChannelTransport implements AutoCloseable {
     private pendingSendError: Error | null = null;
     private openError: Error | null = null;
     private isOpening = false;
-    private readonly endOpeningCallback = (): void => {
-        this.isOpening = false;
-        this.openError = null;
-    };
+    // updateEndpoint has thrown the failure of a connect that node also emits as an 'error' event later: drop that one
+    private connectFailureHandled = false;
     private isClosed = false;
     // close() has run: it frees the managed port once. Not isClosed, which a failed open also sets (late socket errors).
     private closeDone = false;
@@ -610,7 +608,6 @@ export abstract class UdpChannelTransport implements AutoCloseable {
      * @param statusIndicator for the channel
      */
     public updateEndpoint(newAddress: InetSocketAddress, statusIndicator: AtomicCounter | null): void {
-        let failed = false;
         try {
             const socket = this.sendDatagramChannel;
             if (null !== socket) {
@@ -646,17 +643,16 @@ export abstract class UdpChannelTransport implements AutoCloseable {
                 '): ' +
                 this._udpChannel.originalUriString();
 
-            // The failed connect was handled by this throw. Node also emits it as an 'error' event on the next tick
-            // (Java has no such second error), so the transport stays "opening" until a tick queued after node's own, and
-            // the event is dropped by onSocketError instead of being reported at the next poll.
-            failed = true;
-            process.nextTick(this.endOpeningCallback);
+            // The failed connect was handled by this throw. Node also emits it as an 'error' event later (Java has no
+            // such second error): onSocketError drops one error of the connect, whenever it arrives, instead of
+            // reporting it at the next poll.
+            if (error instanceof IOException || 'connect' === (error as NodeJS.ErrnoException).syscall) {
+                this.connectFailureHandled = true;
+            }
 
             throw new AeronException(message, error);
         } finally {
-            if (!failed) {
-                this.isOpening = false;
-            }
+            this.isOpening = false;
         }
     }
 
@@ -765,6 +761,11 @@ export abstract class UdpChannelTransport implements AutoCloseable {
      * held, the first: a repeating error is reported once per duty cycle.
      */
     private onSocketError(error: Error): void {
+        if (this.connectFailureHandled && 'connect' === (error as NodeJS.ErrnoException).syscall) {
+            this.connectFailureHandled = false;
+            return;
+        }
+
         if (this.isOpening) {
             this.openError ??= error;
             return;

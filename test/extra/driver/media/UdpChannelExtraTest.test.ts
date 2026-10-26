@@ -79,6 +79,25 @@ describe('UdpChannelExtraTest', () => {
         });
     });
 
+    describe('null name resolver', () => {
+        // issue #18; mutation: parse checks the resolver up front, or wraps any TypeError of a null resolver
+        it('aNullNameResolverFailsAtTheFirstLookupAndNotBeforeRegression', () => {
+            // no address to look up: Java never touches the resolver
+            const channel = UdpChannel.parse('aeron:udp?control-mode=manual', null as unknown as NameResolver);
+            expect(channel.isManualControlMode()).toBe(true);
+
+            for (const uri of [
+                'aeron:udp?endpoint=127.0.0.1:1234',
+                'aeron:udp?control=localhost:1234|control-mode=dynamic',
+            ]) {
+                const ex = assertThrowsExactly(InvalidChannelException, () =>
+                    UdpChannel.parse(uri, null as unknown as NameResolver),
+                );
+                expect(getCause(ex)).toBeInstanceOf(NullPointerException);
+            }
+        });
+    });
+
     describe('canonical form', () => {
         // Mutation: in the final `else` branch of parse, `'-' + uniqueCanonicalFormValue++` becomes
         // `'-' + uniqueCanonicalFormValue` (the increment is dropped).

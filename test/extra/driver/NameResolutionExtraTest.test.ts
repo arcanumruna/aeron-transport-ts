@@ -122,14 +122,43 @@ describe('NameResolutionExtraTest', () => {
         });
 
         it.each([
-            ['1:2:3', '1:2:3: invalid IPv6 address'],
-            ['[::1', '[::1: invalid IPv6 address'],
-            ['::1%', '::1%: invalid IPv6 address'],
-            [':', ':: invalid IPv6 address'],
+            ['1:2:3', '1:2:3: invalid IPv6 address literal'],
+            ['[::1', '[::1: invalid IPv6 address literal'],
+            ['::1%', '::1%: invalid IPv6 address literal'],
+            [':', ':: invalid IPv6 address literal'],
         ])('throwsForAnInvalidIpV6Literal %s', (host, message) => {
             const e = assertThrowsExactly(UnknownHostException, () => InetAddress.getByName(host));
 
             expect(e.message).toBe(message);
+        });
+
+        // issue #13, pinned against OpenJDK 21.0.12's InetAddress.getByName: inside brackets only an IPv6 literal is
+        // accepted, whatever the BSD form says, and the message names the original string, brackets included.
+        // mutation: the BSD check runs for a bracketed literal (the message is the bare host), or the message loses
+        // "literal" or the brackets
+        it.each([
+            '[1.2.3.4]',
+            '[0x7f.1]',
+            '[0x7f]',
+            '[127.1]',
+            '[a]',
+            '[g]',
+            '[localhost]',
+            '[1.2.3.4%1]',
+            '[256.1.1.1]',
+            '[xyz:1]',
+            '[:::]',
+            '[::1]]',
+            '[1.2.3.4]x',
+        ])('rejectsAnythingButAnIpV6LiteralInBracketsRegression %s', (host) => {
+            const e = assertThrowsExactly(UnknownHostException, () => InetAddress.getByName(host));
+
+            expect(e.message).toBe(host + ': invalid IPv6 address literal');
+        });
+
+        it('stillAcceptsABracketedIpV6Literal', () => {
+            expect(InetAddress.getByName('[::1]').getHostAddress()).toBe('0:0:0:0:0:0:0:1');
+            expect(InetAddress.getByName('[::ffff:1.2.3.4]').getHostAddress()).toBe('1.2.3.4');
         });
 
         it('throwsForAnUnknownInterfaceScope', () => {
