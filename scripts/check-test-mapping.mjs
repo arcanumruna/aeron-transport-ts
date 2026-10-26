@@ -88,15 +88,19 @@ function matchParen(src, open) {
     return -1;
 }
 
-/** `it` titles in a TS test file: name (title up to the first space), and whether it is skipped. */
+/**
+ * `it` titles in a TS test file: name (title up to the first space), and whether it is skipped. `it.each` and `it.for` (vitest's
+ * `each` whose callback also gets the test context, so that a row can `skip`) take the table first and the title in the
+ * call that follows.
+ */
 export function tsTestTitles(src) {
     const out = [];
-    const re = /\bit((?:\.(?:skip|only|todo|each|fails))*)\s*(?:<[^()]*>)?\s*\(/g;
+    const re = /\bit((?:\.(?:skip|only|todo|each|for|fails))*)\s*(?:<[^()]*>)?\s*\(/g;
     let m;
     while ((m = re.exec(src)) !== null) {
         const mods = m[1];
         let open = m.index + m[0].length - 1;
-        if (mods.includes('.each')) {
+        if (mods.includes('.each') || mods.includes('.for')) {
             const close = matchParen(src, open);
             if (close < 0) continue;
             const next = /^\s*\(/.exec(src.slice(close + 1));

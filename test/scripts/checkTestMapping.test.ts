@@ -59,6 +59,15 @@ describe('checkTestMapping', () => {
         ]);
     });
 
+    it('collects TS titles of it.for like it.each', () => {
+        const src =
+            "it.for(['a', 'b'])('shouldDoA %s', (row, { skip }) => {});\nit.skip.for<number>([1])('shouldDoB %s', () => {});";
+        expect(tsTestTitles(src)).toEqual([
+            { name: 'shouldDoA', skip: false },
+            { name: 'shouldDoB', skip: true },
+        ]);
+    });
+
     it('collects TS titles, it.each prefixes and skips', () => {
         const titles = tsTestTitles(read('ts/Sample.test.ts'));
         expect(titles.map((t) => t.name)).toEqual(['shouldDoA', 'shouldDoB', 'shouldDoC']);

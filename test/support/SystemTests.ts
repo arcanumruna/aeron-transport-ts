@@ -6,14 +6,25 @@
 // With a manual clock a turn is also 1 ms of the clock of every driver and client, so the timeouts of the driver (image
 // liveness, linger, receiver timeouts) pass without wall time.
 import { afterEach } from 'vitest';
+import { BitUtil } from '../../src/agrona/BitUtil.js';
+import { UnsafeBuffer } from '../../src/agrona/concurrent/UnsafeBuffer.js';
 import type { AgentInvoker } from '../../src/agrona/concurrent/AgentInvoker.js';
 import { CountersReader } from '../../src/agrona/concurrent/status/CountersReader.js';
 import { Aeron } from '../../src/client/Aeron.js';
 import type { Publication } from '../../src/client/Publication.js';
 import type { Subscription } from '../../src/client/Subscription.js';
+import { AeronException } from '../../src/client/exceptions/AeronException.js';
+import { RegistrationException } from '../../src/client/exceptions/RegistrationException.js';
+import { DebugChannelEndpointConfiguration } from '../../src/driver/ext/DebugChannelEndpointConfiguration.js';
+import { DebugReceiveChannelEndpoint } from '../../src/driver/ext/DebugReceiveChannelEndpoint.js';
+import type { LossGenerator } from '../../src/driver/ext/LossGenerator.js';
 import { MediaDriver } from '../../src/driver/MediaDriver.js';
+import { LossReport } from '../../src/driver/reports/LossReport.js';
 import { ThreadingMode } from '../../src/driver/ThreadingMode.js';
 import { CYCLE_NS, ManualClock } from './EmbeddedRig.js';
+
+/** The most duty cycles a driver gets to finish the commands that are queued when its test closes it. */
+const QUIESCE_CYCLES = 1000;
 
 /** The most turns `drainUntil` takes before it fails, unless the call gives another cap. */
 export const DEFAULT_MAX_TURNS = 1_000_000;
@@ -47,6 +58,13 @@ export class TestNode {
         // clients before the driver, as the Java tests close them (try-with-resources in reverse)
         for (const client of this.clients.splice(0).reverse()) {
             client.close();
+        }
+        // The agents of Java's driver are threads, which have long since taken the commands a client left in their queues when
+        // the test closes the driver (a destination added the moment before the close, say, whose transport is open). The
+        // driver here runs only when it is invoked: let it finish them, so that no socket outlives its driver.
+        const invoker = this.driver.sharedAgentInvoker();
+        for (let i = 0; i < QUIESCE_CYCLES && 0 !== invoker.invoke(); i++) {
+            // until a cycle has no work
         }
         this.driver.close();
     }
@@ -309,6 +327,32 @@ export class SystemTests {
         );
     }
 
+    /** `Tests.reAddSubscription`: adds the subscription, again while the driver refuses it with a warning (it is closing). */
+    public async reAddSubscription(
+        aeron: Aeron,
+        channel: string,
+        streamId: number,
+        maxTurns = DEFAULT_MAX_TURNS,
+    ): Promise<Subscription> {
+        let subscription: Subscription | null = null;
+        await this.drainUntil(
+            () => {
+                try {
+                    subscription = aeron.addSubscription(channel, streamId);
+                    return true;
+                } catch (ex) {
+                    if (ex instanceof RegistrationException && ex.category() === AeronException.Category.WARN) {
+                        return false;
+                    }
+                    throw ex;
+                }
+            },
+            maxTurns,
+            () => 'subscription of ' + channel,
+        );
+        return subscription as unknown as Subscription;
+    }
+
     /** Teardown: every client is closed before its driver; the first error a close throws is thrown after the rest. */
     public close(): void {
         let failure: unknown = null;
@@ -324,6 +368,78 @@ export class SystemTests {
             throw failure;
         }
     }
+}
+
+/** The parts of `TestMediaDriver` that the ported system tests call, as statics. */
+export const TestMediaDriver = {
+    /**
+     * `TestMediaDriver.enableRandomLoss(context, rate, seed, loseDataMessages, loseControlMessages)`, Java driver: a debug
+     * receive endpoint that drops frames of the data and/or control stream at random.
+     */
+    enableRandomLoss(
+        context: MediaDriver.Context,
+        rate: number,
+        seed: number,
+        loseDataMessages: boolean,
+        loseControlMessages: boolean,
+    ): void {
+        const never: LossGenerator = { shouldDropFrame: () => false };
+        const dataLossGenerator = loseDataMessages
+            ? DebugChannelEndpointConfiguration.lossGeneratorSupplier(rate, seed)
+            : never;
+        const controlLossGenerator = loseControlMessages
+            ? DebugChannelEndpointConfiguration.lossGeneratorSupplier(rate, seed)
+            : never;
+        context.receiveChannelEndpointSupplier({
+            newInstance: (udpChannel, dispatcher, statusIndicator, ctx) =>
+                new DebugReceiveChannelEndpoint(
+                    udpChannel,
+                    dispatcher,
+                    statusIndicator,
+                    ctx,
+                    dataLossGenerator,
+                    controlLossGenerator,
+                ),
+        });
+    },
+};
+
+/**
+ * The loss report of a driver that has no file (spec D50): the buffer that the context's `LossReport` writes to. Make one
+ * with `newLossReport` and set it with `context.lossReport(report)`.
+ */
+export function newLossReportBuffer(capacity = 64 * 1024): { buffer: UnsafeBuffer; report: LossReport } {
+    const buffer = new UnsafeBuffer(new Uint8Array(capacity));
+    return { buffer, report: new LossReport(buffer) };
+}
+
+/**
+ * `SystemTests.verifyLossOccurredForStream(aeronDirectoryName, streamId)`: reads the entries of the loss report (the layout of
+ * `LossReportReader`) and says whether one for the stream observed loss (an observation count and total bytes lost above 0);
+ * the test asserts that it is true.
+ */
+export function verifyLossOccurredForStream(buffer: UnsafeBuffer, streamId: number): boolean {
+    const { SIZE_OF_INT, align } = BitUtil;
+    let offset = 0;
+    while (offset + LossReport.ENTRY_ALIGNMENT <= buffer.capacity()) {
+        const observationCount = buffer.getLongVolatile(offset + LossReport.OBSERVATION_COUNT_OFFSET);
+        if (observationCount <= 0) {
+            break;
+        }
+
+        const totalBytesLost = buffer.getLong(offset + LossReport.TOTAL_BYTES_LOST_OFFSET);
+        const entryStreamId = buffer.getInt(offset + LossReport.STREAM_ID_OFFSET);
+        if (entryStreamId === streamId && totalBytesLost > 0) {
+            return true;
+        }
+
+        const channelLength = buffer.getInt(offset + LossReport.CHANNEL_OFFSET);
+        const sourceOffset = offset + LossReport.CHANNEL_OFFSET + align(SIZE_OF_INT + channelLength, SIZE_OF_INT);
+        const sourceLength = buffer.getInt(sourceOffset);
+        offset += align(sourceOffset + SIZE_OF_INT + sourceLength - offset, LossReport.ENTRY_ALIGNMENT);
+    }
+
+    return false;
 }
 
 const open = new Set<SystemTests>();

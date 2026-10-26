@@ -1,6 +1,7 @@
 // Tests of the support of the ported system tests (phase 3, T5, D115): `drainUntil` and the waits over it fail at their cap
 // instead of hanging, a manual clock moves only with the turns, two drivers of one test are told apart, and the teardown
 // closes the clients before the drivers.
+import dgram from 'node:dgram';
 import { describe, expect, it, vi } from 'vitest';
 import { UnsafeBuffer } from '../../src/agrona/concurrent/UnsafeBuffer.js';
 import { freeUdpPort } from '../support/Udp.js';
@@ -122,5 +123,28 @@ describe('SystemTests', () => {
         expect(order).toEqual(['client extra', 'client second', 'driver second', 'client first', 'driver first']);
         expect(tests.nodes).toEqual([]);
         vi.restoreAllMocks();
+    });
+
+    it('theTeardownLetsTheDriverFinishQueuedCommandsSoNoDestinationSocketOutlivesIt Regression', async () => {
+        const bindable = (port: number): Promise<boolean> =>
+            new Promise((resolve) => {
+                const socket = dgram.createSocket('udp4');
+                socket.once('error', () => resolve(false));
+                socket.bind(port, '127.0.0.1', () => {
+                    socket.close();
+                    resolve(true);
+                });
+            });
+        const port = await freeUdpPort();
+        const tests = new SystemTests('queued', true);
+        const node = tests.launch();
+        const subscription = node.aeron.addSubscription('aeron:udp?control-mode=manual', STREAM_ID);
+        // the driver has opened the transport of the destination; the receiver has not yet taken it from its queue
+        subscription.addDestination('aeron:udp?endpoint=127.0.0.1:' + port);
+        expect(await bindable(port)).toBe(false);
+
+        tests.close();
+
+        expect(await bindable(port)).toBe(true);
     });
 });
