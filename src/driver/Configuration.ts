@@ -47,6 +47,8 @@ import { DataHeaderFlyweight } from '../client/protocol/DataHeaderFlyweight.js';
 import type { InetSocketAddress } from './jdkNet.js';
 import { DefaultReceiveChannelEndpointSupplier } from './DefaultReceiveChannelEndpointSupplier.js';
 import { DefaultSendChannelEndpointSupplier } from './DefaultSendChannelEndpointSupplier.js';
+import { DebugReceiveChannelEndpointSupplier } from './ext/DebugReceiveChannelEndpointSupplier.js';
+import { DebugSendChannelEndpointSupplier } from './ext/DebugSendChannelEndpointSupplier.js';
 import type { ReceiveChannelEndpointSupplier } from './ReceiveChannelEndpointSupplier.js';
 import type { SendChannelEndpointSupplier } from './SendChannelEndpointSupplier.js';
 import { ThreadingMode } from './ThreadingMode.js';
@@ -2004,8 +2006,8 @@ export class Configuration {
      * Get the supplier of {@link SendChannelEndpoint}s which can be used for debugging, monitoring, or modifying the
      * behaviour when sending to the channel.
      * <p>
-     * There is no class loader (spec D25): the property names the default supplier, and any other name is a
-     * `ClassNotFoundException`. The debug supplier of `io.aeron.driver.ext` is added by the task that ports it (T21).
+     * There is no class loader (spec D25, D63): the property names the default supplier or the debug supplier of
+     * `io.aeron.driver.ext`, and any other name is a `ClassNotFoundException`.
      *
      * @return the {@link SendChannelEndpointSupplier}.
      */
@@ -2015,6 +2017,10 @@ export class Configuration {
             return new DefaultSendChannelEndpointSupplier();
         }
 
+        if ('io.aeron.driver.ext.DebugSendChannelEndpointSupplier' === className) {
+            return new DebugSendChannelEndpointSupplier();
+        }
+
         return LangUtil.rethrowUnchecked(new ClassNotFoundException(className));
     }
 
@@ -2022,8 +2028,8 @@ export class Configuration {
      * Get the supplier of {@link ReceiveChannelEndpoint}s which can be used for debugging, monitoring, or modifying the
      * behaviour when receiving from the channel.
      * <p>
-     * There is no class loader (spec D25): the property names the default supplier, and any other name is a
-     * `ClassNotFoundException`. The debug supplier of `io.aeron.driver.ext` is added by the task that ports it (T21).
+     * There is no class loader (spec D25, D63): the property names the default supplier or the debug supplier of
+     * `io.aeron.driver.ext`, and any other name is a `ClassNotFoundException`.
      *
      * @return the {@link ReceiveChannelEndpointSupplier}.
      */
@@ -2031,6 +2037,10 @@ export class Configuration {
         const className = System.getProperty(Configuration.RECEIVE_CHANNEL_ENDPOINT_SUPPLIER_PROP_NAME);
         if (null === className || 'io.aeron.driver.DefaultReceiveChannelEndpointSupplier' === className) {
             return new DefaultReceiveChannelEndpointSupplier();
+        }
+
+        if ('io.aeron.driver.ext.DebugReceiveChannelEndpointSupplier' === className) {
+            return new DebugReceiveChannelEndpointSupplier();
         }
 
         return LangUtil.rethrowUnchecked(new ClassNotFoundException(className));
