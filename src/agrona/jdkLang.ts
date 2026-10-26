@@ -1,7 +1,14 @@
 // JDK stand-ins added with the agents and counters (phase 1, T5): `Thread` and its interrupt flag, the exceptions and
 // error that the agent code catches by type, `AutoCloseable`, `Objects.requireNonNull` and `Charset`.
 // Not part of Agrona: there is no Java file behind this one. It sits beside `jdk.ts` (spec D10, docs/mapping.md).
-import { Exception, NullPointerException, systemProperties } from './jdk.js';
+import type { Lock } from './concurrent/NoOpLock.js';
+import {
+    Exception,
+    IllegalStateException,
+    NullPointerException,
+    UnsupportedOperationException,
+    systemProperties,
+} from './jdk.js';
 
 /**
  * `java.lang.AutoCloseable`. A try-with-resources block becomes try / finally with an explicit `close()`.
@@ -146,6 +153,43 @@ export class Thread {
 
     static {
         Thread.current = new Thread('main', true);
+    }
+}
+
+/**
+ * Stand-in for `java.util.concurrent.locks.ReentrantLock` on the one JS thread (spec D3): the lock can always be taken,
+ * by the thread that holds it or by any other (there is no other), and is counted so that an `unlock` without a `lock`
+ * is the error that Java reports (`IllegalMonitorStateException`, here an {@link IllegalStateException}).
+ */
+export class ReentrantLock implements Lock {
+    private holdCount = 0;
+
+    public lock(): void {
+        this.holdCount++;
+    }
+
+    public lockInterruptibly(): void {
+        this.holdCount++;
+    }
+
+    public tryLock(): boolean {
+        this.holdCount++;
+        return true;
+    }
+
+    public unlock(): void {
+        if (0 === this.holdCount) {
+            throw new IllegalStateException('the lock is not held');
+        }
+        this.holdCount--;
+    }
+
+    public newCondition(): never {
+        throw new UnsupportedOperationException();
+    }
+
+    public isLocked(): boolean {
+        return this.holdCount > 0;
     }
 }
 

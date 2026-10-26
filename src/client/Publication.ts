@@ -18,16 +18,17 @@
 // Port of io/aeron/Publication.java @ 1.53.3
 import { BitUtil } from '../agrona/BitUtil.js';
 import type { UnsafeBuffer } from '../agrona/concurrent/UnsafeBuffer.js';
-import type { CountersReader } from '../agrona/concurrent/status/CountersReader.js';
 import type { ReadablePosition } from '../agrona/concurrent/status/ReadablePosition.js';
 import type { DirectBuffer } from '../agrona/DirectBuffer.js';
 import { ByteOrder, IllegalArgumentException, Long } from '../agrona/jdk.js';
+import type { ClientConductor } from './ClientConductor.js';
 import type { DirectBufferVector } from './DirectBufferVector.js';
 import { AeronException } from './exceptions/AeronException.js';
 import type { BufferClaim } from './logbuffer/BufferClaim.js';
 import { FrameDescriptor } from './logbuffer/FrameDescriptor.js';
 import { HeaderWriter } from './logbuffer/HeaderWriter.js';
 import { LogBufferDescriptor } from './logbuffer/LogBufferDescriptor.js';
+import type { LogBuffers } from './LogBuffers.js';
 import { DataHeaderFlyweight } from './protocol/DataHeaderFlyweight.js';
 import type { ReservedValueSupplier } from './ReservedValueSupplier.js';
 import { ChannelEndpointStatus } from './status/ChannelEndpointStatus.js';
@@ -38,32 +39,6 @@ const { FRAME_ALIGNMENT } = FrameDescriptor;
 const { HEADER_LENGTH, RESERVED_VALUE_OFFSET } = DataHeaderFlyweight;
 const { PARTITION_COUNT, TERM_TAIL_COUNTERS_OFFSET } = LogBufferDescriptor;
 const { align, SIZE_OF_LONG } = BitUtil;
-
-/**
- * The log buffers that a publication uses: the part of T19's `LogBuffers` that `Publication` calls (a forward
- * reference, spec D80). T19 makes `LogBuffers` satisfy it and replaces it with `import type { LogBuffers }`.
- */
-export interface PublicationLogBuffers {
-    metaDataBuffer(): UnsafeBuffer;
-    termLength(): number;
-    duplicateTermBuffers(): UnsafeBuffer[];
-}
-
-/**
- * The client conductor that a publication calls: the part of T19's `ClientConductor` that `Publication` and its
- * subclasses use (a forward reference, spec D80). T19 makes `ClientConductor` satisfy it and replaces it with
- * `import type { ClientConductor }`. Java's two overloads of `removeDestination` and of `asyncRemoveDestination`,
- * by the endpoint channel or by the registration id of the destination, are one method with a union parameter.
- */
-export interface PublicationClientConductor {
-    removePublication(publication: Publication): void;
-    channelStatus(channelStatusId: number): number;
-    countersReader(): CountersReader;
-    addDestination(registrationId: number, endpointChannel: string): void;
-    removeDestination(registrationId: number, destination: string | number): void;
-    asyncAddDestination(registrationId: number, endpointChannel: string): number;
-    asyncRemoveDestination(registrationId: number, destination: string | number): number;
-}
 
 /**
  * Aeron publisher API for sending messages to subscribers of a given channel and streamId pair. {@link Publication}s
@@ -149,9 +124,9 @@ export abstract class Publication {
     /** @internal package-private in Java */
     public readonly headerWriter: HeaderWriter;
     /** @internal package-private in Java */
-    public readonly _logBuffers: PublicationLogBuffers;
+    public readonly _logBuffers: LogBuffers;
     /** @internal package-private in Java */
-    public readonly conductor: PublicationClientConductor;
+    public readonly conductor: ClientConductor;
     /** @internal package-private in Java */
     public readonly _channel: string;
 
@@ -173,13 +148,13 @@ export abstract class Publication {
 
     /** @internal package-private in Java */
     protected constructor(
-        clientConductor: PublicationClientConductor,
+        clientConductor: ClientConductor,
         channel: string,
         streamId: number,
         sessionId: number,
         positionLimit: ReadablePosition,
         channelStatusId: number,
-        logBuffers: PublicationLogBuffers,
+        logBuffers: LogBuffers,
         originalRegistrationId: number,
         registrationId: number,
     ) {
@@ -621,7 +596,7 @@ export abstract class Publication {
     }
 
     /** @internal package-private in Java */
-    public logBuffers(): PublicationLogBuffers {
+    public logBuffers(): LogBuffers {
         return this._logBuffers;
     }
 

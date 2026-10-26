@@ -29,7 +29,7 @@ import { DataHeaderFlyweight } from '../../src/client/protocol/DataHeaderFlyweig
 import { Publication } from '../../src/client/Publication.js';
 import type { ReservedValueSupplier } from '../../src/client/ReservedValueSupplier.js';
 import { ChannelEndpointStatus } from '../../src/client/status/ChannelEndpointStatus.js';
-import { newFakeLogBuffers, newFakePublicationConductor } from '../support/ClientFakes.js';
+import { asConductor, asLogBuffers, newFakeLogBuffers, newFakePublicationConductor } from '../support/ClientFakes.js';
 import type { FakePublicationConductor } from '../support/ClientFakes.js';
 import { MockPosition } from '../support/MockPosition.js';
 
@@ -144,13 +144,13 @@ describe('PublicationTest', () => {
         }
 
         publication = new ConcurrentPublication(
-            conductor,
+            asConductor(conductor),
             CHANNEL,
             STREAM_ID_1,
             SESSION_ID_1,
             publicationLimit,
             ChannelEndpointStatus.NO_ID_ALLOCATED,
-            logBuffers,
+            asLogBuffers(logBuffers),
             CORRELATION_ID,
             CORRELATION_ID,
         );

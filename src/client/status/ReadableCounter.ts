@@ -21,7 +21,7 @@ import { UnsafeBuffer } from '../../agrona/concurrent/UnsafeBuffer.js';
 import { CountersReader } from '../../agrona/concurrent/status/CountersReader.js';
 import { IllegalStateException } from '../../agrona/jdk.js';
 import { type AutoCloseable } from '../../agrona/jdkLang.js';
-import { Aeron } from '../Aeron.js';
+import { NULL_VALUE } from '../NullValue.js';
 
 const { SIZE_OF_LONG } = BitUtil;
 
@@ -42,7 +42,7 @@ export class ReadableCounter implements AutoCloseable {
      * Construct a view of an existing counter.
      *
      * @param countersReader for getting access to the buffers.
-     * @param registrationId assigned by the driver for the counter or {@link Aeron.NULL_VALUE} if not known.
+     * @param registrationId assigned by the driver for the counter or {@link NULL_VALUE} if not known.
      * @param counterId      for the counter to be viewed.
      * @throws IllegalStateException if the id has for the counter has not been allocated.
      */
@@ -56,7 +56,7 @@ export class ReadableCounter implements AutoCloseable {
      */
     public constructor(countersReader: CountersReader, counterId: number);
     public constructor(countersReader: CountersReader, registrationIdOrCounterId: number, counterIdArg?: number) {
-        const registrationId = undefined === counterIdArg ? Aeron.NULL_VALUE : registrationIdOrCounterId;
+        const registrationId = undefined === counterIdArg ? NULL_VALUE : registrationIdOrCounterId;
         const counterId = undefined === counterIdArg ? registrationIdOrCounterId : counterIdArg;
 
         const counterState = countersReader.getCounterState(counterId);

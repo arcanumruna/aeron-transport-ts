@@ -34,7 +34,7 @@ import { LocalSocketAddressStatus } from '../../src/client/status/LocalSocketAdd
 import { Subscription } from '../../src/client/Subscription.js';
 import type { UnavailableImageHandler } from '../../src/client/UnavailableImageHandler.js';
 import { Configuration } from '../../src/driver/Configuration.js';
-import { newFakeSubscriptionConductor } from '../support/ClientFakes.js';
+import { asConductor, newFakeSubscriptionConductor } from '../support/ClientFakes.js';
 import type { FakeSubscriptionConductor } from '../support/ClientFakes.js';
 import { expectInOrder } from '../support/InOrder.js';
 import { mock } from '../support/Mockito.js';
@@ -97,7 +97,7 @@ describe('SubscriptionTest', () => {
         conductor.countersReader.mockReturnValue(countersManager);
 
         subscription = new Subscription(
-            conductor,
+            asConductor(conductor),
             CHANNEL,
             STREAM_ID_1,
             SUBSCRIPTION_CORRELATION_ID,
@@ -114,7 +114,7 @@ describe('SubscriptionTest', () => {
 
     function newSubscription(channel: string): Subscription {
         return new Subscription(
-            conductor,
+            asConductor(conductor),
             channel,
             STREAM_ID_1,
             SUBSCRIPTION_CORRELATION_ID,

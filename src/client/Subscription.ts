@@ -17,42 +17,23 @@
  */
 // Port of io/aeron/Subscription.java @ 1.53.3
 import { ArrayUtil } from '../agrona/collections/ArrayUtil.js';
-import type { CountersReader } from '../agrona/concurrent/status/CountersReader.js';
 import { ArrayIndexOutOfBoundsException } from '../agrona/jdk.js';
-import { Aeron } from './Aeron.js';
 import type { AvailableImageHandler } from './AvailableImageHandler.js';
 import { ChannelUri } from './ChannelUri.js';
 import { CommonContext } from './CommonContext.js';
 import { AeronException } from './exceptions/AeronException.js';
-import type { Image, ImageLogBuffers } from './Image.js';
+import type { ClientConductor } from './ClientConductor.js';
+import type { Image } from './Image.js';
 import type { BlockHandler } from './logbuffer/BlockHandler.js';
 import type { ControlledFragmentHandler } from './logbuffer/ControlledFragmentHandler.js';
 import type { FragmentHandler } from './logbuffer/FragmentHandler.js';
 import type { RawBlockHandler } from './logbuffer/RawBlockHandler.js';
+import { NULL_VALUE } from './NullValue.js';
 import { ChannelEndpointStatus } from './status/ChannelEndpointStatus.js';
 import { LocalSocketAddressStatus } from './status/LocalSocketAddressStatus.js';
 import type { UnavailableImageHandler } from './UnavailableImageHandler.js';
 
-const { NULL_VALUE } = Aeron;
 const { ENDPOINT_PARAM_NAME, MDC_CONTROL_MODE_MANUAL, MDC_CONTROL_MODE_PARAM_NAME, SPY_PREFIX } = CommonContext;
-
-/**
- * The client conductor that a subscription calls: the part of T19's `ClientConductor` that `Subscription` uses (a
- * forward reference, spec D80). T19 makes `ClientConductor` satisfy it and replaces it with
- * `import type { ClientConductor }`.
- */
-export interface SubscriptionClientConductor {
-    removeSubscription(subscription: Subscription): void;
-    channelStatus(channelStatusId: number): number;
-    countersReader(): CountersReader;
-    addRcvDestination(registrationId: number, endpointChannel: string): void;
-    removeRcvDestination(registrationId: number, endpointChannel: string): void;
-    asyncAddRcvDestination(registrationId: number, endpointChannel: string): number;
-    asyncRemoveRcvDestination(registrationId: number, endpointChannel: string): number;
-    closeImages(images: readonly Image[], unavailableImageHandler: UnavailableImageHandler, lingerNs: number): void;
-    releaseLogBuffers(logBuffers: ImageLogBuffers, registrationId: number, lingerNs: number): void;
-    rejectImage(correlationId: number, position: number, reason: string): void;
-}
 
 /**
  * Aeron Subscriber API for receiving a reconstructed {@link Image} for a stream of messages from a publisher on a
@@ -84,10 +65,10 @@ export class Subscription {
     public _isClosed: boolean = false;
     /** @internal package-private in Java: `volatile Image[] images`, read by {@link images} */
     public _images: readonly Image[] = Subscription.EMPTY_IMAGES;
-    private readonly conductor: SubscriptionClientConductor;
+    private readonly conductor: ClientConductor;
     private readonly _channel: string;
-    private readonly _availableImageHandler: AvailableImageHandler;
-    private readonly _unavailableImageHandler: UnavailableImageHandler;
+    private readonly _availableImageHandler: AvailableImageHandler | null;
+    private readonly _unavailableImageHandler: UnavailableImageHandler | null;
     private channelUri: ChannelUri | null = null;
     private resolvedChannel: string | null = null;
     private _resolvedEndpoint: string | null = null;
@@ -95,12 +76,12 @@ export class Subscription {
 
     /** @internal package-private in Java */
     public constructor(
-        conductor: SubscriptionClientConductor,
+        conductor: ClientConductor,
         channel: string,
         streamId: number,
         registrationId: number,
-        availableImageHandler: AvailableImageHandler,
-        unavailableImageHandler: UnavailableImageHandler,
+        availableImageHandler: AvailableImageHandler | null,
+        unavailableImageHandler: UnavailableImageHandler | null,
     ) {
         this._registrationId = registrationId;
         this._streamId = streamId;
@@ -142,7 +123,7 @@ export class Subscription {
      *
      * @return callback used to indicate when an {@link Image} becomes available under this {@link Subscription}.
      */
-    public availableImageHandler(): AvailableImageHandler {
+    public availableImageHandler(): AvailableImageHandler | null {
         return this._availableImageHandler;
     }
 
@@ -151,7 +132,7 @@ export class Subscription {
      *
      * @return callback used to indicate when an {@link Image} goes unavailable under this {@link Subscription}.
      */
-    public unavailableImageHandler(): UnavailableImageHandler {
+    public unavailableImageHandler(): UnavailableImageHandler | null {
         return this._unavailableImageHandler;
     }
 

@@ -29,7 +29,8 @@ import { LogBufferDescriptor } from './logbuffer/LogBufferDescriptor.js';
 import { DataHeaderFlyweight } from './protocol/DataHeaderFlyweight.js';
 import { HeaderFlyweight } from './protocol/HeaderFlyweight.js';
 import { Publication } from './Publication.js';
-import type { PublicationClientConductor, PublicationLogBuffers } from './Publication.js';
+import type { ClientConductor } from './ClientConductor.js';
+import type { LogBuffers } from './LogBuffers.js';
 import type { ReservedValueSupplier } from './ReservedValueSupplier.js';
 
 const { LITTLE_ENDIAN } = ByteOrder;
@@ -87,13 +88,13 @@ export class ExclusivePublication extends Publication {
 
     /** @internal package-private in Java */
     public constructor(
-        clientConductor: PublicationClientConductor,
+        clientConductor: ClientConductor,
         channel: string,
         streamId: number,
         sessionId: number,
         positionLimit: ReadablePosition,
         channelStatusId: number,
-        logBuffers: PublicationLogBuffers,
+        logBuffers: LogBuffers,
         originalRegistrationId: number,
         registrationId: number,
     ) {

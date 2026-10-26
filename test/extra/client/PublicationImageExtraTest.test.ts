@@ -416,7 +416,7 @@ describe.each(VARIANTS)('PublicationImageExtraTest %s', (_name, options) => {
         const rig = new ClientRig(options);
         const { publication } = rig;
         const src = new UnsafeBuffer(pattern(10, 1));
-        rig.publicationConductor.removePublication.mockImplementation((p) => p.internalClose());
+        rig.publicationConductor.removePublication.mockImplementation((p) => (p as Publication).internalClose());
 
         publication.close();
         publication.close(); // idempotent: the conductor is called once
@@ -588,7 +588,7 @@ describe('ExclusivePublication extra', () => {
         expect(() => publication.offerBlock(block, 0, 64 * 1024)).toThrow(IllegalArgumentException);
         expect(rig.image.position()).toBe(480);
 
-        rig.publicationConductor.removePublication.mockImplementation((p) => p.internalClose());
+        rig.publicationConductor.removePublication.mockImplementation((p) => (p as Publication).internalClose());
         publication.close();
         expect(publication.offerBlock(block, 0, 480)).toBe(CLOSED);
     });
@@ -618,12 +618,12 @@ describe('ExclusivePublication extra', () => {
     it('revoke() marks the publication revoked on close and closes it, once', () => {
         // mutation: the flag set after close(), or set on a closed publication
         const { rig, publication } = exclusive();
-        rig.publicationConductor.removePublication.mockImplementation((p) => p.internalClose());
+        rig.publicationConductor.removePublication.mockImplementation((p) => (p as Publication).internalClose());
         publication.revokeOnClose();
         expect(publication._revokeOnClose).toBe(true);
 
         const other = exclusive();
-        other.rig.publicationConductor.removePublication.mockImplementation((p) => p.internalClose());
+        other.rig.publicationConductor.removePublication.mockImplementation((p) => (p as Publication).internalClose());
         other.publication.revoke();
         other.publication.revoke();
 

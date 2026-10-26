@@ -29,6 +29,7 @@ import { Header } from './logbuffer/Header.js';
 import { LogBufferDescriptor } from './logbuffer/LogBufferDescriptor.js';
 import type { RawBlockHandler } from './logbuffer/RawBlockHandler.js';
 import { TermBlockScanner } from './logbuffer/TermBlockScanner.js';
+import type { LogBuffers } from './LogBuffers.js';
 import { DataHeaderFlyweight } from './protocol/DataHeaderFlyweight.js';
 import type { Subscription } from './Subscription.js';
 
@@ -36,18 +37,6 @@ const { ABORT, BREAK, COMMIT } = ControlledFragmentHandler.Action;
 const { FRAME_ALIGNMENT, frameLengthVolatile, isPaddingFrame } = FrameDescriptor;
 const { HEADER_LENGTH, TERM_ID_FIELD_OFFSET } = DataHeaderFlyweight;
 const { LITTLE_ENDIAN } = ByteOrder;
-
-/**
- * The log buffers that an image uses: the part of T19's `LogBuffers` that `Image` calls (a forward reference, spec
- * D80). T19 makes `LogBuffers` satisfy it and replaces it with `import type { LogBuffers }`. The log is in memory
- * (spec D4), so `fileChannel()` has no file to return: it answers `null`.
- */
-export interface ImageLogBuffers {
-    metaDataBuffer(): UnsafeBuffer;
-    termLength(): number;
-    duplicateTermBuffers(): UnsafeBuffer[];
-    fileChannel(): unknown;
-}
 
 /**
  * Represents a replicated publication {@link Image} from a publisher to a {@link Subscription}.
@@ -80,7 +69,7 @@ export class Image {
     private readonly termBuffers: UnsafeBuffer[];
     private readonly header: Header;
     private readonly errorHandler: ErrorHandler;
-    private readonly _logBuffers: ImageLogBuffers;
+    private readonly _logBuffers: LogBuffers;
     private readonly _sourceIdentity: string;
     private readonly _subscription: Subscription;
 
@@ -99,7 +88,7 @@ export class Image {
         subscription: Subscription,
         sessionId: number,
         subscriberPosition: Position,
-        logBuffers: ImageLogBuffers,
+        logBuffers: LogBuffers,
         errorHandler: ErrorHandler,
         sourceIdentity: string,
         correlationId: number,
@@ -725,7 +714,7 @@ export class Image {
     }
 
     /** @internal package-private in Java */
-    public logBuffers(): ImageLogBuffers {
+    public logBuffers(): LogBuffers {
         return this._logBuffers;
     }
 

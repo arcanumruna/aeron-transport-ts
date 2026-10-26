@@ -17,11 +17,16 @@
  */
 // Port of io/aeron/driver/MediaDriverTest.java @ 1.53.3
 import { describe, expect, it } from 'vitest';
+import type { AgentInvoker } from '../../src/agrona/concurrent/AgentInvoker.js';
+import { Aeron } from '../../src/client/Aeron.js';
 import { DutyCycleTracker } from '../../src/driver/DutyCycleTracker.js';
 import { MediaDriver } from '../../src/driver/MediaDriver.js';
 import { DutyCycleStallTracker } from '../../src/driver/status/DutyCycleStallTracker.js';
 import { SystemCounterDescriptor } from '../../src/driver/status/SystemCounterDescriptor.js';
 import { ThreadingMode } from '../../src/driver/ThreadingMode.js';
+import { freeUdpPort } from '../support/Udp.js';
+
+const MAX_INVOKES = 10_000;
 
 const {
     CONDUCTOR_CYCLE_TIME_THRESHOLD_EXCEEDED,
@@ -147,7 +152,37 @@ describe('MediaDriverTest', () => {
         }
     });
 
-    // Java launches a DEDICATED driver on a directory and connects an Aeron client to it by that directory (spec D4,
-    // D54). The client is T19; the embedded driver and client end to end are the system tests of T22.
-    it.skip('shouldExecuteAsyncCommandsInOrder', () => {});
+    it('shouldExecuteAsyncCommandsInOrder', () => {
+        // Java launches a DEDICATED driver on an Aeron directory (spec D4, D54: the driver runs as INVOKER whatever the
+        // mode says) and connects by the directory; here the client takes the CnC from the driver and runs its duty
+        // cycle (Tests.await), and the driver's, by hand. The port is free, where Java's is 5050.
+        const context = new MediaDriver.Context().threadingMode(ThreadingMode.DEDICATED);
+        const mediaDriver = MediaDriver.launch(context);
+        try {
+            const aeron = Aeron.connect(new Aeron.Context().mediaDriver(mediaDriver).useConductorAgentInvoker(true));
+            try {
+                const channel = 'aeron:udp?endpoint=localhost:' + freeUdpPort();
+                const streamId = 1111;
+                const pubId1 = aeron.asyncAddExclusivePublication(channel, streamId);
+                aeron.asyncRemovePublication(pubId1);
+
+                const pubId2 = aeron.asyncAddExclusivePublication(channel, streamId);
+
+                let isAvailable = false;
+                for (let i = 0; i < MAX_INVOKES && !isAvailable; i++) {
+                    mediaDriver.sharedAgentInvoker().invoke();
+                    (aeron.conductorAgentInvoker() as AgentInvoker).invoke();
+                    isAvailable = null !== aeron.getExclusivePublication(pubId2);
+                }
+                expect(isAvailable).toBe(true);
+
+                expect(aeron.getExclusivePublication(pubId1)).toBeNull();
+                expect(aeron.getExclusivePublication(pubId2)).not.toBeNull();
+            } finally {
+                aeron.close();
+            }
+        } finally {
+            mediaDriver.close();
+        }
+    });
 });

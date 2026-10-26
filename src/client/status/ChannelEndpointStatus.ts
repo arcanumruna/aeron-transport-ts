@@ -21,7 +21,7 @@ import { type MutableDirectBuffer } from '../../agrona/MutableDirectBuffer.js';
 import { type AtomicCounter } from '../../agrona/concurrent/status/AtomicCounter.js';
 import { type CountersManager } from '../../agrona/concurrent/status/CountersManager.js';
 import { CountersReader } from '../../agrona/concurrent/status/CountersReader.js';
-import { Aeron } from '../Aeron.js';
+import { NULL_VALUE } from '../NullValue.js';
 
 const { SIZE_OF_INT } = BitUtil;
 const { MAX_LABEL_LENGTH } = CountersReader;
@@ -55,7 +55,7 @@ export class ChannelEndpointStatus {
     /**
      * No counter ID is allocated yet.
      */
-    public static readonly NO_ID_ALLOCATED = Aeron.NULL_VALUE;
+    public static readonly NO_ID_ALLOCATED = NULL_VALUE;
 
     /**
      * Offset in the key metadata for the channel of the counter.

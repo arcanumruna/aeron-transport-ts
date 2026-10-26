@@ -12,16 +12,16 @@ import { Long } from '../../src/agrona/jdk.js';
 import { ConcurrentPublication } from '../../src/client/ConcurrentPublication.js';
 import { ExclusivePublication } from '../../src/client/ExclusivePublication.js';
 import { Image } from '../../src/client/Image.js';
-import type { ImageLogBuffers } from '../../src/client/Image.js';
 import { LogBufferDescriptor } from '../../src/client/logbuffer/LogBufferDescriptor.js';
 import { DataHeaderFlyweight } from '../../src/client/protocol/DataHeaderFlyweight.js';
-import type { Publication, PublicationLogBuffers } from '../../src/client/Publication.js';
+import type { LogBuffers } from '../../src/client/LogBuffers.js';
+import type { Publication } from '../../src/client/Publication.js';
 import { Subscription } from '../../src/client/Subscription.js';
 import type { RawLog } from '../../src/driver/buffer/RawLog.js';
 import { ARRAY_BACKING } from './Backing.js';
 import type { Backing } from './Backing.js';
 import { AtomicLongPosition } from './AtomicLongPosition.js';
-import { newFakePublicationConductor, newFakeSubscriptionConductor } from './ClientFakes.js';
+import { asConductor, asLogBuffers, newFakePublicationConductor, newFakeSubscriptionConductor } from './ClientFakes.js';
 import type { FakePublicationConductor, FakeSubscriptionConductor } from './ClientFakes.js';
 import { MockPosition } from './MockPosition.js';
 import { TestLogProducer } from './TestLogProducer.js';
@@ -52,7 +52,7 @@ export class ClientRig {
     public readonly streamId: number;
     public readonly rawLog: RawLog;
     /** Plain functions, not `vi.fn`: a spy records its calls, and the allocation tests run through these. */
-    public readonly logBuffers: ImageLogBuffers & PublicationLogBuffers;
+    public readonly logBuffers: LogBuffers;
     public readonly publicationConductor: FakePublicationConductor;
     public readonly subscriptionConductor: FakeSubscriptionConductor;
     public readonly limit = new MockPosition();
@@ -108,19 +108,19 @@ export class ClientRig {
             this.initialTermId,
         );
 
-        this.logBuffers = {
+        this.logBuffers = asLogBuffers({
             metaDataBuffer: () => metaData,
             termLength: () => this.termLength,
             duplicateTermBuffers: () => termBuffers,
             fileChannel: () => null,
-        };
+        });
         this.publicationConductor = newFakePublicationConductor();
         this.subscriptionConductor = newFakeSubscriptionConductor();
         this.limit.value = Long.MAX_VALUE;
 
         const Class = options.exclusive ? ExclusivePublication : ConcurrentPublication;
         this.publication = new Class(
-            this.publicationConductor,
+            asConductor(this.publicationConductor),
             ClientRig.CHANNEL,
             this.streamId,
             this.sessionId,
@@ -134,7 +134,7 @@ export class ClientRig {
         this.errorHandler = { onError: vi.fn((error: Error) => void this.errors.push(error)) };
         this.subscriberPosition = new AtomicLongPosition(0, this.startPosition);
         this.subscription = new Subscription(
-            this.subscriptionConductor,
+            asConductor(this.subscriptionConductor),
             ClientRig.CHANNEL,
             this.streamId,
             ClientRig.REGISTRATION_ID,
