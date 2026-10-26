@@ -109,6 +109,14 @@ export async function addPublicationWhenFree(
     return publication as unknown as ConcurrentPublication;
 }
 
+/** Aeron's own test groups; the tests run one at a time, so a group is reused and only the port is fresh. */
+export const MULTICAST_GROUP = '224.20.30.39';
+
+/** A multicast channel on the loopback interface (`interface=localhost`, plan decision 2) with extra parameters. */
+export function multicastChannel(port: number, params = '', group = MULTICAST_GROUP): string {
+    return 'aeron:udp?endpoint=' + group + ':' + port + '|interface=localhost' + (params === '' ? '' : '|' + params);
+}
+
 /** One line of JSON that a helper printed. */
 export interface HelperEvent {
     readonly event: string;
@@ -393,10 +401,19 @@ const FRAME_TYPE_DATA = 0x01;
 const DATA_HEADER_LENGTH = 32;
 
 /**
- * A loopback UDP forwarder between a C publisher's driver and a TS subscription that drops DATA frames that carry a
- * payload, with a seeded rate. The C driver sends to `frontPort`; the datagrams go on to `targetPort` (the TS
- * subscription's endpoint) from a socket of the relay, so the replies (status messages, NAKs) come back to the relay
- * and go to the C driver's socket. Heartbeats, setup and every control frame pass.
+ * A loopback UDP forwarder that drops DATA frames that carry a payload, with a seeded rate. It sits on one destination
+ * (one C publisher destination, or one TS subscription's endpoint): the `front` socket is bound to `frontPort`, the
+ * `back` socket to an ephemeral port, and the datagrams that reach the front go on to `targetPort` from the back
+ * socket, while what the target (or the peer it answers) sends to the back socket goes out of the front socket to the
+ * last sender seen at the front. Heartbeats, setup and every control frame pass.
+ *
+ * - `forward` (the default): the frames that reach the front are the ones dropped. The C driver sends to `frontPort`;
+ *   the datagrams go on to the TS subscription's endpoint (`targetPort`), and the replies (status messages, NAKs) come
+ *   back through the back socket to the C driver's socket. A C publisher with a manual destination, one relay for each.
+ * - `return`: the frames that reach the back socket are the ones dropped. The TS subscription sends its status messages
+ *   and NAKs to `frontPort` (its `control` address), the relay forwards them to the C publisher's control address
+ *   (`targetPort`) from the back socket, so the C publisher learns the back socket as the destination of a dynamic MDC
+ *   and sends its data there; the relay drops some of it on its way to the TS endpoint. One relay for each receiver.
  */
 export class LossyRelay {
     public dropped = 0;
@@ -411,6 +428,7 @@ export class LossyRelay {
         private readonly targetPort: number,
         private readonly rate: number,
         seed: number,
+        private readonly dropOn: 'forward' | 'return',
     ) {
         this.random = mulberry32(seed);
         this.front = dgram.createSocket({ type: 'udp4', recvBufferSize: 8 << 20, sendBufferSize: 8 << 20 });
@@ -419,26 +437,40 @@ export class LossyRelay {
         this.back.on('error', () => {});
         this.front.on('message', (message, remote) => {
             this.sender = { port: remote.port, address: remote.address };
-            if (
-                frameType(message) === FRAME_TYPE_DATA &&
-                message.length > DATA_HEADER_LENGTH &&
-                this.random() < this.rate
-            ) {
-                this.dropped++;
+            if (this.dropOn === 'forward' && this.drops(message)) {
                 return;
             }
             this.forwarded++;
             this.back.send(message, this.targetPort, '127.0.0.1');
         });
         this.back.on('message', (message) => {
-            if (this.sender) {
-                this.front.send(message, this.sender.port, this.sender.address);
+            if (this.sender === null || (this.dropOn === 'return' && this.drops(message))) {
+                return;
             }
+            this.front.send(message, this.sender.port, this.sender.address);
         });
     }
 
-    public static async open(frontPort: number, targetPort: number, rate: number, seed: number): Promise<LossyRelay> {
-        const relay = new LossyRelay(frontPort, targetPort, rate, seed);
+    private drops(message: Uint8Array): boolean {
+        if (
+            frameType(message) === FRAME_TYPE_DATA &&
+            message.length > DATA_HEADER_LENGTH &&
+            this.random() < this.rate
+        ) {
+            this.dropped++;
+            return true;
+        }
+        return false;
+    }
+
+    public static async open(
+        frontPort: number,
+        targetPort: number,
+        rate: number,
+        seed: number,
+        dropOn: 'forward' | 'return' = 'forward',
+    ): Promise<LossyRelay> {
+        const relay = new LossyRelay(frontPort, targetPort, rate, seed, dropOn);
         await Promise.all([
             new Promise<void>((resolveBind) => relay.front.bind(frontPort, '127.0.0.1', resolveBind)),
             new Promise<void>((resolveBind) => relay.back.bind(0, '127.0.0.1', resolveBind)),

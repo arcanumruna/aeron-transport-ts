@@ -1,6 +1,6 @@
 // Interop helper (T23): a C subscriber that checks what it reads against the payload pattern of interop_publisher.
 //
-//   interop_subscriber -d <aeron dir> -c <channel> [-s <stream>] [-n <count>] [-l <last sequence>] [-S <len,len,...>] [-t <deadline ms>] [-q <quiet ms>] [-P <pause ms>]
+//   interop_subscriber -d <aeron dir> -c <channel> [-s <stream>] [-n <count>] [-l <last sequence>] [-S <len,len,...>] [-t <deadline ms>] [-q <quiet ms>] [-P <pause ms>] [-D <destination>]... [-E]
 //
 // It reads whole messages (fragment assembler) and checks, for each session, that the sequence numbers go up by one
 // from the first message it reads, and that every byte is the pattern of the sequence number (a message of 1..3
@@ -14,6 +14,10 @@
 // `-P` makes a slow consumer: after the first message it reads, it stops polling for that many ms (once), so that the
 // window of the receiver stops moving and the publisher is back pressured; then it reads on. Default: no pause.
 //   {"event":"paused"}                             printed when the pause starts
+// `-D` (repeatable, D116) adds a destination to a multi-destination subscription (`control-mode=manual`) before it
+// reports ready, with `aeron_subscription_async_add_destination`.
+// `-E` makes the subscriber wait for an image to end (a publication that closes) as well as for `count` / `last`, so
+// that the end of stream of a publication that closes after its last message is part of the summary.
 // Exit code 0 when the summary has no error and the count was reached.
 #include <poll.h>
 #include <sched.h>
@@ -26,6 +30,7 @@
 #include "interop_common.h"
 
 #define MAX_SESSIONS 16
+#define MAX_DESTINATIONS 16
 
 typedef struct
 {
@@ -186,9 +191,12 @@ int main(int argc, char **argv)
     uint64_t want = 0;
     int64_t last_target = -1;
     int64_t deadline_ms = 60000, quiet_ms = 300, pause_ms = 0;
+    const char *destinations[MAX_DESTINATIONS];
+    int destination_count = 0;
+    bool wait_for_end = false;
     int opt;
 
-    while ((opt = getopt(argc, argv, "d:c:s:n:l:S:t:q:P:")) != -1)
+    while ((opt = getopt(argc, argv, "d:c:s:n:l:S:t:q:P:D:E")) != -1)
     {
         switch (opt)
         {
@@ -211,6 +219,15 @@ int main(int argc, char **argv)
             case 't': deadline_ms = strtoll(optarg, NULL, 10); break;
             case 'q': quiet_ms = strtoll(optarg, NULL, 10); break;
             case 'P': pause_ms = strtoll(optarg, NULL, 10); break;
+            case 'E': wait_for_end = true; break;
+            case 'D':
+                if (destination_count == MAX_DESTINATIONS)
+                {
+                    fprintf(stderr, "too many destinations\n");
+                    return 2;
+                }
+                destinations[destination_count++] = optarg;
+                break;
             default: fprintf(stderr, "bad option\n"); return 2;
         }
     }
@@ -252,6 +269,28 @@ int main(int argc, char **argv)
         sched_yield();
     }
 
+    for (int i = 0; i < destination_count; i++)
+    {
+        aeron_async_destination_t *async_destination = NULL;
+        if (aeron_subscription_async_add_destination(&async_destination, aeron, subscription, destinations[i]) < 0)
+        {
+            fprintf(stderr, "add destination %s: %s\n", destinations[i], aeron_errmsg());
+            goto cleanup;
+        }
+
+        int polled = 0;
+        while (0 == polled)
+        {
+            polled = aeron_subscription_async_destination_poll(async_destination);
+            if (polled < 0 || (0 == polled && interop_now_ms() - start > deadline_ms))
+            {
+                fprintf(stderr, "destination %s: %s\n", destinations[i], aeron_errmsg());
+                goto cleanup;
+            }
+            sched_yield();
+        }
+    }
+
     if (aeron_fragment_assembler_create(&assembler, on_fragment, &state) < 0)
     {
         fprintf(stderr, "assembler: %s\n", aeron_errmsg());
@@ -285,6 +324,8 @@ int main(int argc, char **argv)
         {
             reached = reached || state.sessions[i].last >= last_target;
         }
+
+        reached = reached && (!wait_for_end || state.unavailable > 0);
 
         if (0 == reached_ms && reached)
         {

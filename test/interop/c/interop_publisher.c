@@ -1,12 +1,14 @@
 // Interop helper (T23): a C publisher of messages whose bytes are derived from their sequence number.
 //
 //   interop_publisher -d <aeron dir> -c <channel> [-s <stream>] [-n <count>] [-f <first sequence>] [-S <len,len,...>]
-//                     [-x] [-t <deadline ms>] [-w <ms to hold the publication open at the end>]
+//                     [-x] [-D <destination>]... [-t <deadline ms>] [-w <ms to hold the publication open at the end>]
 //
 // Message `sequence` is `lengths[sequence % lengths.size()]` bytes long. It offers `count` messages from `first` (it
 // waits for a subscriber as long as offers answer NOT_CONNECTED, up to the deadline `-t`), prints one JSON line
 // ({"event":"sent",...}) on stdout, holds the publication open until stdin closes or `-w` ms have passed (so the test decides when the
 // publication ends), then closes it (the subscriber sees the end of the stream). `-x` makes an exclusive publication.
+// `-D` (repeatable, D116) adds a destination to a manual MDC publication (`control-mode=manual`) before the first
+// offer, with `aeron_publication_async_add_destination`; the helper waits for each one to be accepted by the driver.
 // Exit code 0 when all messages were offered.
 #include <poll.h>
 #include <sched.h>
@@ -19,6 +21,7 @@
 #include "interop_common.h"
 
 #define MAX_LENGTHS 32
+#define MAX_DESTINATIONS 16
 
 static int parse_lengths(const char *text, size_t *lengths)
 {
@@ -39,9 +42,11 @@ int main(int argc, char **argv)
     uint64_t count = 1, first = 0;
     int64_t deadline_ms = 60000, hold_ms = 60000;
     bool exclusive = false;
+    const char *destinations[MAX_DESTINATIONS];
+    int destination_count = 0;
     int opt;
 
-    while ((opt = getopt(argc, argv, "d:c:s:n:f:S:t:w:x")) != -1)
+    while ((opt = getopt(argc, argv, "d:c:s:n:f:S:t:w:xD:")) != -1)
     {
         switch (opt)
         {
@@ -54,6 +59,14 @@ int main(int argc, char **argv)
             case 't': deadline_ms = strtoll(optarg, NULL, 10); break;
             case 'w': hold_ms = strtoll(optarg, NULL, 10); break;
             case 'x': exclusive = true; break;
+            case 'D':
+                if (destination_count == MAX_DESTINATIONS)
+                {
+                    fprintf(stderr, "too many destinations\n");
+                    return 2;
+                }
+                destinations[destination_count++] = optarg;
+                break;
             default: fprintf(stderr, "bad option\n"); return 2;
         }
     }
@@ -120,6 +133,32 @@ int main(int argc, char **argv)
             if (aeron_async_add_publication_poll(&pub, async_pub) < 0 || interop_now_ms() - start > deadline_ms)
             {
                 fprintf(stderr, "publication: %s\n", aeron_errmsg());
+                goto cleanup;
+            }
+            sched_yield();
+        }
+    }
+
+    for (int i = 0; i < destination_count; i++)
+    {
+        aeron_async_destination_t *async_destination = NULL;
+        int added = exclusive
+            ? aeron_exclusive_publication_async_add_destination(&async_destination, aeron, xpub, destinations[i])
+            : aeron_publication_async_add_destination(&async_destination, aeron, pub, destinations[i]);
+        if (added < 0)
+        {
+            fprintf(stderr, "add destination %s: %s\n", destinations[i], aeron_errmsg());
+            goto cleanup;
+        }
+
+        int polled = 0;
+        while (0 == polled)
+        {
+            polled = exclusive ? aeron_exclusive_publication_async_destination_poll(async_destination)
+                               : aeron_publication_async_destination_poll(async_destination);
+            if (polled < 0 || (0 == polled && interop_now_ms() - start > deadline_ms))
+            {
+                fprintf(stderr, "destination %s: %s\n", destinations[i], aeron_errmsg());
                 goto cleanup;
             }
             sched_yield();
