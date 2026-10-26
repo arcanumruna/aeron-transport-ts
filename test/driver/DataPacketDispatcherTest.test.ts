@@ -22,13 +22,15 @@ import { UnsafeBuffer } from '../../src/agrona/concurrent/UnsafeBuffer.js';
 import { LogBufferDescriptor } from '../../src/client/logbuffer/LogBufferDescriptor.js';
 import { DataHeaderFlyweight } from '../../src/client/protocol/DataHeaderFlyweight.js';
 import { SetupFlyweight } from '../../src/client/protocol/SetupFlyweight.js';
-import type { PublicationImage, Receiver } from '../../src/driver/DataPacketDispatcher.js';
 import { DataPacketDispatcher, SessionState } from '../../src/driver/DataPacketDispatcher.js';
+import type { PublicationImage } from '../../src/driver/PublicationImage.js';
+import type { Receiver } from '../../src/driver/Receiver.js';
 import { InetSocketAddress } from '../../src/driver/jdkNet.js';
 import { ReceiveChannelEndpoint } from '../../src/driver/media/ReceiveChannelEndpoint.js';
 import { newFakeConductorProxy, type FakeConductorProxy } from '../support/ConductorProxyFake.js';
+import { type ImageFake, type ReceiverFake, asImageFake, asReceiverFake } from '../support/PublicationFakes.js';
 import { expectInOrder } from '../support/InOrder.js';
-import { type Fake, calledMembers, mock } from '../support/Mockito.js';
+import { calledMembers, mock } from '../support/Mockito.js';
 
 const { ON_COOL_DOWN, PENDING_SETUP_FRAME } = SessionState;
 
@@ -45,9 +47,9 @@ const TERM_LENGTH = LogBufferDescriptor.TERM_MIN_LENGTH;
 const SRC_ADDRESS = new InetSocketAddress('localhost', 4510);
 const STREAM_SESSION_LIMIT = 10;
 
-/** `mock(PublicationImage.class)`: a hand fake of the placeholder type of `DataPacketDispatcher.ts` (T16 ports the class). */
-function mockPublicationImage(): Fake<PublicationImage> {
-    return {
+/** `mock(PublicationImage.class)`: a hand fake of the members that the dispatcher calls, typed as the class (T16). */
+function mockPublicationImage(): ImageFake {
+    return asImageFake({
         sessionId: vi.fn<PublicationImage['sessionId']>(() => 0),
         streamId: vi.fn<PublicationImage['streamId']>(() => 0),
         correlationId: vi.fn<PublicationImage['correlationId']>(() => 0),
@@ -57,7 +59,7 @@ function mockPublicationImage(): Fake<PublicationImage> {
         insertPacket: vi.fn<PublicationImage['insertPacket']>(() => 0),
         addDestinationConnectionIfUnknown: vi.fn<PublicationImage['addDestinationConnectionIfUnknown']>(),
         onRttMeasurement: vi.fn<PublicationImage['onRttMeasurement']>(),
-    };
+    });
 }
 
 /** `when(mock.method()).thenReturn(value)` for a method with overloads (a getter and a fluent setter). */
@@ -68,21 +70,21 @@ function stub(method: unknown, value: unknown): void {
 describe('DataPacketDispatcherTest', () => {
     // JUnit makes a new instance of the test class for each test: the mocks and the dispatcher are made in beforeEach.
     let mockConductorProxy: FakeConductorProxy;
-    let mockReceiver: Fake<Receiver>;
+    let mockReceiver: ReceiverFake;
     let dispatcher: DataPacketDispatcher;
     let mockHeader: DataHeaderFlyweight;
     let mockSetupHeader: SetupFlyweight;
     let mockBuffer: UnsafeBuffer;
-    let mockImage: Fake<PublicationImage>;
+    let mockImage: ImageFake;
     let mockChannelEndpoint: ReceiveChannelEndpoint;
     let sendSetupElicitingStatusMessage: Mock<ReceiveChannelEndpoint['sendSetupElicitingStatusMessage']>;
 
     beforeEach(() => {
-        // mock(DriverConductorProxy.class) and mock(Receiver.class): hand fakes of the placeholder types
+        // mock(DriverConductorProxy.class) and mock(Receiver.class): hand fakes of the members that the dispatcher calls
         mockConductorProxy = newFakeConductorProxy();
-        mockReceiver = {
+        mockReceiver = asReceiverFake({
             addPendingSetupMessage: vi.fn<Receiver['addPendingSetupMessage']>(),
-        };
+        });
         dispatcher = new DataPacketDispatcher(mockConductorProxy, mockReceiver, STREAM_SESSION_LIMIT);
         mockHeader = mock(DataHeaderFlyweight).mock;
         mockSetupHeader = mock(SetupFlyweight).mock;
