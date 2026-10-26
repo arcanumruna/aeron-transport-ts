@@ -257,6 +257,20 @@ write+read` (median 1.052, p50 1.033, pairs from 0.82 to 1.25). Neither runs a l
 `FlowControl.calculateRetransmissionLength` is the only changed function that a running sender calls, once per NAK).
 This is the noise of the shared VM described below, not a verdict.
 
+**The gate after review A (d08decb against `origin/main`).** 5 pairs failed four benches: `Image poll` and
+`Image controlledPoll` of 64 B, `NetworkPublication resend: 2 frames of 1024 B` and `UdpChannelTransport
+onMessage+receive 128B, two senders alternating` (medians 1.059 to 1.209, pairs from 0.75 to 1.46). Rerun with 15 pairs,
+three passed (0.982, 1.017, 0.999) and the resend bench failed (1.080). Because it runs
+`FlowControl.calculateRetransmissionLength`, which the branch changed, it was bisected at 15 pairs each:
+
+- the same commit against itself: 0.978;
+- T2 (`13c379c`, the only commit that changes `FlowControl.ts`) against T1: 0.991;
+- T3 (`d13b093`, the registry that builds `UnicastFlowControl`) against T2: 0.977;
+- d08decb against the merge `7aaca68`: 0.934.
+
+T1, T4 and the merge do not change the resend path. A second 15-pair run of d08decb against `origin/main` gave 0.972.
+No step regresses, so the single 1.080 was noise.
+
 ### Receiver (T16)
 
 `bench/micro/receiver.bench.ts`: `Receiver.doWork` on a real `PublicationImage` over an in-memory log (`SharedArrayBuffer`),
