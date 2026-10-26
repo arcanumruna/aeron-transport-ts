@@ -60,8 +60,13 @@ import type { NameResolverAgent } from './NameResolverAgent.js';
 import { DutyCycleStallTracker } from './status/DutyCycleStallTracker.js';
 import { SystemCounterDescriptor } from './status/SystemCounterDescriptor.js';
 import { SystemCounters } from './status/SystemCounters.js';
+import type { ControlTransportPoller } from './media/ControlTransportPoller.js';
+import { DataTransportPoller } from './media/DataTransportPoller.js';
 import type { PortManager } from './media/PortManager.js';
+import { ReceiveChannelEndpointThreadLocals } from './media/ReceiveChannelEndpointThreadLocals.js';
 import { WildcardPortManager } from './media/WildcardPortManager.js';
+import type { ReceiveChannelEndpointSupplier } from './ReceiveChannelEndpointSupplier.js';
+import type { SendChannelEndpointSupplier } from './SendChannelEndpointSupplier.js';
 import { ThreadingMode } from './ThreadingMode.js';
 
 function isAutoCloseable(value: unknown): value is AutoCloseable {
@@ -156,6 +161,11 @@ export class MediaDriverContext extends CommonContext {
     private _osMaxSocketSndbufLength = Aeron.NULL_VALUE;
     private _senderPortManager: PortManager | null = null;
     private _receiverPortManager: PortManager | null = null;
+    private _sendChannelEndpointSupplier: SendChannelEndpointSupplier | null = null;
+    private _receiveChannelEndpointSupplier: ReceiveChannelEndpointSupplier | null = null;
+    private _receiveChannelEndpointThreadLocals: ReceiveChannelEndpointThreadLocals | null = null;
+    private _dataTransportPoller: DataTransportPoller | null = null;
+    private _controlTransportPoller: ControlTransportPoller | null = null;
     private _epochClock: EpochClock | null = null;
     private _nanoClock: NanoClock | null = null;
     private _cachedEpochClock: CachedEpochClock | null = null;
@@ -2773,6 +2783,117 @@ export class MediaDriverContext extends CommonContext {
     }
 
     /**
+     * Supplier of the send channel endpoints.
+     *
+     * @return the supplier of the send channel endpoints.
+     */
+    public sendChannelEndpointSupplier(): SendChannelEndpointSupplier | null;
+    /**
+     * Supplier of the send channel endpoints, which can be used for debugging, monitoring, or modifying the behaviour
+     * when sending to the channel.
+     *
+     * @param supplier to be used.
+     * @return this for a fluent API.
+     */
+    public sendChannelEndpointSupplier(supplier: SendChannelEndpointSupplier | null): this;
+    public sendChannelEndpointSupplier(
+        supplier?: SendChannelEndpointSupplier | null,
+    ): SendChannelEndpointSupplier | null | this {
+        if (undefined === supplier) {
+            return this._sendChannelEndpointSupplier;
+        }
+
+        this._sendChannelEndpointSupplier = supplier;
+        return this;
+    }
+
+    /**
+     * Supplier of the receive channel endpoints.
+     *
+     * @return the supplier of the receive channel endpoints.
+     */
+    public receiveChannelEndpointSupplier(): ReceiveChannelEndpointSupplier | null;
+    /**
+     * Supplier of the receive channel endpoints, which can be used for debugging, monitoring, or modifying the
+     * behaviour when receiving from the channel.
+     *
+     * @param supplier to be used.
+     * @return this for a fluent API.
+     */
+    public receiveChannelEndpointSupplier(supplier: ReceiveChannelEndpointSupplier | null): this;
+    public receiveChannelEndpointSupplier(
+        supplier?: ReceiveChannelEndpointSupplier | null,
+    ): ReceiveChannelEndpointSupplier | null | this {
+        if (undefined === supplier) {
+            return this._receiveChannelEndpointSupplier;
+        }
+
+        this._receiveChannelEndpointSupplier = supplier;
+        return this;
+    }
+
+    /**
+     * The state that only the receiver uses, and that the receive channel endpoints share.
+     *
+     * @return the thread locals of the receive channel endpoints.
+     */
+    public receiveChannelEndpointThreadLocals(): ReceiveChannelEndpointThreadLocals | null;
+    /**
+     * The state that only the receiver uses, and that the receive channel endpoints share.
+     *
+     * @param threadLocals to be used.
+     * @return this for a fluent API.
+     */
+    public receiveChannelEndpointThreadLocals(threadLocals: ReceiveChannelEndpointThreadLocals | null): this;
+    public receiveChannelEndpointThreadLocals(
+        threadLocals?: ReceiveChannelEndpointThreadLocals | null,
+    ): ReceiveChannelEndpointThreadLocals | null | this {
+        if (undefined === threadLocals) {
+            return this._receiveChannelEndpointThreadLocals;
+        }
+
+        this._receiveChannelEndpointThreadLocals = threadLocals;
+        return this;
+    }
+
+    /**
+     * The poller of the data transports of the receive channel endpoints.
+     *
+     * @return the data transport poller.
+     * @internal package-private in Java
+     */
+    public dataTransportPoller(): DataTransportPoller | null;
+    public dataTransportPoller(transportPoller: DataTransportPoller | null): this;
+    public dataTransportPoller(transportPoller?: DataTransportPoller | null): DataTransportPoller | null | this {
+        if (undefined === transportPoller) {
+            return this._dataTransportPoller;
+        }
+
+        this._dataTransportPoller = transportPoller;
+        return this;
+    }
+
+    /**
+     * The poller of the control transports of the send channel endpoints. `conclude` does not create it yet: it is
+     * created with the `DriverConductorProxy` that task T17 ports.
+     *
+     * @return the control transport poller.
+     * @internal package-private in Java
+     */
+    public controlTransportPoller(): ControlTransportPoller | null;
+    public controlTransportPoller(transportPoller: ControlTransportPoller | null): this;
+    public controlTransportPoller(
+        transportPoller?: ControlTransportPoller | null,
+    ): ControlTransportPoller | null | this {
+        if (undefined === transportPoller) {
+            return this._controlTransportPoller;
+        }
+
+        this._controlTransportPoller = transportPoller;
+        return this;
+    }
+
+    /**
      * The default `SO_RCVBUF` of a datagram socket of this OS, probed once.
      *
      * @return the length in bytes.
@@ -2950,8 +3071,16 @@ export class MediaDriverContext extends CommonContext {
             this._receiverCachedNanoClock = new CachedNanoClock();
         }
 
-        // The flow control, channel endpoint and congestion control suppliers, the receive channel endpoint thread
-        // locals, the command queues and the delay generators are added by the tasks that port their types.
+        if (null === this._sendChannelEndpointSupplier) {
+            this._sendChannelEndpointSupplier = Configuration.sendChannelEndpointSupplier();
+        }
+
+        if (null === this._receiveChannelEndpointSupplier) {
+            this._receiveChannelEndpointSupplier = Configuration.receiveChannelEndpointSupplier();
+        }
+
+        // The flow control and congestion control suppliers, the command queues and the delay generators are added by
+        // the tasks that port their types.
 
         if (null === this._applicationSpecificFeedback) {
             this._applicationSpecificFeedback = Configuration.applicationSpecificFeedback();
@@ -2971,6 +3100,10 @@ export class MediaDriverContext extends CommonContext {
                 const buffer = new UnsafeBuffer(this._applicationSpecificFeedback);
                 this._receiverGroupTag = buffer.getLong(0, ByteOrder.LITTLE_ENDIAN);
             }
+        }
+
+        if (null === this._receiveChannelEndpointThreadLocals) {
+            this._receiveChannelEndpointThreadLocals = new ReceiveChannelEndpointThreadLocals();
         }
 
         if (null === this._threadingMode) {
@@ -3123,9 +3256,13 @@ export class MediaDriverContext extends CommonContext {
             );
         }
 
-        // The sender, receiver, driver conductor and native resource agent proxies, the control and data transport
-        // pollers, the log factory and the port managers are added by the tasks that port their types; the loss
-        // report is not ported (spec section 3).
+        // The sender, receiver, driver conductor and native resource agent proxies, the control transport poller (it
+        // takes the driver conductor proxy), the log factory and the port managers are added by the tasks that port
+        // their types; the loss report is not ported (spec section 3).
+
+        if (null === this._dataTransportPoller) {
+            this._dataTransportPoller = new DataTransportPoller(this._countedErrorHandler);
+        }
 
         if (null === this._conductorDutyCycleTracker) {
             this._conductorDutyCycleTracker = new DutyCycleStallTracker(

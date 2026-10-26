@@ -36,6 +36,12 @@ export class PortUnreachableException extends SocketException {}
 /** `java.net.UnknownHostException`. */
 export class UnknownHostException extends IOException {}
 
+/**
+ * `java.nio.channels.ClosedChannelException`: a channel was registered with a poller after it had been closed (or before
+ * it was opened). Not a `java.net` class; it is here beside the other exceptions of the socket code.
+ */
+export class ClosedChannelException extends IOException {}
+
 /** `java.net.ProtocolFamily`. */
 export interface ProtocolFamily {
     name(): string;

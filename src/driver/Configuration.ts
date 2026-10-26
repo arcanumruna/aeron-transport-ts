@@ -45,6 +45,10 @@ import { FrameDescriptor } from '../client/logbuffer/FrameDescriptor.js';
 import { LogBufferDescriptor } from '../client/logbuffer/LogBufferDescriptor.js';
 import { DataHeaderFlyweight } from '../client/protocol/DataHeaderFlyweight.js';
 import type { InetSocketAddress } from './jdkNet.js';
+import { DefaultReceiveChannelEndpointSupplier } from './DefaultReceiveChannelEndpointSupplier.js';
+import { DefaultSendChannelEndpointSupplier } from './DefaultSendChannelEndpointSupplier.js';
+import type { ReceiveChannelEndpointSupplier } from './ReceiveChannelEndpointSupplier.js';
+import type { SendChannelEndpointSupplier } from './SendChannelEndpointSupplier.js';
 import { ThreadingMode } from './ThreadingMode.js';
 
 /**
@@ -52,8 +56,8 @@ import { ThreadingMode } from './ThreadingMode.js';
  * system properties that set them.
  * <p>
  * The members that name a type not ported yet are left out and added by the task that ports the type (see
- * `docs/mapping.md`): the channel endpoint, flow control and congestion control suppliers and their `*_SUPPLIER`
- * readers, `terminationValidator`, `flowControlGroupTag` and `validateSocketBufferLengths`. Their PROP_NAME and DEFAULT
+ * `docs/mapping.md`): the flow control and congestion control suppliers and their `*_SUPPLIER` readers,
+ * `terminationValidator`, `flowControlGroupTag` and `validateSocketBufferLengths`. Their PROP_NAME and DEFAULT
  * constants are ported.
  */
 export class Configuration {
@@ -1994,6 +1998,42 @@ export class Configuration {
         }
 
         return BitUtil.fromHex(propertyValue);
+    }
+
+    /**
+     * Get the supplier of {@link SendChannelEndpoint}s which can be used for debugging, monitoring, or modifying the
+     * behaviour when sending to the channel.
+     * <p>
+     * There is no class loader (spec D25): the property names the default supplier, and any other name is a
+     * `ClassNotFoundException`. The debug supplier of `io.aeron.driver.ext` is added by the task that ports it (T21).
+     *
+     * @return the {@link SendChannelEndpointSupplier}.
+     */
+    public static sendChannelEndpointSupplier(): SendChannelEndpointSupplier {
+        const className = System.getProperty(Configuration.SEND_CHANNEL_ENDPOINT_SUPPLIER_PROP_NAME);
+        if (null === className || 'io.aeron.driver.DefaultSendChannelEndpointSupplier' === className) {
+            return new DefaultSendChannelEndpointSupplier();
+        }
+
+        return LangUtil.rethrowUnchecked(new ClassNotFoundException(className));
+    }
+
+    /**
+     * Get the supplier of {@link ReceiveChannelEndpoint}s which can be used for debugging, monitoring, or modifying the
+     * behaviour when receiving from the channel.
+     * <p>
+     * There is no class loader (spec D25): the property names the default supplier, and any other name is a
+     * `ClassNotFoundException`. The debug supplier of `io.aeron.driver.ext` is added by the task that ports it (T21).
+     *
+     * @return the {@link ReceiveChannelEndpointSupplier}.
+     */
+    public static receiveChannelEndpointSupplier(): ReceiveChannelEndpointSupplier {
+        const className = System.getProperty(Configuration.RECEIVE_CHANNEL_ENDPOINT_SUPPLIER_PROP_NAME);
+        if (null === className || 'io.aeron.driver.DefaultReceiveChannelEndpointSupplier' === className) {
+            return new DefaultReceiveChannelEndpointSupplier();
+        }
+
+        return LangUtil.rethrowUnchecked(new ClassNotFoundException(className));
     }
 
     /**

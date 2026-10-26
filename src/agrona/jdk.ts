@@ -311,6 +311,11 @@ export const Short = {
     MAX_VALUE: 32767,
 } as const;
 
+// The limits of a Java `long`, as constants: `-(2n ** 63n)` computed in `Long.checkInt64` allocated a `bigint` per call,
+// on the path of every flyweight that writes a 64-bit field (the group tag of a status message, the RTT timestamps).
+const INT64_MIN = -(2n ** 63n);
+const INT64_MAX = 2n ** 63n - 1n;
+
 /**
  * Stand-in for `java.lang.Long`. A Java `long` that is held in a `number` is exact to +/-(2^53 - 1) (spec 5.2), so
  * {@link Long.MAX_VALUE} and {@link Long.MIN_VALUE} are the largest and smallest values that can be held.
@@ -372,7 +377,7 @@ export const Long = {
 
     /** A `long` held in a `bigint`: the value, or a `RangeError` if it is outside [-2^63, 2^63 - 1]; it never wraps. */
     checkInt64(value: bigint): bigint {
-        if (value < -(2n ** 63n) || value > 2n ** 63n - 1n) {
+        if (value < INT64_MIN || value > INT64_MAX) {
             throw new RangeError('long value is outside [-2^63, 2^63 - 1]: ' + value);
         }
 
