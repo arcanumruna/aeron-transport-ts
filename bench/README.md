@@ -197,3 +197,23 @@ harness (2,000 samples, median of the repeats).
 | Receiver doWork: one data frame of 64 B (ring, validate, route, insertPacket, rebuild, status message) | 1,069.5 | 1,008.2 | 2,116.9 | 2,855.1 |
 | Receiver doWork: one heartbeat (frame length 0)                                                        | 421.4   | 408.6   | 809.4   | 1,335.6 |
 | Receiver doWork: an idle cycle (no command, no datagram, the image has nothing to send)                | 96.8    | 94.1    | 188.6   | 231.3   |
+
+### Publications and images (T20)
+
+`bench/micro/publication.bench.ts`: `offer` and `tryClaim` + `commit` of a `ConcurrentPublication` (one atomic add of the raw
+tail, spec D84) and of an `ExclusivePublication` (a plain store of it, spec D82), and `Image.poll` and `controlledPoll` of one
+fragment, over a log in memory (`SharedArrayBuffer`) with 64 B messages (frames of 96 B). The limit never back pressures, and one
+`offer` in 680 is the rotation of a full term (`ADMIN_ACTION`), which is part of the figure. The poll benches read a term of 600
+frames written by the setup and move the subscriber back to its start after the 600th (one operation in 600). None allocates
+(`expectNoAllocation` in `PublicationAllocationTest` and `ImageAllocationTest`, also from a position of 2^40). Measured on 4
+cores with a load average of about 5 (other tasks were running), n=1 run of the harness (2,000 samples, median of the repeats),
+so the figures are upper bounds; the baseline for the gate is to be taken on the idle machine.
+
+| Bench                                                                               | ns/op | p50   | p99   | p99.9   |
+| ----------------------------------------------------------------------------------- | ----- | ----- | ----- | ------- |
+| ConcurrentPublication offer 64 B (claim the tail, header, copy, publish the length) | 325.0 | 296.0 | 633.6 | 3,109.8 |
+| ExclusivePublication offer 64 B (store the tail, header, copy, publish the length)  | 275.9 | 229.6 | 530.7 | 1,596.0 |
+| ConcurrentPublication tryClaim + commit 64 B                                        | 254.2 | 231.4 | 514.5 | 1,248.9 |
+| ExclusivePublication tryClaim + commit 64 B                                         | 204.1 | 158.9 | 397.4 | 1,189.1 |
+| Image poll: one fragment of 64 B                                                    | 47.7  | 42.7  | 108.0 | 293.7   |
+| Image controlledPoll: one fragment of 64 B                                          | 54.8  | 48.0  | 95.2  | 132.0   |
