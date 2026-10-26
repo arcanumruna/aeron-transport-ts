@@ -1,6 +1,8 @@
 // Not in Agrona (CloseHelper has no test there): every overload of CloseHelper.
 import { describe, expect, it, vi } from 'vitest';
 import { CloseHelper } from '../../../src/agrona/CloseHelper.js';
+import type { AtomicCounter } from '../../../src/agrona/concurrent/status/AtomicCounter.js';
+import { CountedErrorHandler } from '../../../src/agrona/concurrent/CountedErrorHandler.js';
 import { NullPointerException, RuntimeException, getSuppressed } from '../../../src/agrona/jdk.js';
 import type { AutoCloseable } from '../../../src/agrona/jdkLang.js';
 import { assertThrows } from '../../support/Assertions.js';
@@ -131,5 +133,33 @@ describe('CloseHelperExtra', () => {
         CloseHelper.close(handler, odd);
         expect(handler.onError).toHaveBeenCalledExactlyOnceWith('text' as unknown as Error);
         expect(() => CloseHelper.close(odd)).toThrow();
+    });
+
+    it('closeAllWithAnErrorHandlerThatIsCloseableClosesTheCloseablesAndNotTheHandler Regression', () => {
+        // a CountedErrorHandler is an ErrorHandler and an AutoCloseable: as the first argument it is the handler (D120)
+        const reported = new RuntimeException('reported');
+        const delegate = mockErrorHandler();
+        const counter = { isClosed: () => false, increment: vi.fn() } as unknown as AtomicCounter;
+        const handler = new CountedErrorHandler(delegate, counter);
+        const closeables = [closeable(reported), closeable()];
+
+        CloseHelper.closeAll(handler, closeables);
+        CloseHelper.closeAll(handler, closeables[1]!);
+
+        expect(handler.isClosed()).toBe(false);
+        expect(closeables[0]!.close).toHaveBeenCalledTimes(1);
+        expect(closeables[1]!.close).toHaveBeenCalledTimes(2);
+        expect(delegate.onError.mock.calls).toEqual([[reported]]);
+        expect(counter.increment).toHaveBeenCalledTimes(1);
+    });
+
+    it('closeAllOfACloseableErrorHandlerAloneClosesIt', () => {
+        const delegate = mockErrorHandler();
+        const counter = { isClosed: () => false, increment: vi.fn() } as unknown as AtomicCounter;
+        const handler = new CountedErrorHandler(delegate, counter);
+
+        CloseHelper.closeAll(handler);
+
+        expect(handler.isClosed()).toBe(true);
     });
 });
