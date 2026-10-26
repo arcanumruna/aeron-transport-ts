@@ -210,20 +210,31 @@ function getInteger(name: string, def: number | null = null): number | null {
  * Stand-in for `java.lang.Integer`.
  */
 /**
- * The ASCII spelling of a string whose decimal digits may be any Unicode `Nd` code point, which is what
- * `Character.digit(ch, 10)` accepts (a run of `Nd` code points is made of sets of ten, the first of which is zero).
+ * The ASCII spelling of a string whose decimal digits may be any BMP `Nd` character, which is what
+ * `Character.digit(char, 10)` accepts: Java's `parseInt` and `parseLong` work per UTF-16 unit, so a supplementary digit
+ * (mathematical bold, U+1D7CE) is two surrogates, neither a digit, and stays as it is for the caller to refuse.
+ * A run of `Nd` characters is made of sets of ten, the first of which is zero.
  * Not on a hot path: the ASCII case is answered by the caller's own test.
  */
 function toAsciiDigits(s: string): string {
-    return s.replace(/\p{Nd}/gu, (ch) => {
-        let cp = ch.codePointAt(0)!;
-        const here = cp;
-        while (cp > 0 && /^\p{Nd}$/u.test(String.fromCodePoint(cp - 1))) {
-            cp--;
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+        const ch = s.charAt(i);
+        if (!/^\p{Nd}$/u.test(ch)) {
+            out += ch;
+            continue;
         }
 
-        return String((here - cp) % 10);
-    });
+        let unit = s.charCodeAt(i);
+        const here = unit;
+        while (unit > 0 && /^\p{Nd}$/u.test(String.fromCharCode(unit - 1))) {
+            unit--;
+        }
+
+        out += String((here - unit) % 10);
+    }
+
+    return out;
 }
 
 export const Integer = {
