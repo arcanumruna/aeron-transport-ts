@@ -1324,6 +1324,9 @@ export class ClientConductor implements Agent {
                 this.awaitingIdleStrategy.idle();
             } else {
                 this.driverAgentInvoker.invoke();
+                // this wait holds the thread: no `dns.lookup` of the driver can complete (spec D126), so a parse that
+                // waits for one is answered now with the cache as it is, as the unknown host error (D102)
+                this.ctx.mediaDriver()?.context().nativeResourceAgentProxy()?.failPendingLookups();
             }
 
             this.service(correlationId);

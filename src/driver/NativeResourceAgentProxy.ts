@@ -42,6 +42,14 @@ export class NativeResourceAgentProxy extends CommandProxy {
         this._nativeResourceAgent = nativeResourceAgent;
     }
 
+    /**
+     * Completes the parses that wait for a `dns.lookup` with the cache as it is (see
+     * {@link NativeResourceAgent.failPendingLookups}); a synchronous client call that blocks the thread calls it.
+     */
+    public failPendingLookups(): number {
+        return this._nativeResourceAgent?.failPendingLookups() ?? 0;
+    }
+
     public parseChannel(channel: string, isDestination: boolean): CommandResult<UdpChannel> {
         const result = new CommandResult<UdpChannel>();
         this.offer(() =>
