@@ -1,4 +1,4 @@
-// `npm run bench:gate -- --base <ref> [--pairs n] [--filter s] [--samples n] [--seed n] [--ignore-load]`: the performance regression gate.
+// `npm run bench:gate -- --base <ref> [--pairs n] [--filter s] [--file s] [--samples n] [--seed n] [--ignore-load] [--inject spec]`: the performance regression gate.
 //
 // 1. Resolves <ref> (default origin/main) to a sha and extracts it with `git archive` into a fresh directory under the
 //    temp directory, outside the repository, with a symlink to node_modules and the CANDIDATE's bench/ and worker
@@ -31,9 +31,13 @@ interface Options {
     base: string;
     pairs: number;
     filter: string;
+    /** Only the bench files whose name contains this (the tests of the gate use it). */
+    file: string;
     samples: number;
     seed: number;
     ignoreLoad: boolean;
+    /** A delay for the candidate runs only (bench/lib/inject.ts): the tests of the gate use it. */
+    inject: string;
 }
 
 class UsageError extends Error {}
@@ -46,9 +50,11 @@ function parseArgs(argv: string[]): Options {
         base: 'origin/main',
         pairs: 5,
         filter: '',
+        file: '',
         samples: 2000,
         seed: (Date.now() ^ (process.pid << 8)) >>> 0,
         ignoreLoad: false,
+        inject: '',
     };
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
@@ -65,6 +71,9 @@ function parseArgs(argv: string[]): Options {
             case '--filter':
                 options.filter = argv[++i] ?? '';
                 break;
+            case '--file':
+                options.file = argv[++i] ?? '';
+                break;
             case '--samples':
                 options.samples = Number(argv[++i]);
                 if (!Number.isInteger(options.samples) || options.samples < 10) {
@@ -79,6 +88,12 @@ function parseArgs(argv: string[]): Options {
                 break;
             case '--ignore-load':
                 options.ignoreLoad = true;
+                break;
+            case '--inject':
+                options.inject = argv[++i] ?? '';
+                if ('' === options.inject) {
+                    throw new UsageError('--inject needs a spec, as TermReader.read:+20%');
+                }
                 break;
             default:
                 throw new UsageError('unknown argument: ' + arg);
@@ -100,7 +115,7 @@ function prng(seed: number): () => number {
 }
 
 /** Runs one bench file in `cwd` as a separate process; the JSON lines it printed, and a line for a process that failed. */
-function runFile(cwd: string, file: string, options: Options): Line[] {
+function runFile(cwd: string, file: string, options: Options, inject = ''): Line[] {
     const args = [
         '--expose-gc',
         '--experimental-transform-types',
@@ -117,11 +132,18 @@ function runFile(cwd: string, file: string, options: Options): Line[] {
     if ('' !== options.filter) {
         args.push('--filter', options.filter);
     }
+    // the delay is for the candidate runs only: the base never inherits one from the environment of the gate
+    const env = { ...process.env };
+    delete env['AERON_BENCH_INJECT'];
+    if ('' !== inject) {
+        env['AERON_BENCH_INJECT'] = inject;
+    }
     const run = spawnSync(process.execPath, args, {
         cwd,
         encoding: 'utf8',
         timeout: 20 * 60 * 1000,
         maxBuffer: 1 << 26,
+        env,
     });
     const lines: Line[] = [];
     for (const text of (run.stdout ?? '').split('\n')) {
@@ -194,6 +216,11 @@ async function main(): Promise<number> {
             return EXIT_NO_VERDICT;
         }
     }
+    if ('' !== options.inject) {
+        process.stderr.write(
+            '--inject ' + options.inject + ': a delay in the candidate runs only (a test of the gate)\n',
+        );
+    }
     if (options.ignoreLoad) {
         process.stderr.write('--ignore-load: the load average is not checked; the numbers are for local experiments\n');
     }
@@ -203,7 +230,7 @@ async function main(): Promise<number> {
         encoding: 'utf8',
     }).trim();
     const files = readdirSync(join(repo, 'bench', 'micro'))
-        .filter((f) => f.endsWith('.bench.ts'))
+        .filter((f) => f.endsWith('.bench.ts') && f.includes(options.file))
         .sort();
     const expected = await expectedBenches(repo, files, options.filter);
 
@@ -243,9 +270,9 @@ async function main(): Promise<number> {
                 // base and candidate in an order drawn per pair from the seed, so that neither always runs first
                 if (random() < 0.5) {
                     base.push(...runFile(scratch, file, options));
-                    cand.push(...runFile(repo, file, options));
+                    cand.push(...runFile(repo, file, options, options.inject));
                 } else {
-                    cand.push(...runFile(repo, file, options));
+                    cand.push(...runFile(repo, file, options, options.inject));
                     base.push(...runFile(scratch, file, options));
                 }
             }

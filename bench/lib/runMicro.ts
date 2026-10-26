@@ -67,6 +67,10 @@ function printTable(results: Result[]): void {
 
 async function main(): Promise<void> {
     const options = parseArgs(process.argv.slice(2));
+    if (undefined !== process.env['AERON_BENCH_INJECT']) {
+        // the delay of the gate's own tests (bench/lib/inject.ts, spec D110); imported only when asked for
+        await (await import('./inject.js')).installFromEnvironment();
+    }
     const dir = new URL('../micro/', import.meta.url);
     const files = readdirSync(dir)
         .filter((f) => f.endsWith('.bench.ts') && f.includes(options.file))

@@ -95,15 +95,22 @@ async function measureSync(bench: SyncBench, samples: number): Promise<Result> {
 }
 
 async function measureRun(bench: RunBench, samples: number): Promise<Result> {
-    const runs: Result[] = [];
-    for (let r = 0; r < REPEATS; r++) {
-        await settle();
-        const run: RunSamples = await bench.run({ samples });
-        const result = reduce(bench.name, run.samplesNsPerOp, run.elapsedMs * 1e6, run.totalOps);
-        result.opsPerSec = run.totalOps / (run.elapsedMs / 1e3);
-        runs.push(result);
+    await bench.setup?.();
+    try {
+        const runs: Result[] = [];
+        for (let r = 0; r < REPEATS; r++) {
+            await settle();
+            const run: RunSamples = await bench.run({ samples });
+            const result = reduce(bench.name, run.samplesNsPerOp, run.elapsedMs * 1e6, run.totalOps);
+            if (false !== bench.throughput) {
+                result.opsPerSec = run.totalOps / (run.elapsedMs / 1e3);
+            }
+            runs.push(result);
+        }
+        return medianOf(runs);
+    } finally {
+        await bench.teardown?.();
     }
-    return medianOf(runs);
 }
 
 /**

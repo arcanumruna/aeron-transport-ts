@@ -8,6 +8,7 @@ Low latency is the requirement, so a slowdown fails like a red test (plan, "Perf
 npm run bench:micro                       # every bench in bench/micro/*.bench.ts
 npm run bench:micro -- --filter ManyToOne # benches whose name contains the text
 npm run bench:micro -- --samples 500 --json
+npm run bench:e2e                         # the end-to-end report (below): latency, throughput, allocation, first message after idle
 ```
 
 One JSON line per bench goes to stdout, `{name, nsPerOp, p50, p99, p999, samples, opsPerSec?}`, and a table goes to stderr
@@ -36,7 +37,7 @@ reports NO_VERDICT for it.
 ## The gate
 
 ```
-npm run bench:gate -- --base <ref> [--pairs n] [--filter s] [--samples n] [--seed n] [--ignore-load]
+npm run bench:gate -- --base <ref> [--pairs n] [--filter s] [--file s] [--samples n] [--seed n] [--ignore-load] [--inject spec]
 ```
 
 It extracts `<ref>` (default `origin/main`) with `git archive` into a scratch directory under the temp directory,
@@ -80,7 +81,25 @@ ratio and every pair's ratio.
 | 2         | a usage error                                            |
 | 3         | a NO_VERDICT without a FAIL (also: the host is too busy) |
 
-The verdict logic is `bench/lib/verdict.ts`, tested in `test/extra/bench/GateVerdict.test.ts`.
+The verdict logic is `bench/lib/verdict.ts`, tested in `test/extra/bench/GateVerdict.test.ts` (every threshold, on both
+sides, on made-up numbers). The whole gate is tested end to end in `test/extra/bench/GateEndToEndTest.test.ts`, with a real
+bench (`TermReader read: 16 fragments of 64 B`) and real processes: a candidate with `--inject TermReader.read:+20%` must
+fail it (exit 1, the ratios named), and the same commit as base and candidate must pass it (exit 0). The test works in a
+scratch repository made of the sources of `HEAD` with the working tree's `bench/` and `test/support/` over them, so base
+and candidate are the same commit whatever is uncommitted. The sizes are chosen for the verdict to be robust: 20% is four
+times the 5% limit and the delay is 20% of the very call the bench times (calibrated in the bench process, so it is 20% on
+any host); 9 pairs for the delay and 11 for the same commit, 1000 samples per run; and the gate's own rule for noise
+applies: a first run that does not give the expected verdict is rerun once with 15 pairs, and the rerun counts. On the
+4-core shared host of the baselines below, with the load average at 4 to 10, the 20% delay gave median ratios of 1.17 to
+1.23 (p50 about 1.20), and the same commit gave median ratios of 0.96 to 1.05 in 7 of 8 runs of 11 pairs and 1.17 in one
+(a busy host: the rerun with 15 pairs is for that). Each test takes about 40 s on a quiet host (the file 85 s), and more under the load of the
+whole suite.
+
+`--file s` runs only the bench files (`bench/micro/*.bench.ts`) whose name contains `s`. `--inject TermReader.read:+20%`
+sets `AERON_BENCH_INJECT` for the **candidate** runs only (the base never inherits it); the bench process then wraps
+`TermReader.read` with a busy loop of 20% of the median cost of one 16 fragment read, measured in that process
+(`bench/lib/inject.ts`, spec D110). It exists to prove that the gate fails a slow candidate: the tests of the gate use it
+(below), and nothing in `src/` has a hook.
 
 **Noise is never a verdict: rerun with `--pairs 15`, then bisect.** Run it on an idle machine; shared CI runners are
 too noisy for latency, so CI only runs the benches once per PR and reports the numbers.
@@ -217,3 +236,121 @@ so the figures are upper bounds; the baseline for the gate is to be taken on the
 | ExclusivePublication tryClaim + commit 64 B                                         | 204.1 | 158.9 | 397.4 | 1,189.1 |
 | Image poll: one fragment of 64 B                                                    | 47.7  | 42.7  | 108.0 | 293.7   |
 | Image controlledPoll: one fragment of 64 B                                          | 54.8  | 48.0  | 95.2  | 132.0   |
+
+**What the shared 4-core VM of these baselines does to the gate (T24).** Two full runs of `npm run bench:gate` with the same
+commit as base and candidate, 5 pairs, while other jobs ran on the host (load average 1.5 to 3.2 during the run, 0.7 at
+the start of the first): the first failed 14 of 46 benches and the second 15, almost all of them benches that nothing
+changed (per-pair ratios from 0.45 to 1.85), and both passed the `TermReader` benches and three of the four end-to-end
+ones. The round trip of 1376 B failed in both (its p50 is 42 to 68 us from one process to the next; 15 pairs gave a
+median of 1.07 over pair ratios of 0.62 to 1.66). That is noise, not a regression, and it is why the gate wants an idle
+machine and 15 pairs before a verdict is believed; a clean 5 pair run needs a host with nothing else running.
+
+### End-to-end benches (T24)
+
+`bench/lib/e2e.ts` runs two `MediaDriver`s and two `Aeron` clients in one process on the real loopback (127.0.0.1),
+default configuration (spec D100, D111): the drivers run themselves on the event loop and the bench polls the clients, one
+turn of `setImmediate` between polls. After an `offer` the bench calls `MediaDriver.wake()` of the driver that has work
+(D101); the report also shows the figures without it. Both nodes are one thread, so these figures are the port plus the
+event loop plus the kernel, and the **raw `dgram` floor** (two plain sockets in the same process, same sizes, the echo in
+the `'message'` handler; spec 5.3) is reported next to them and is not in the gate.
+
+- **In the gate** (`bench/micro/e2e.bench.ts`, `npm run bench:micro -- --file e2e`): `Unicast round trip` of 32 B and
+  1376 B (the largest message of one datagram; a sample is one round trip: `offer`, the echo of the other node, the read)
+  and `Unicast stream` of 64 B and 1376 B (one way, continuously; a sample is the ns per message of a window of 100
+  messages read). The round trips are judged as latency benches (5 pairs), the streams as throughput benches (3 pairs).
+  They have the same noise rules as the micro benches and need an idle host more than they do; the p99 and p99.9 of the
+  default 2000 samples are information.
+- **The report** (`npm run bench:e2e [-- --runs n --stream-runs n --rtt n --windows n --idle n --json]`): round trips of
+  32, 512 and 1376 B with the wake, without it and the `dgram` floor, **interleaved** (each run does every size, the order
+  alternates between runs), 5 runs of 3000 round trips (the table is the median over the runs of each run's p50, p99 and
+  p99.9); one-way streams of 64 B and 1376 B, 3 runs (msgs/s and MB/s of payload); allocation per message; the first
+  message after the runners went idle. The CI job `bench-e2e` runs it once per PR and writes it to
+  `$GITHUB_STEP_SUMMARY`; it never fails the build.
+- **Allocation** is the sampling heap profiler (a sample every 256 bytes, objects already collected counted) split by the
+  file of the allocating function, with the minor collections per 1000 messages from a `gc` observer (what
+  `test/support/Allocation.ts` counts). The profiler estimates. `port` is `src/`, `node` is Node's own (the `Buffer` and
+  `rinfo` of each `'message'`, the `SendWrap` of each `send`, timers: spec 5.3), `harness` is the promise and
+  `setImmediate` of each turn of the bench.
+- **First message after idle** (D101: `offer` does not wake a parked runner): 150 ms of nothing, then `offer`, and the time
+  to the read by the subscriber, with and without `MediaDriver.wake()`, and the same for a plain `dgram` send to its
+  `'message'`.
+
+### Baselines of the end-to-end benches
+
+`npm run bench:e2e`, one invocation, 2026-10-26, Node v22.22.0, Intel(R) Xeon(R) Processor @ 2.10GHz, 4 cores, a shared
+host (load average 3.5 at the start and 2.2 at the end, another job was finishing: indicative only; the baseline of the
+gate is to be taken on the idle machine). 5 runs of 3000 round trips per row, 3 runs of 50,000 messages per stream row, 30
+first messages.
+
+Round trip, microseconds (one way is about half):
+
+| bytes | path                            | p50  | p99   | p99.9 |
+| ----- | ------------------------------- | ---- | ----- | ----- |
+| 32    | Aeron TS, wake after each offer | 42.5 | 134.9 | 480.5 |
+| 32    | Aeron TS, no wake               | 42.6 | 121.5 | 498.7 |
+| 32    | raw dgram floor                 | 15.9 | 72.7  | 137.7 |
+| 512   | Aeron TS, wake after each offer | 43.6 | 135.1 | 355.8 |
+| 512   | Aeron TS, no wake               | 44.5 | 165.3 | 361.6 |
+| 512   | raw dgram floor                 | 16.3 | 77.3  | 176.1 |
+| 1376  | Aeron TS, wake after each offer | 54.8 | 222.1 | 440.4 |
+| 1376  | Aeron TS, no wake               | 49.6 | 195.3 | 615.3 |
+| 1376  | raw dgram floor                 | 22.9 | 94.0  | 167.0 |
+
+The wake makes no difference to a round trip here; most likely because the bench polls in a tight loop of `setImmediate`, so the datagram of
+the first leg and the offer of the echo find the runner of the other node running. The port costs about 27 us more than the
+floor per round trip at 32 B.
+
+Throughput, one way:
+
+| bytes | path                                     | msgs/s  | MB/s  |
+| ----- | ---------------------------------------- | ------- | ----- |
+| 64    | Aeron TS                                 | 408,789 | 26.2  |
+| 64    | raw dgram floor (credit of 64 datagrams) | 118,029 | 7.6   |
+| 1376  | Aeron TS                                 | 43,771  | 60.2  |
+| 1376  | raw dgram floor (credit of 64 datagrams) | 99,321  | 136.7 |
+
+Aeron puts the small messages of one cycle in one datagram, so at 64 B it moves more messages than the floor moves
+datagrams. At 1376 B every message is a datagram and the port reaches 44% of the floor in messages per second, 21 us per
+message: the sender sends one frame per cycle and a cycle is a turn of the event loop (D11), the first place to look.
+
+Allocation per message (estimates, bytes per message):
+
+| run                                       | port   | node   | harness | other | minor GCs per 1000 msgs |
+| ----------------------------------------- | ------ | ------ | ------- | ----- | ----------------------- |
+| stream 64 B                               | 133.9  | 69.8   | 42.0    | 42.2  | 0.02                    |
+| stream 1376 B                             | 814.0  | 949.1  | 601.6   | 580.1 | 0.20                    |
+| round trip 32 B, per message (2 per trip) | 1274.4 | 1091.3 | 1211.4  | 622.1 | 0.17                    |
+
+The `port` column is not zero, although spec 5.3 says the port's own code allocates nothing per datagram. The biggest
+sites of the 64 B stream in this run were `AbstractMutableDirectBuffer.putInt` (50.6 B/msg), `PublicationImage.validatePacket`
+(32.2), `AgentRunner.dutyCycle` (16.6: the `Immediate` or `Timeout` of each cycle, D11), `getInt` (6.1) and
+`TermRebuilder.insert` (5.0); in another run `putInt` was not among them, so the attribution is a sample, not a count.
+They are not investigated here; the candidates are the heap numbers of values above 2^31 (D13) in code the profiler
+sees unoptimized. The figures are per message of a run, so they grow with the datagrams per message (1376 B) and with the
+cycles per message (the round trip spins the loop many times for each message). Recorded, not a gate. The minor
+collections are rare (0.02 per 1000 messages at 64 B).
+
+First message after the runners went idle, microseconds, 100 messages (one run of the report with `--idle 100`):
+
+| path                                        | p50   | p99     | max     |
+| ------------------------------------------- | ----- | ------- | ------- |
+| Aeron TS, `offer` only (default)            | 260.5 | 1,159.3 | 1,195.3 |
+| Aeron TS, `offer` then `MediaDriver.wake()` | 264.2 | 527.3   | 580.5   |
+| raw dgram floor, send to read               | 184.7 | 339.2   | 342.0   |
+
+The median is a quarter of a millisecond with or without the wake (the floor is 0.18 ms: an idle event loop, a cold
+cache). Without the wake the tail goes up to the park of the idle strategy, 1 ms (D101), plus the same quarter
+millisecond: 1.2 ms at the worst of 100. That is within the expectation of D101 (within 1 ms of the park, plus the path);
+the wake takes the tail to 0.58 ms. An application that cannot wait 1 ms calls `MediaDriver.wake()`.
+
+The gate's own figures for the same benches (`npm run bench:micro -- --file e2e` and `--file termreader`, load average
+0.8 to 0.9, 4 cores, ns per operation; a round trip is one operation, a stream operation is one message):
+
+| Bench                                                                   | ns/op    | p50      | p99     | p99.9    | ops/s   |
+| ----------------------------------------------------------------------- | -------- | -------- | ------- | -------- | ------- |
+| Unicast round trip 32 B (TS to TS on the loopback: offer, echo, read)   | 58,208   | 54,850   | 151,297 | 875,804  |         |
+| Unicast round trip 1376 B (TS to TS on the loopback: offer, echo, read) | 56,738.6 | 46,781   | 151,819 | 294,534  |         |
+| Unicast stream 64 B (TS to TS on the loopback, ns per message)          | 2,386.6  | 2,195.4  | 4,922.3 | 13,161.4 | 419,005 |
+| Unicast stream 1376 B (TS to TS on the loopback, ns per message)        | 21,309.8 | 18,400.6 | 49,499  | 65,164.2 | 46,927  |
+| TermReader read: 1 fragment of 64 B                                     | 42.9     | 34.9     | 94.2    | 133.5    |         |
+| TermReader read: 16 fragments of 64 B                                   | 320.6    | 310      | 551.3   | 865      |         |

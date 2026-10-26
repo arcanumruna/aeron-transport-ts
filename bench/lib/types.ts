@@ -36,7 +36,16 @@ export interface RunSamples {
 /** A bench that runs workers and returns its own samples. */
 export interface RunBench {
     name: string;
+    /** Called once before the first run (the end-to-end benches start their drivers here). */
+    setup?(): void | Promise<void>;
     run(options: { samples: number }): Promise<RunSamples>;
+    /** Called once after the last run, also after a failure. */
+    teardown?(): void | Promise<void>;
+    /**
+     * `false` for a latency bench: the result has no ops/s, so the gate judges it as a latency bench (5 pairs, no
+     * throughput rule). Throughput benches leave it out.
+     */
+    throughput?: boolean;
 }
 
 export type Bench = SyncBench | RunBench;
