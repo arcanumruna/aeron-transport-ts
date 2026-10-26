@@ -524,7 +524,7 @@ export async function measureAllocation(run: () => Promise<number>): Promise<All
             scavengesPer1000: (scavenges * 1000) / messages,
             portSites: [...sites]
                 .sort((x, y) => y[1] - x[1])
-                .slice(0, 5)
+                .slice(0, 8)
                 .map(([site, bytes]) => ({ site, bytesPerMessage: bytes / messages })),
         };
     } finally {

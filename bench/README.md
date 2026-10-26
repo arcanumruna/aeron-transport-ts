@@ -8,7 +8,7 @@ Low latency is the requirement, so a slowdown fails like a red test (plan, "Perf
 npm run bench:micro                       # every bench in bench/micro/*.bench.ts
 npm run bench:micro -- --filter ManyToOne # benches whose name contains the text
 npm run bench:micro -- --samples 500 --json
-npm run bench:e2e                         # the end-to-end report (below): latency, throughput, allocation, first message after idle
+npm run bench:e2e                         # the end-to-end report (below): latency, throughput, allocation, first message after idle, fan-out
 ```
 
 One JSON line per bench goes to stdout, `{name, nsPerOp, p50, p99, p999, samples, opsPerSec?}`, and a table goes to stderr
@@ -346,6 +346,38 @@ the `'message'` handler; spec 5.3) is reported next to them and is not in the ga
   to the read by the subscriber, with and without `MediaDriver.wake()`, and the same for a plain `dgram` send to its
   `'message'`.
 
+### Fan-out benches (phase 3 T14, D121)
+
+`bench/lib/fanout.ts`: the same harness style for the phase 3 topologies, **one way** (offer to the read, not an echo).
+Each receiver is a `MediaDriver` and an `Aeron` client of its own in the process (a receiver id of its own for the flow
+control); the publisher is one more. The scenarios: a unicast reference; **multicast** (group 224.20.30.39,
+`interface=localhost`) with 1 and 3 subscriptions; **MDC dynamic** (`control-mode=dynamic`, receivers join with
+`control=`) and **MDC manual** (`control-mode=manual`, `addDestination`) with 2 and 4 destinations; **MDS** with 2
+destinations (one `control-mode=manual` subscription, two publications on one driver, one for each destination, the offers
+alternating between them). The multicast and MDC publications have `fc=min,g:/N` (as the interop rows of D116), so the
+stream starts when all N receivers are counted and the slowest paces it.
+
+- **Latency**: one 32 B message at a time, the ns from `offer` until the LAST subscriber has read it.
+- **Throughput**: a 64 B stream; the ns per message of a window of 100 read by the SLOWEST subscriber. msgs/s counts
+  messages offered (each reaches every receiver); MB/s is payload of one receiver.
+- **In the report** (`npm run bench:e2e`): 5 latency runs (3000 messages each) and 3 stream runs (50,000 messages),
+  every scenario taken in turn within each run (the order alternates), a fresh set of drivers for each scenario and run,
+  so they are interleaved with each other and run in the same process after the unicast sections above; allocation
+  per message as D112 measures it (sampling heap profiler, split by file) for the 64 B stream, with the top
+  allocation sites of `src/`.
+- **In the gate** (`bench/micro/fanout.bench.ts`, `npm run bench:micro -- --file fanout`): the 7 non-unicast
+  scenarios as latency benches (5 pairs) and as throughput benches (3 pairs). The unicast reference is the
+  `Unicast` benches of `e2e.bench.ts`. The file imports a phase 3 module, so a base without phase 3 reports it
+  `n/a in base`. The non-gating CI job `bench-e2e` posts the report and `--file fanout` to the run summary.
+- **Allocation reading.** The `port` column is the whole process: N+1 drivers. The remaining `src/` sites are the
+  D13 heap numbers (`nowNs` of `Sender`, `Receiver`, `DriverConductor`, `AgentRunner.dutyCycle`, about 4 B per message and
+  driver each, so they grow with the number of drivers), `ClientConductor.service`, and in the multicast and MDC runs
+  `DataTransportPoller.receive` and `PublicationImage.insertPacket` (1 to 2 B per message and receiver, the same class).
+  The send loops that phase 3 added (`MultiSndDestination.send`, `DynamicSndMultiDestination.send`), the multicast status
+  message and NAK path and the MDS receive path (`MultiRcvDestination`, 0.1 B) show no site of their own; their
+  `expectNoAllocation` tests are `MulticastFlowControlAllocationTest` and the allocation tests of the publication image.
+  No fix was needed in T14.
+
 ### Baselines of the end-to-end benches
 
 `npm run bench:e2e`, one invocation, 2026-10-26, Node v22.22.0, Intel(R) Xeon(R) Processor @ 2.10GHz, 4 cores, a shared
@@ -415,6 +447,64 @@ The median is a quarter of a millisecond with or without the wake (the floor is 
 cache). Without the wake the tail goes up to the park of the idle strategy, 1 ms (D101), plus the same quarter
 millisecond: 1.2 ms at the worst of 100. That is within the expectation of D101 (within 1 ms of the park, plus the path);
 the wake takes the tail to 0.58 ms. An application that cannot wait 1 ms calls `MediaDriver.wake()`.
+
+Fan-out (phase 3 T14, D121), `npm run bench:e2e`, one invocation, 2026-10-26, same Node and host (4 cores, load average 1.05
+at the end; not perfectly idle: indicative only). One way, offer to the read by the last subscriber, 32 B, 5 runs of 3000
+messages (median over the runs of each run's percentiles); throughput of a 64 B stream, 3 runs of 50,000 messages, per
+message offered; bytes per message offered of the whole process (N+1 drivers), 64 B stream. The scenarios were taken in
+turn within each run.
+
+| scenario                            | p50 us | p99 us | p99.9 us | msgs/s  | MB/s | port B/msg | node B/msg | harness B/msg | other B/msg |
+| ----------------------------------- | ------ | ------ | -------- | ------- | ---- | ---------- | ---------- | ------------- | ----------- |
+| unicast, 1 subscription (reference) | 27.4   | 88.4   | 288.6    | 457,545 | 29.3 | 37.5       | 67.6       | 15.1          | 37.4        |
+| multicast, 1 subscription           | 21.3   | 92.7   | 209.8    | 533,308 | 34.1 | 38.7       | 70.2       | 15.0          | 36.9        |
+| multicast, 3 subscriptions          | 36.3   | 113.7  | 399.8    | 267,923 | 17.1 | 77.8       | 72.6       | 14.5          | 92.0        |
+| MDC dynamic, 2 destinations         | 32.6   | 110.0  | 404.9    | 250,127 | 16.0 | 61.2       | 115.9      | 15.2          | 63.5        |
+| MDC dynamic, 4 destinations         | 55.0   | 158.3  | 837.1    | 169,105 | 10.8 | 99.3       | 223.4      | 14.9          | 118.1       |
+| MDC manual, 2 destinations          | 34.1   | 100.5  | 281.4    | 268,021 | 17.2 | 58.7       | 116.1      | 14.9          | 62.9        |
+| MDC manual, 4 destinations          | 57.4   | 133.7  | 407.0    | 172,947 | 11.1 | 98.0       | 223.4      | 15.2          | 116.5       |
+| MDS, 2 destinations                 | 22.2   | 84.7   | 169.4    | 439,803 | 28.1 | 34.1       | 86.7       | 15.1          | 45.6        |
+
+Reading: each extra receiver costs about 7 us at the median for multicast (1 to 3 subscriptions: 21 to 36 us) and about
+11 us for MDC (2 to 4 destinations: 33 to 56 us). It is one process with N+1 drivers on one thread, so every receiver adds
+a driver's work to the same event loop, and MDC sends a datagram to each destination where multicast sends one to the
+group. Dynamic and manual MDC are the same within the noise. MDS is at the unicast figure. The `port` column rises with the number of
+drivers (the D13 heap numbers, about 4 B per message and driver per duty-cycle function), not with the destinations: no
+`src/` site of the MDC send loop, the multicast status message and NAK path or the MDS receive path allocates per message
+on its own (the top sites are listed by `npm run bench:e2e`).
+
+The fan-out benches as the gate runs them (`npm run bench:micro -- --file fanout`, load average 1.1, 4 cores, ns per
+operation; a latency operation is one message offered and read by every subscriber, a stream operation is one message at the
+slowest subscriber). These are the baselines of the gate; the base of the first gate run (`origin/main`) has no phase 3, so
+they are `n/a in base` there.
+
+| Bench                                             | ns/op  | p50    | p99     | p99.9   | ops/s   |
+| ------------------------------------------------- | ------ | ------ | ------- | ------- | ------- |
+| Fan-out latency 32 B, multicast, 1 subscription   | 34,016 | 24,479 | 120,876 | 391,884 |         |
+| Fan-out latency 32 B, multicast, 3 subscriptions  | 43,003 | 37,040 | 118,004 | 489,551 |         |
+| Fan-out latency 32 B, MDC dynamic, 2 destinations | 36,673 | 31,486 | 104,552 | 468,622 |         |
+| Fan-out latency 32 B, MDC dynamic, 4 destinations | 76,196 | 58,947 | 177,778 | 487,578 |         |
+| Fan-out latency 32 B, MDC manual, 2 destinations  | 38,569 | 34,328 | 105,266 | 243,011 |         |
+| Fan-out latency 32 B, MDC manual, 4 destinations  | 68,373 | 58,050 | 175,615 | 445,102 |         |
+| Fan-out latency 32 B, MDS, 2 destinations         | 32,890 | 26,357 | 97,963  | 179,538 |         |
+| Fan-out stream 64 B, multicast, 1 subscription    | 2,380  | 2,056  | 5,354   | 10,240  | 420,120 |
+| Fan-out stream 64 B, multicast, 3 subscriptions   | 4,770  | 4,358  | 10,066  | 91,810  | 209,629 |
+| Fan-out stream 64 B, MDC dynamic, 2 destinations  | 4,911  | 4,447  | 11,257  | 69,058  | 203,647 |
+| Fan-out stream 64 B, MDC dynamic, 4 destinations  | 6,067  | 5,100  | 13,923  | 84,780  | 164,824 |
+| Fan-out stream 64 B, MDC manual, 2 destinations   | 3,296  | 2,852  | 7,814   | 62,594  | 303,449 |
+| Fan-out stream 64 B, MDC manual, 4 destinations   | 7,332  | 6,531  | 14,194  | 80,673  | 136,390 |
+| Fan-out stream 64 B, MDS, 2 destinations          | 2,128  | 1,897  | 5,325   | 10,386  | 470,019 |
+
+The mean (ns/op) of a latency bench sits above its p50 because of the tail (a collection or a timer in the one process).
+
+**Gate against `origin/main` (a79825d, T14, phase 3 candidate).** A full `npm run bench:gate` (5 pairs) failed on 16
+benches, all in code that phase 3 did not touch (`git diff origin/main..HEAD` is empty for the ring buffers, the
+publications, `Image`, the term reader, `Receiver`, `SendChannelEndpoint`, `ReceiveChannelEndpoint` and
+`ControlTransportPoller`), with pair ratios from 0.67 to 2.2 for the same code. Re-run per file with 11 pairs: the
+congestion, e2e (all four Unicast benches: 0.93 to 1.00), loss and transport files passed; `endpoint`, `publication`,
+`receiver` and `ringbuffer` still had benches over the limit with ratios that swing from 0.76 to 2.2 between pairs on
+byte-identical code (the shared 4-core VM is not idle), so they are noise and not a regression. The 14 new fan-out
+benches are `n/a in base`. The authoritative gate against `main` is on an idle host at T15.
 
 The gate's own figures for the same benches (`npm run bench:micro -- --file e2e` and `--file termreader`, load average
 0.8 to 0.9, 4 cores, ns per operation; a round trip is one operation, a stream operation is one message):

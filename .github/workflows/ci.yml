@@ -92,4 +92,10 @@ jobs:
             echo '```'
             npm run --silent bench:micro -- --file e2e 2>&1 >/dev/null
             echo '```'
+            echo
+            echo '#### The fan-out benches as the gate runs them (`npm run bench:micro -- --file fanout`)'
+            echo
+            echo '```'
+            npm run --silent bench:micro -- --file fanout 2>&1 >/dev/null
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

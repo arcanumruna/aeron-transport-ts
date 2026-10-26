@@ -8,7 +8,12 @@
 //   throughput       one-way streams of 64 and 1376 byte messages, --runs runs (default 3), msgs/s and MB/s
 //   allocation       bytes per message by where they were allocated, minor collections per 1000 messages
 //   after idle       the first message after the runners have been idle, with and without `MediaDriver.wake()` (D101)
+//   fan-out          phase 3 (T14, D121): unicast, multicast (1 and 3 subscriptions), MDC dynamic and manual (2 and 4
+//                    destinations) and MDS (2 destinations), one way, offer to the read of the last subscriber: 32 B
+//                    latency (--runs runs of --rtt messages) and a 64 B stream (--stream-runs runs), the scenarios taken
+//                    in turn within each run (the order alternates), and the allocation of the stream
 import { availableParallelism, cpus, loadavg } from 'node:os';
+import { FANOUT_SCENARIOS, Fanout, fanoutLatency, fanoutStream } from '../lib/fanout.js';
 import {
     DgramPair,
     Loopback,
@@ -39,6 +44,7 @@ const STREAM_SIZES = [64, 1376];
 const WINDOW = 100;
 const WARM_UP_ROUND_TRIPS = 3_000;
 const IDLE_MS = 150;
+const FANOUT_WARM_UP = 1_000;
 
 function parseArgs(argv: string[]): Options {
     const o: Options = { runs: 5, streamRuns: 3, rtt: 3000, windows: 500, idle: 30, json: false };
@@ -84,6 +90,10 @@ async function settle(): Promise<void> {
 }
 
 type Summary = ReturnType<typeof summarize>;
+
+function med(v: number[]): number {
+    return [...v].sort((a, b) => a - b)[v.length >> 1] as number;
+}
 
 function us(ns: number): string {
     return (ns / 1000).toFixed(1);
@@ -184,7 +194,6 @@ async function main(): Promise<void> {
     if (lbs.errors().length > 0) {
         throw new Error('the nodes reported errors: ' + lbs.errors().map(String).join('; '));
     }
-    const med = (v: number[]): number => [...v].sort((a, b) => a - b)[v.length >> 1] as number;
     for (const size of STREAM_SIZES) {
         for (const [what, label] of [
             ['aeron', 'Aeron TS'],
@@ -257,6 +266,97 @@ async function main(): Promise<void> {
         a.scavengesPer1000.toFixed(2),
     ]);
     result['allocation'] = allocations;
+
+    // ---- fan-out (phase 3 T14): every scenario in turn within each run, a fresh set of drivers for each (run, scenario)
+    log(
+        'fan-out: ' +
+            FANOUT_SCENARIOS.length +
+            ' scenarios, ' +
+            o.runs +
+            ' latency runs, ' +
+            o.streamRuns +
+            ' stream runs',
+    );
+    const fanLatency = new Map<string, Summary[]>();
+    const fanRates = new Map<string, { msgs: number[]; mb: number[] }>();
+    const fanout: Record<string, unknown> = {};
+    for (let run = 0; run < Math.max(o.runs, o.streamRuns); run++) {
+        const order = 0 === run % 2 ? FANOUT_SCENARIOS : [...FANOUT_SCENARIOS].reverse();
+        for (const scenario of order) {
+            const f = await Fanout.create(scenario);
+            try {
+                await fanoutLatency(f, 32, new Float64Array(FANOUT_WARM_UP));
+                await fanoutStream(f, 64, WINDOW, new Float64Array(FANOUT_WARM_UP / WINDOW));
+                if (run < o.runs) {
+                    await settle();
+                    const out = new Float64Array(o.rtt);
+                    await fanoutLatency(f, 32, out);
+                    fanLatency.set(scenario.name, [...(fanLatency.get(scenario.name) ?? []), summarize(out)]);
+                }
+                if (run < o.streamRuns) {
+                    await settle();
+                    const t0 = performance.now();
+                    const moved = await fanoutStream(f, 64, WINDOW, new Float64Array(o.windows));
+                    const seconds = (performance.now() - t0) / 1e3;
+                    const r = fanRates.get(scenario.name) ?? { msgs: [], mb: [] };
+                    r.msgs.push(moved.messages / seconds);
+                    r.mb.push(moved.bytes / seconds / 1e6);
+                    fanRates.set(scenario.name, r);
+                }
+                if (f.errors().length > 0) {
+                    throw new Error(scenario.name + ' reported errors: ' + f.errors().map(String).join('; '));
+                }
+            } finally {
+                f.close();
+            }
+        }
+    }
+    const fanLatencyRows: string[][] = [];
+    const fanTputRows: string[][] = [];
+    const fanAllocRows: string[][] = [];
+    const fanSites: string[] = [];
+    for (const scenario of FANOUT_SCENARIOS) {
+        const all = fanLatency.get(scenario.name) as Summary[];
+        const m = medianOfRuns(all);
+        const r = fanRates.get(scenario.name) as { msgs: number[]; mb: number[] };
+        fanLatencyRows.push([scenario.name, us(m.p50), us(m.p99), us(m.p999), String(all.length)]);
+        fanTputRows.push([
+            scenario.name,
+            Math.round(med(r.msgs)).toLocaleString('en-US'),
+            med(r.mb).toFixed(1),
+            String(r.msgs.length),
+        ]);
+        const f = await Fanout.create(scenario);
+        await fanoutStream(f, 64, WINDOW, new Float64Array(FANOUT_WARM_UP / WINDOW));
+        await settle();
+        const a = await measureAllocation(
+            async () => (await fanoutStream(f, 64, WINDOW, new Float64Array(o.windows))).messages,
+        );
+        f.close();
+        fanAllocRows.push([
+            scenario.name,
+            a.portBytesPerMessage.toFixed(1),
+            a.nodeBytesPerMessage.toFixed(1),
+            a.harnessBytesPerMessage.toFixed(1),
+            a.otherBytesPerMessage.toFixed(1),
+            a.scavengesPer1000.toFixed(2),
+        ]);
+        fanSites.push(
+            '- ' +
+                scenario.name +
+                ': ' +
+                a.portSites
+                    .slice(0, 3)
+                    .map((s) => s.site + ' ' + s.bytesPerMessage.toFixed(1))
+                    .join('; '),
+        );
+        fanout[scenario.name] = {
+            latency: { ...m, runs: all.length },
+            throughput: { msgsPerSec: med(r.msgs), mbPerSec: med(r.mb), runs: r.msgs.length },
+            allocation: a,
+        };
+    }
+    result['fanout'] = fanout;
 
     // ---- the first message after the runners have been idle
     log('first message after idle: ' + o.idle + ' messages each, ' + IDLE_MS + ' ms idle before each');
@@ -338,6 +438,24 @@ async function main(): Promise<void> {
             ' ms of nothing before each; µs from `offer` to the read; D101).',
         '',
         table(['path', 'p50', 'p99', 'max', 'n'], idleRows),
+        '',
+        '**Fan-out, one way** (phase 3, D121): offer to the read by the last subscriber, 32 B messages, µs; medians over the runs of ' +
+            o.rtt +
+            ' messages each. Every receiver is a driver and a client of its own; the multicast and MDC publications have `fc=min,g:/N`.',
+        '',
+        table(['scenario', 'p50', 'p99', 'p99.9', 'runs'], fanLatencyRows),
+        '',
+        '**Fan-out throughput**, 64 B messages, per message offered (a message reaches every receiver), paced by the slowest receiver; median over the runs.',
+        '',
+        table(['scenario', 'msgs/s', 'MB/s', 'runs'], fanTputRows),
+        '',
+        '**Fan-out allocation**, bytes per message offered, all drivers and clients of the process together (64 B stream).',
+        '',
+        table(['scenario', 'port B/msg', 'node B/msg', 'harness B/msg', 'other B/msg', 'scavenges/1000'], fanAllocRows),
+        '',
+        'Top allocation sites in `src/`:',
+        '',
+        ...fanSites,
         '',
     ].join('\n');
     process.stdout.write(o.json ? JSON.stringify(result) + '\n' : text);
