@@ -24,40 +24,15 @@ import { LangUtil } from './LangUtil.js';
 type Closeables = (AutoCloseable | Iterable<AutoCloseable | null | undefined> | null | undefined)[];
 
 /**
- * Whether the argument has the method of an {@link ErrorHandler}, which is how the overloads that start with an error
- * handler are told from the others at run time.
- */
-function hasOnError(arg: unknown): arg is ErrorHandler {
-    return 'object' === typeof arg && null !== arg && 'function' === typeof (arg as ErrorHandler).onError;
-}
-
-/**
- * Whether the arguments of {@code closeAll} are an error handler and the closeables to close. An object with
- * {@code onError} is the handler when it cannot be closed, or when closeables follow it: a {@code CountedErrorHandler} is
- * both an {@link ErrorHandler} and an {@link AutoCloseable}, and Java tells its overload by the static type (spec D120).
- * Alone, a closeable error handler is a closeable. An object whose {@code onError} declares more than one parameter is
- * not an {@link ErrorHandler} (its {@code onError} takes the throwable only), so it is closed as a closeable.
- */
-function startsWithErrorHandler(args: unknown[]): boolean {
-    const first = args[0];
-    return (
-        hasOnError(first) &&
-        // an ErrorHandler.onError takes one argument; an object with a longer onError (SendChannelEndpoint.onError) is no handler
-        first.onError.length <= 1 &&
-        ('function' !== typeof (first as Partial<AutoCloseable>).close || args.length > 1)
-    );
-}
-
-/**
  * Helper functions for safely closing resources.
  * <p>
  * Java's overloads over a {@code Collection} and over varargs are one function that takes the closeables, or a
  * collection of them: {@code closeAll(a, b)} and {@code closeAll([a, b])} do the same. A {@code null} or
  * {@code undefined} closeable is skipped, as is a null collection. {@code close(errorHandler, closeable)} is told
- * from {@code close(closeable)} by its two arguments, and {@code closeAll(errorHandler, ...)} from
- * {@code closeAll(...)} by its first argument having {@code onError} and either no {@code close} or closeables after it
- * (a {@code CountedErrorHandler} has both methods, spec D120); a {@code null} error handler is therefore only recognised by
- * {@code close}.
+ * from {@code close(closeable)} by its two arguments. Java's {@code closeAll(ErrorHandler, ...)} is
+ * {@link closeAllWith}: Java picks the overload by the static type of the first argument, which an object that is
+ * both an {@link ErrorHandler} and an {@link AutoCloseable} (a {@code CountedErrorHandler}, a context) makes
+ * ambiguous at run time, so the two are separate entry points (spec D120).
  */
 export class CloseHelper {
     private constructor() {}
@@ -156,49 +131,59 @@ export class CloseHelper {
      *
      * @param closeables to be closed.
      */
-    public static closeAll(...closeables: Closeables): void;
+    public static closeAll(...closeables: Closeables): void {
+        let error: Error | null = null;
+        for (const closeable of CloseHelper.flatten(closeables)) {
+            if (null !== closeable && undefined !== closeable) {
+                try {
+                    closeable.close();
+                } catch (ex) {
+                    if (null === error) {
+                        error = ex as Error;
+                    } else {
+                        addSuppressed(error, ex as Error);
+                    }
+                }
+            }
+        }
+
+        if (null !== error) {
+            LangUtil.rethrowUnchecked(error);
+        }
+    }
 
     /**
      * Close all closeables in a collection, or given as arguments, dealing with nulls and exceptions. Every
      * closeable is attempted. Each exception is passed to the {@link ErrorHandler}. If the handler is null, a
      * {@link NullPointerException} with the exceptions suppressed in it is thrown after all have been closed.
+     * <p>
+     * Java's {@code closeAll(ErrorHandler, ...)}, a separate entry point so that an argument that is an
+     * {@link ErrorHandler} and an {@link AutoCloseable} is never taken for the other (spec D120).
      *
      * @param errorHandler to which exceptions are passed.
      * @param closeables   to be closed.
      */
-    public static closeAll(errorHandler: ErrorHandler | null | undefined, ...closeables: Closeables): void;
-
-    public static closeAll(...args: unknown[]): void {
-        if (startsWithErrorHandler(args)) {
-            const errorHandler = args[0] as ErrorHandler;
-            for (const closeable of CloseHelper.flatten(args.slice(1) as Closeables)) {
-                if (null !== closeable && undefined !== closeable) {
-                    try {
-                        closeable.close();
-                    } catch (ex) {
+    public static closeAllWith(errorHandler: ErrorHandler | null | undefined, ...closeables: Closeables): void {
+        let error: NullPointerException | null = null;
+        for (const closeable of CloseHelper.flatten(closeables)) {
+            if (null !== closeable && undefined !== closeable) {
+                try {
+                    closeable.close();
+                } catch (ex) {
+                    if (null !== errorHandler && undefined !== errorHandler) {
                         errorHandler.onError(ex as Error);
+                    } else if (null === error) {
+                        error = new NullPointerException('errorHandler is null');
+                        error.addSuppressed(ex as Error);
+                    } else {
+                        error.addSuppressed(ex as Error);
                     }
                 }
             }
-        } else {
-            let error: Error | null = null;
-            for (const closeable of CloseHelper.flatten(args as Closeables)) {
-                if (null !== closeable && undefined !== closeable) {
-                    try {
-                        closeable.close();
-                    } catch (ex) {
-                        if (null === error) {
-                            error = ex as Error;
-                        } else {
-                            addSuppressed(error, ex as Error);
-                        }
-                    }
-                }
-            }
+        }
 
-            if (null !== error) {
-                LangUtil.rethrowUnchecked(error);
-            }
+        if (null !== error) {
+            throw error;
         }
     }
 

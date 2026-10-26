@@ -299,7 +299,7 @@ export class PublicationImage implements LossHandler, DriverManagedResource, Sub
         CloseHelper.close(errorHandler, this.hwmPosition);
         CloseHelper.close(errorHandler, this.rebuildPosition);
         CloseHelper.close(errorHandler, this.receiverNaksSent);
-        CloseHelper.closeAll(errorHandler, this.subscriberPositions);
+        CloseHelper.closeAllWith(errorHandler, this.subscriberPositions);
 
         for (let i = 0, size = this.untetheredSubscriptions.length; i < size; i++) {
             const untetheredSubscription = this.untetheredSubscriptions[i] as UntetheredSubscription;

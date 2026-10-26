@@ -287,7 +287,7 @@ export class NetworkPublication implements RetransmitSender, DriverManagedResour
         CloseHelper.close(errorHandler, this.senderLimit);
         CloseHelper.close(errorHandler, this.senderBpe);
         CloseHelper.close(errorHandler, this.senderNaksReceived);
-        CloseHelper.closeAll(errorHandler, this.spyPositions);
+        CloseHelper.closeAllWith(errorHandler, this.spyPositions);
 
         for (const untetheredSubscription of this.untetheredSubscriptions) {
             if (UntetheredSubscription.State.RESTING === untetheredSubscription.state()) {
