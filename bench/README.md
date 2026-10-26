@@ -200,6 +200,60 @@ baseline for the gate is to be taken on the idle machine.
 | Sender doWork: a data frame at t=0 then a heartbeat at t=2 x timeout (two cycles per operation) | 1,070.9 | 1,013.1 | 2,059.2 | 3,146.3 |
 | NetworkPublication resend: 2 frames of 1024 B                                                   | 459.4   | 386.5   | 915.2   | 968.6   |
 
+### Multicast flow control and MDC (phase 3 T4)
+
+`bench/micro/multicastflowcontrol.bench.ts`: `onStatusMessage` from a receiver the strategy already tracks and `onIdle`,
+for the `max`, `min` and `tagged` strategies with 1, 8 and 64 receivers (the receiver ids are `(0, n)`, the tagged
+receivers carry the strategy's group tag, the positions and times stay below 2^30). `max` tracks no receivers, so its rows
+show that the count does not matter. The sender rows are on a manual MDC publication (`control-mode=manual`) over an
+in-memory log and a sink socket with 1, 4 and 16 destinations: the destination timeout and re-resolution check
+(`ControlTransportPoller.checkForReResolutions`, which `Sender.doWork` runs once per `reResolutionCheckInterval`; all
+destinations live) and `Sender.doWork` sending one data frame of 1024 B to every destination (`MultiSndDestination.send`
+per frame, the socket hand-off for each). None allocates (`expectNoAllocation` in `MulticastFlowControlAllocationTest`).
+Measured on 4 cores with a load average of 1.1 to 1.3 (`npm run bench:micro -- --file multicastflowcontrol`, 2,000
+samples, median of the repeats, n=1 run of the harness), so the p99 and p99.9 columns are information, and an `onIdle`
+of 5 to 13 ns is at the limit of what a batch of 1,000 calls resolves. The min and tagged figures grow with the receivers
+because both loops walk the receiver array once per call (as Java's do); `tagged` adds the three reads of the group tag
+(`asfLength`, the two halves) to `min`.
+
+| Bench                                                                                          | ns/op   | p50     | p99     | p99.9   |
+| ---------------------------------------------------------------------------------------------- | ------- | ------- | ------- | ------- |
+| Flow control max: onStatusMessage from a known receiver, 1 receivers                           | 30.8    | 26.9    | 64.3    | 99.3    |
+| Flow control max: onStatusMessage from a known receiver, 8 receivers                           | 28.1    | 26.1    | 54.4    | 92.3    |
+| Flow control max: onStatusMessage from a known receiver, 64 receivers                          | 31.1    | 26.1    | 66.7    | 310.7   |
+| Flow control min: onStatusMessage from a known receiver, 1 receivers                           | 67.5    | 60.2    | 140.0   | 675.0   |
+| Flow control min: onStatusMessage from a known receiver, 8 receivers                           | 84.8    | 82.6    | 152.6   | 250.0   |
+| Flow control min: onStatusMessage from a known receiver, 64 receivers                          | 304.9   | 292.5   | 483.4   | 643.0   |
+| Flow control tagged: onStatusMessage from a known receiver, 1 receivers                        | 97.4    | 79.1    | 240.2   | 623.2   |
+| Flow control tagged: onStatusMessage from a known receiver, 8 receivers                        | 130.3   | 110.1   | 283.1   | 445.6   |
+| Flow control tagged: onStatusMessage from a known receiver, 64 receivers                       | 457.6   | 409.9   | 792.4   | 963.3   |
+| Flow control max: onIdle, 1 receivers                                                          | 6.2     | 5.0     | 22.7    | 111.9   |
+| Flow control max: onIdle, 8 receivers                                                          | 5.5     | 4.9     | 12.0    | 29.4    |
+| Flow control max: onIdle, 64 receivers                                                         | 5.6     | 4.8     | 17.1    | 48.2    |
+| Flow control min: onIdle, 1 receivers                                                          | 13.4    | 12.5    | 28.6    | 61.0    |
+| Flow control min: onIdle, 8 receivers                                                          | 42.1    | 37.8    | 83.8    | 139.6   |
+| Flow control min: onIdle, 64 receivers                                                         | 275.8   | 259.9   | 470.8   | 497.3   |
+| Flow control tagged: onIdle, 1 receivers                                                       | 12.7    | 12.3    | 24.3    | 34.7    |
+| Flow control tagged: onIdle, 8 receivers                                                       | 62.2    | 63.0    | 98.6    | 109.3   |
+| Flow control tagged: onIdle, 64 receivers                                                      | 269.8   | 259.0   | 434.5   | 468.1   |
+| Sender destination timeouts (checkForReResolutions): manual MDC publication of 1 destinations  | 13.0    | 11.4    | 26.7    | 49.2    |
+| Sender destination timeouts (checkForReResolutions): manual MDC publication of 4 destinations  | 30.7    | 29.9    | 60.9    | 75.3    |
+| Sender destination timeouts (checkForReResolutions): manual MDC publication of 16 destinations | 43.6    | 42.9    | 62.3    | 83.6    |
+| Sender doWork: one data frame of 1024 B to a manual MDC publication of 1 destinations          | 555.8   | 497.8   | 1,061.6 | 1,673.7 |
+| Sender doWork: one data frame of 1024 B to a manual MDC publication of 4 destinations          | 988.3   | 844.0   | 1,738.6 | 2,701.9 |
+| Sender doWork: one data frame of 1024 B to a manual MDC publication of 16 destinations         | 2,244.5 | 1,993.9 | 3,898.2 | 4,990.9 |
+
+**The gate against the phase 2 tip (phase 3 T4).** `npm run bench:gate -- --base 2340b67` (the tip of phase 2 merged into the
+phase 3 branch) on an idle host (load average 0.8 at the start, 5 pairs): the 24 new benches are `n/a in base` and pass,
+and 5 benches of code that phase 3 does not touch failed on pairs that ranged from 0.8 to 1.4 (the receiver data frame
+and heartbeat, `ManyToOneRingBuffer tryClaim+commit+read`, the sender heartbeat and `TermReader read: 1 fragment`). The
+rerun of those files with 15 pairs, as above, passed all of them but two, by the margin of the noise: `Receiver doWork: an
+idle cycle` (median 1.050 against a limit of 1.05, p50 1.007, pairs from 0.62 to 1.34) and `ManyToOneRingBuffer
+write+read` (median 1.052, p50 1.033, pairs from 0.82 to 1.25). Neither runs a line that the branch changed (the diff to
+`src/` is the flow control, its suppliers, the registry, `Configuration`, `MediaDriver.Context` and two flyweight accessors;
+`FlowControl.calculateRetransmissionLength` is the only changed function that a running sender calls, once per NAK).
+This is the noise of the shared VM described below, not a verdict.
+
 ### Receiver (T16)
 
 `bench/micro/receiver.bench.ts`: `Receiver.doWork` on a real `PublicationImage` over an in-memory log (`SharedArrayBuffer`),

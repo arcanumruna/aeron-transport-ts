@@ -14,6 +14,13 @@ import { UdpChannel } from '../../../src/driver/media/UdpChannel.js';
 import { MinMulticastFlowControl } from '../../../src/driver/MinMulticastFlowControl.js';
 import { TaggedMulticastFlowControl } from '../../../src/driver/TaggedMulticastFlowControl.js';
 import { expectNoAllocation } from '../../support/Allocation.js';
+import { SenderRig } from '../../support/SenderRig.js';
+import { ChannelUri } from '../../../src/client/ChannelUri.js';
+import type { DriverConductorProxy } from '../../../src/driver/DriverConductorProxy.js';
+import { InetSocketAddress } from '../../../src/driver/jdkNet.js';
+import type { CountersManager as CountersManagerType } from '../../../src/agrona/concurrent/status/CountersManager.js';
+import type { MutableDirectBuffer } from '../../../src/agrona/MutableDirectBuffer.js';
+import type { Socket } from 'node:dgram';
 
 const ITERATIONS = 1_000_000;
 const WINDOW_LENGTH = 16 * 1024;
@@ -169,5 +176,82 @@ describe('MulticastFlowControlAllocationTest', () => {
 
             expect(limit).toBe(TERM_OFFSET + WINDOW_LENGTH);
         });
+    });
+});
+
+describe('MDC sender paths', () => {
+    class SinkSocket {
+        public sends = 0;
+
+        public getSendQueueCount(): number {
+            return 0;
+        }
+
+        public send(): void {
+            this.sends++;
+        }
+
+        public close(): void {}
+    }
+
+    function newMdcRig(destinations: number): { rig: SenderRig; sink: SinkSocket; end: number } {
+        const uri = 'aeron:udp?control-mode=manual';
+        const rig = new SenderRig({ uri });
+        rig.endpoint.allocateDestinationsCounterForMdc(
+            rig.context.tempBuffer() as MutableDirectBuffer,
+            rig.context.countersManager() as CountersManagerType,
+            SenderRig.REGISTRATION_ID,
+            uri,
+        );
+        for (let i = 0; i < destinations; i++) {
+            rig.endpoint.addDestination(
+                ChannelUri.parse('aeron:udp?endpoint=127.0.0.1:' + (41000 + i)),
+                new InetSocketAddress('127.0.0.1', 41000 + i),
+                1000 + i,
+            );
+        }
+        let end = 0;
+        for (let i = 0; i < 40; i++) {
+            end = rig.producer.offer(new Uint8Array(992));
+        }
+        const sink = new SinkSocket();
+        rig.endpoint.sendDatagramChannel = sink as unknown as Socket;
+        rig.senderLimit.set(1 << 20);
+
+        return { rig, sink, end };
+    }
+
+    it.each([1, 4, 16])('the destination timeout check of %i destinations allocates nothing', async (destinations) => {
+        const { rig } = newMdcRig(destinations);
+        const nowNs = rig.clock.nanoTime();
+        try {
+            await expectNoAllocation((n) => {
+                for (let i = 0; i < n; i++) {
+                    rig.poller.checkForReResolutions(nowNs, rig.conductorProxy as DriverConductorProxy);
+                }
+            }, ITERATIONS);
+            expect(rig.conductorProxy.reResolveEndpoint).not.toHaveBeenCalled();
+        } finally {
+            rig.close();
+        }
+    });
+
+    it.each([1, 4, 16])('Sender.doWork of a data frame to %i destinations allocates nothing', async (destinations) => {
+        const { rig, sink, end } = newMdcRig(destinations);
+        const position = rig.senderPosition;
+        try {
+            await expectNoAllocation((n) => {
+                for (let i = 0; i < n; i++) {
+                    if (position.get() >= end) {
+                        position.set(0);
+                    }
+                    rig.sender.doWork();
+                }
+            }, 300_000);
+            expect(sink.sends).toBeGreaterThan(destinations * 100_000);
+            expect(rig.errors).toEqual([]);
+        } finally {
+            rig.close();
+        }
     });
 });
