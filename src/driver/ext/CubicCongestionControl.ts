@@ -26,7 +26,7 @@ import { Configuration } from '../Configuration.js';
 import { CongestionControl } from '../CongestionControl.js';
 import { type InetSocketAddress } from '../jdkNet.js';
 import { type UdpChannel } from '../media/UdpChannel.js';
-import { type MediaDriver } from '../MediaDriver.js';
+import type { MediaDriver } from '../MediaDriver.js';
 import { PerImageIndicator } from '../status/PerImageIndicator.js';
 import { CubicCongestionControlConfiguration } from './CubicCongestionControlConfiguration.js';
 

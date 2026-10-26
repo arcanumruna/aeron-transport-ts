@@ -36,6 +36,7 @@ import { ErrorCode } from '../client/ErrorCode.js';
 import { ControlProtocolException } from '../client/exceptions/ControlProtocolException.js';
 import { StorageSpaceException } from '../client/exceptions/StorageSpaceException.js';
 import type { ClientProxy } from './ClientProxy.js';
+import type { DriverConductor } from './DriverConductor.js';
 import { Configuration } from './Configuration.js';
 
 const {
@@ -59,44 +60,6 @@ const { SPY_QUALIFIER } = ChannelUri;
 const { GENERIC_ERROR, STORAGE_SPACE } = ErrorCode;
 
 /**
- * The members of the `DriverConductor` (task T18) that the {@link ClientCommandAdapter} calls: the narrowest type
- * the adapter needs, a forward reference in the manner of spec D24 (`docs/mapping.md`, "Sources"). T18 makes the
- * conductor satisfy it. `long` ids are `number`s (spec D5). The counter commands and `onNextAvailableSessionId`
- * are not part of it (plan decision 8).
- */
-export interface ClientCommandConductor {
-    notAcceptingClientCommands(): boolean;
-    onAddIpcPublication(
-        channel: string,
-        streamId: number,
-        registrationId: number,
-        clientId: number,
-        isExclusive: boolean,
-    ): void;
-    onAddNetworkPublication(
-        channel: string,
-        streamId: number,
-        registrationId: number,
-        clientId: number,
-        isExclusive: boolean,
-    ): void;
-    onRemovePublication(registrationId: number, correlationId: number, revoke: boolean): void;
-    onAddIpcSubscription(channel: string, streamId: number, registrationId: number, clientId: number): void;
-    onAddSpySubscription(channel: string, streamId: number, registrationId: number, clientId: number): void;
-    onAddNetworkSubscription(channel: string, streamId: number, registrationId: number, clientId: number): void;
-    onRemoveSubscription(registrationId: number, correlationId: number): void;
-    onAddSendDestination(registrationId: number, destinationChannel: string, correlationId: number): void;
-    onRemoveSendDestination(registrationId: number, destinationChannel: string, correlationId: number): void;
-    onRemoveSendDestination(registrationId: number, destinationRegistrationId: number, correlationId: number): void;
-    onAddRcvDestination(registrationId: number, destinationChannel: string, correlationId: number): void;
-    onRemoveRcvDestination(registrationId: number, destinationChannel: string, correlationId: number): void;
-    onClientKeepalive(clientId: number): void;
-    onClientClose(clientId: number): void;
-    onTerminateDriver(tokenBuffer: MutableDirectBuffer, tokenOffset: number, tokenLength: number): void;
-    onRejectImage(correlationId: number, imageCorrelationId: number, position: number, reason: string): void;
-}
-
-/**
  * Receives commands from Aeron clients and dispatches them to the {@link DriverConductor} for processing.
  * <p>
  * Not ported: the `ADD_COUNTER`, `REMOVE_COUNTER`, `ADD_STATIC_COUNTER` and `GET_NEXT_AVAILABLE_SESSION_ID` commands
@@ -112,7 +75,7 @@ export class ClientCommandAdapter implements ControlledMessageHandler {
     private readonly terminateDriverFlyweight = new TerminateDriverFlyweight();
     private readonly rejectImageFlyweight = new RejectImageFlyweight();
     private readonly destinationByIdMessageFlyweight = new DestinationByIdMessageFlyweight();
-    private readonly conductor: ClientCommandConductor;
+    private readonly conductor: DriverConductor;
     private readonly toDriverCommands: RingBuffer;
     private readonly clientProxy: ClientProxy;
     private readonly errorHandler: ErrorHandler;
@@ -121,7 +84,7 @@ export class ClientCommandAdapter implements ControlledMessageHandler {
         errorHandler: ErrorHandler,
         toDriverCommands: RingBuffer,
         clientProxy: ClientProxy,
-        driverConductor: ClientCommandConductor,
+        driverConductor: DriverConductor,
     ) {
         this.errorHandler = errorHandler;
         this.toDriverCommands = toDriverCommands;

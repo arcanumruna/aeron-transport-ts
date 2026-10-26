@@ -21,7 +21,14 @@ import type { ErrorHandler } from '../agrona/ErrorHandler.js';
 import type { UnsafeBuffer } from '../agrona/concurrent/UnsafeBuffer.js';
 import { LoggingErrorHandler } from '../agrona/concurrent/errors/LoggingErrorHandler.js';
 import type { DistinctErrorLog } from '../agrona/concurrent/errors/DistinctErrorLog.js';
-import { Boolean, doubleToLong, Long, NumberFormatException, TimeUnit } from '../agrona/jdk.js';
+import {
+    Boolean,
+    doubleToLong,
+    IllegalArgumentException,
+    Long,
+    NumberFormatException,
+    TimeUnit,
+} from '../agrona/jdk.js';
 import { System, type AutoCloseable } from '../agrona/jdkLang.js';
 import { SystemErr, SystemOut, type PrintStream } from '../agrona/jdkThrowable.js';
 import { SystemUtil } from '../agrona/SystemUtil.js';
@@ -500,6 +507,25 @@ export class CommonContext implements AutoCloseable {
      * Default value of THREAD_NAMING_PROP_NAME.
      */
     public static readonly THREAD_NAMING_DEFAULT: string = CommonContext.THREAD_NAMING_CLASSIC;
+
+    /**
+     * The name of a thread for the thread naming mode set by {@link THREAD_NAMING_PROP_NAME}.
+     *
+     * @param newName     the name of the thread in the mode {@link THREAD_NAMING_NEW}.
+     * @param classicName the name of the thread in the mode {@link THREAD_NAMING_CLASSIC}.
+     * @return the name for the mode of the system property.
+     */
+    public static threadName(newName: string, classicName: string): string {
+        const mode = System.getProperty(CommonContext.THREAD_NAMING_PROP_NAME, CommonContext.THREAD_NAMING_DEFAULT);
+        switch (mode) {
+            case CommonContext.THREAD_NAMING_CLASSIC:
+                return classicName;
+            case CommonContext.THREAD_NAMING_NEW:
+                return newName;
+            default:
+                throw new IllegalArgumentException('Unknown thread naming mode: ' + mode);
+        }
+    }
 
     /**
      * Event Buffer length system property name. If not set then output will default to {@link System#out}.

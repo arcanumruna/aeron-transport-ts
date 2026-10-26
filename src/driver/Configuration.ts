@@ -45,6 +45,13 @@ import { FrameDescriptor } from '../client/logbuffer/FrameDescriptor.js';
 import { LogBufferDescriptor } from '../client/logbuffer/LogBufferDescriptor.js';
 import { DataHeaderFlyweight } from '../client/protocol/DataHeaderFlyweight.js';
 import type { InetSocketAddress } from './jdkNet.js';
+import { DefaultCongestionControlSupplier } from './DefaultCongestionControlSupplier.js';
+import { DefaultDenyTerminationValidator } from './DefaultDenyTerminationValidator.js';
+import { DefaultMulticastFlowControlSupplier } from './DefaultMulticastFlowControlSupplier.js';
+import { DefaultUnicastFlowControlSupplier } from './DefaultUnicastFlowControlSupplier.js';
+import type { CongestionControlSupplier } from './CongestionControlSupplier.js';
+import type { FlowControlSupplier } from './FlowControlSupplier.js';
+import type { TerminationValidator } from './TerminationValidator.js';
 import { DefaultReceiveChannelEndpointSupplier } from './DefaultReceiveChannelEndpointSupplier.js';
 import { DefaultSendChannelEndpointSupplier } from './DefaultSendChannelEndpointSupplier.js';
 import { DebugReceiveChannelEndpointSupplier } from './ext/DebugReceiveChannelEndpointSupplier.js';
@@ -58,9 +65,7 @@ import { ThreadingMode } from './ThreadingMode.js';
  * system properties that set them.
  * <p>
  * The members that name a type not ported yet are left out and added by the task that ports the type (see
- * `docs/mapping.md`): the flow control and congestion control suppliers and their `*_SUPPLIER` readers,
- * `terminationValidator`, `flowControlGroupTag` and `validateSocketBufferLengths`. Their PROP_NAME and DEFAULT
- * constants are ported.
+ * `docs/mapping.md`): `flowControlGroupTag` (phase 3). Their PROP_NAME and DEFAULT constants are ported.
  */
 export class Configuration {
     private constructor() {}
@@ -2000,6 +2005,66 @@ export class Configuration {
         }
 
         return BitUtil.fromHex(propertyValue);
+    }
+
+    /**
+     * Get the supplier of {@link FlowControl}s which can be used for changing behavior of flow control for unicast
+     * publications. There is no class loader (spec D25): any property value but the default is a
+     * `ClassNotFoundException`.
+     *
+     * @return the {@link FlowControlSupplier}.
+     */
+    public static unicastFlowControlSupplier(): FlowControlSupplier {
+        const className = System.getProperty(Configuration.UNICAST_FLOW_CONTROL_STRATEGY_SUPPLIER_PROP_NAME);
+        if (null === className || 'io.aeron.driver.DefaultUnicastFlowControlSupplier' === className) {
+            return new DefaultUnicastFlowControlSupplier();
+        }
+
+        return LangUtil.rethrowUnchecked(new ClassNotFoundException(className));
+    }
+
+    /**
+     * Get the supplier of {@link FlowControl}s which can be used for changing behavior of flow control for multicast
+     * publications.
+     *
+     * @return the {@link FlowControlSupplier}.
+     */
+    public static multicastFlowControlSupplier(): FlowControlSupplier {
+        const className = System.getProperty(Configuration.MULTICAST_FLOW_CONTROL_STRATEGY_SUPPLIER_PROP_NAME);
+        if (null === className || 'io.aeron.driver.DefaultMulticastFlowControlSupplier' === className) {
+            return new DefaultMulticastFlowControlSupplier();
+        }
+
+        return LangUtil.rethrowUnchecked(new ClassNotFoundException(className));
+    }
+
+    /**
+     * Get the supplier of {@link CongestionControl} implementations which can be used for receivers.
+     *
+     * @return the {@link CongestionControlSupplier}
+     */
+    public static congestionControlSupplier(): CongestionControlSupplier {
+        const className = System.getProperty(Configuration.CONGESTION_CONTROL_STRATEGY_SUPPLIER_PROP_NAME);
+        if (null === className || 'io.aeron.driver.DefaultCongestionControlSupplier' === className) {
+            return new DefaultCongestionControlSupplier();
+        }
+
+        return LangUtil.rethrowUnchecked(new ClassNotFoundException(className));
+    }
+
+    /**
+     * Get the {@link TerminationValidator} implementations which can be used for validating a termination request
+     * sent to the driver to ensure the client has the right to terminate a driver.
+     *
+     * @return the {@link TerminationValidator}
+     */
+    public static terminationValidator(): TerminationValidator {
+        const className = System.getProperty(Configuration.TERMINATION_VALIDATOR_PROP_NAME);
+        if (null === className || 'io.aeron.driver.DefaultDenyTerminationValidator' === className) {
+            return new DefaultDenyTerminationValidator();
+        }
+
+        return LangUtil.rethrowUnchecked(new ClassNotFoundException(className));
     }
 
     /**

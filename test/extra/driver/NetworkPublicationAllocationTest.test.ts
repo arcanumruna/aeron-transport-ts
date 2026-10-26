@@ -5,7 +5,7 @@
 import type { Socket } from 'node:dgram';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LogBufferDescriptor } from '../../../src/client/logbuffer/LogBufferDescriptor.js';
-import type { PublicationConductor } from '../../../src/driver/NetworkPublication.js';
+import type { DriverConductor } from '../../../src/driver/DriverConductor.js';
 import { SystemCounterDescriptor } from '../../../src/driver/status/SystemCounterDescriptor.js';
 import type { SystemCounters } from '../../../src/driver/status/SystemCounters.js';
 import { Configuration } from '../../../src/driver/Configuration.js';
@@ -138,12 +138,12 @@ describe('NetworkPublicationAllocationTest', () => {
     it('the cycle of the conductor on the publication allocates nothing', async () => {
         newRig();
         const noop = (): void => {};
-        const conductor: PublicationConductor = {
+        const conductor = {
             cleanupSpies: noop,
             cleanupPublication: noop,
             notifyUnavailableImageLink: noop,
             notifyAvailableImageLink: noop,
-        };
+        } as unknown as DriverConductor;
         const publication = rig.publication;
         const clock = rig.clock;
 

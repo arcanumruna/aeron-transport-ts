@@ -57,7 +57,14 @@ import { ConfigurationException } from '../client/exceptions/ConfigurationExcept
 import { LogBufferDescriptor } from '../client/logbuffer/LogBufferDescriptor.js';
 import { MemoryLogFactory } from './buffer/MemoryLogFactory.js';
 import type { LogFactory } from './buffer/LogFactory.js';
+import { AgentInvoker } from '../agrona/concurrent/AgentInvoker.js';
+import { CompositeAgent } from '../agrona/concurrent/CompositeAgent.js';
+import { ConcurrentConcludeException } from '../client/exceptions/ConcurrentConcludeException.js';
 import { ClientProxy } from './ClientProxy.js';
+import { DriverConductor } from './DriverConductor.js';
+import { NativeResourceAgent } from './NativeResourceAgent.js';
+import { Receiver } from './Receiver.js';
+import { Sender } from './Sender.js';
 import type { Runnable } from './CommandProxy.js';
 import { Configuration } from './Configuration.js';
 import { DriverConductorProxy } from './DriverConductorProxy.js';
@@ -65,6 +72,13 @@ import { DefaultNameResolver } from './DefaultNameResolver.js';
 import type { DutyCycleTracker } from './DutyCycleTracker.js';
 import { MediaDriverVersion } from './MediaDriverVersion.js';
 import type { NameResolverAgent } from './NameResolverAgent.js';
+import type { CongestionControlSupplier } from './CongestionControlSupplier.js';
+import type { FeedbackDelayGenerator } from './FeedbackDelayGenerator.js';
+import type { FlowControlSupplier } from './FlowControlSupplier.js';
+import { NativeResourceAgentProxy } from './NativeResourceAgentProxy.js';
+import { OptimalMulticastDelayGenerator } from './OptimalMulticastDelayGenerator.js';
+import { StaticDelayGenerator } from './StaticDelayGenerator.js';
+import type { TerminationValidator } from './TerminationValidator.js';
 import { ReceiverProxy } from './ReceiverProxy.js';
 import { SenderProxy } from './SenderProxy.js';
 import { DutyCycleStallTracker } from './status/DutyCycleStallTracker.js';
@@ -178,6 +192,16 @@ export class MediaDriverContext extends CommonContext {
     private _dataTransportPoller: DataTransportPoller | null = null;
     private _controlTransportPoller: ControlTransportPoller | null = null;
     private _logFactory: LogFactory | null = null;
+    private _unicastFlowControlSupplier: FlowControlSupplier | null = null;
+    private _multicastFlowControlSupplier: FlowControlSupplier | null = null;
+    private _congestionControlSupplier: CongestionControlSupplier | null = null;
+    private _retransmitUnicastDelayGenerator: FeedbackDelayGenerator | null = null;
+    private _retransmitUnicastLingerGenerator: FeedbackDelayGenerator | null = null;
+    private _unicastFeedbackDelayGenerator: FeedbackDelayGenerator | null = null;
+    private _multicastFeedbackDelayGenerator: FeedbackDelayGenerator | null = null;
+    private _terminationValidator: TerminationValidator | null = null;
+    private _nativeResourceAgentCommandQueue: OneToOneConcurrentArrayQueue<() => void> | null = null;
+    private _nativeResourceAgentProxy: NativeResourceAgentProxy | null = null;
     private _receiverCommandQueue: OneToOneConcurrentArrayQueue<() => void> | null = null;
     private _senderCommandQueue: OneToOneConcurrentArrayQueue<() => void> | null = null;
     private _receiverProxy: ReceiverProxy | null = null;
@@ -3232,6 +3256,187 @@ export class MediaDriverContext extends CommonContext {
         return this;
     }
 
+    /**
+     * The supplier of the flow control of unicast publications. Added by T18.
+     *
+     * @internal package-private in Java
+     */
+    public unicastFlowControlSupplier(): FlowControlSupplier | null;
+    public unicastFlowControlSupplier(unicastFlowControlSupplier: FlowControlSupplier | null): this;
+    public unicastFlowControlSupplier(
+        unicastFlowControlSupplier?: FlowControlSupplier | null,
+    ): FlowControlSupplier | null | this {
+        if (undefined === unicastFlowControlSupplier) {
+            return this._unicastFlowControlSupplier;
+        }
+
+        this._unicastFlowControlSupplier = unicastFlowControlSupplier;
+        return this;
+    }
+
+    /**
+     * The supplier of the flow control of multicast and multi-destination publications. Added by T18.
+     *
+     * @internal package-private in Java
+     */
+    public multicastFlowControlSupplier(): FlowControlSupplier | null;
+    public multicastFlowControlSupplier(multicastFlowControlSupplier: FlowControlSupplier | null): this;
+    public multicastFlowControlSupplier(
+        multicastFlowControlSupplier?: FlowControlSupplier | null,
+    ): FlowControlSupplier | null | this {
+        if (undefined === multicastFlowControlSupplier) {
+            return this._multicastFlowControlSupplier;
+        }
+
+        this._multicastFlowControlSupplier = multicastFlowControlSupplier;
+        return this;
+    }
+
+    /**
+     * The supplier of the congestion control of images. Added by T18.
+     *
+     * @internal package-private in Java
+     */
+    public congestionControlSupplier(): CongestionControlSupplier | null {
+        return this._congestionControlSupplier;
+    }
+
+    /**
+     * Set the supplier. Java's name for the setter is `congestControlSupplier`.
+     */
+    public congestControlSupplier(congestionControlSupplier: CongestionControlSupplier | null): this {
+        this._congestionControlSupplier = congestionControlSupplier;
+        return this;
+    }
+
+    /**
+     * The delay generator of unicast retransmits. Added by T18.
+     *
+     * @internal package-private in Java
+     */
+    public retransmitUnicastDelayGenerator(): FeedbackDelayGenerator | null;
+    public retransmitUnicastDelayGenerator(retransmitUnicastDelayGenerator: FeedbackDelayGenerator | null): this;
+    public retransmitUnicastDelayGenerator(
+        retransmitUnicastDelayGenerator?: FeedbackDelayGenerator | null,
+    ): FeedbackDelayGenerator | null | this {
+        if (undefined === retransmitUnicastDelayGenerator) {
+            return this._retransmitUnicastDelayGenerator;
+        }
+
+        this._retransmitUnicastDelayGenerator = retransmitUnicastDelayGenerator;
+        return this;
+    }
+
+    /**
+     * The linger generator of unicast retransmits. Added by T18.
+     *
+     * @internal package-private in Java
+     */
+    public retransmitUnicastLingerGenerator(): FeedbackDelayGenerator | null;
+    public retransmitUnicastLingerGenerator(retransmitUnicastLingerGenerator: FeedbackDelayGenerator | null): this;
+    public retransmitUnicastLingerGenerator(
+        retransmitUnicastLingerGenerator?: FeedbackDelayGenerator | null,
+    ): FeedbackDelayGenerator | null | this {
+        if (undefined === retransmitUnicastLingerGenerator) {
+            return this._retransmitUnicastLingerGenerator;
+        }
+
+        this._retransmitUnicastLingerGenerator = retransmitUnicastLingerGenerator;
+        return this;
+    }
+
+    /**
+     * The delay generator of unicast NAKs. Added by T18.
+     *
+     * @internal package-private in Java
+     */
+    public unicastFeedbackDelayGenerator(): FeedbackDelayGenerator | null;
+    public unicastFeedbackDelayGenerator(unicastFeedbackDelayGenerator: FeedbackDelayGenerator | null): this;
+    public unicastFeedbackDelayGenerator(
+        unicastFeedbackDelayGenerator?: FeedbackDelayGenerator | null,
+    ): FeedbackDelayGenerator | null | this {
+        if (undefined === unicastFeedbackDelayGenerator) {
+            return this._unicastFeedbackDelayGenerator;
+        }
+
+        this._unicastFeedbackDelayGenerator = unicastFeedbackDelayGenerator;
+        return this;
+    }
+
+    /**
+     * The delay generator of multicast NAKs. Added by T18.
+     *
+     * @internal package-private in Java
+     */
+    public multicastFeedbackDelayGenerator(): FeedbackDelayGenerator | null;
+    public multicastFeedbackDelayGenerator(multicastFeedbackDelayGenerator: FeedbackDelayGenerator | null): this;
+    public multicastFeedbackDelayGenerator(
+        multicastFeedbackDelayGenerator?: FeedbackDelayGenerator | null,
+    ): FeedbackDelayGenerator | null | this {
+        if (undefined === multicastFeedbackDelayGenerator) {
+            return this._multicastFeedbackDelayGenerator;
+        }
+
+        this._multicastFeedbackDelayGenerator = multicastFeedbackDelayGenerator;
+        return this;
+    }
+
+    /**
+     * The validator of the termination requests. Added by T18.
+     *
+     * @internal package-private in Java
+     */
+    public terminationValidator(): TerminationValidator | null;
+    public terminationValidator(terminationValidator: TerminationValidator | null): this;
+    public terminationValidator(
+        terminationValidator?: TerminationValidator | null,
+    ): TerminationValidator | null | this {
+        if (undefined === terminationValidator) {
+            return this._terminationValidator;
+        }
+
+        this._terminationValidator = terminationValidator;
+        return this;
+    }
+
+    /**
+     * The queue of the commands for the native resource agent. Added by T18.
+     *
+     * @internal package-private in Java
+     */
+    public nativeResourceAgentCommandQueue(): OneToOneConcurrentArrayQueue<() => void> | null;
+    public nativeResourceAgentCommandQueue(
+        nativeResourceAgentCommandQueue: OneToOneConcurrentArrayQueue<() => void> | null,
+    ): this;
+    public nativeResourceAgentCommandQueue(
+        nativeResourceAgentCommandQueue?: OneToOneConcurrentArrayQueue<() => void> | null,
+    ): OneToOneConcurrentArrayQueue<() => void> | null | this {
+        if (undefined === nativeResourceAgentCommandQueue) {
+            return this._nativeResourceAgentCommandQueue;
+        }
+
+        this._nativeResourceAgentCommandQueue = nativeResourceAgentCommandQueue;
+        return this;
+    }
+
+    /**
+     * The proxy that the conductor offers its commands to the native resource agent through. Added by T18.
+     *
+     * @internal package-private in Java
+     */
+    public nativeResourceAgentProxy(): NativeResourceAgentProxy | null;
+    public nativeResourceAgentProxy(nativeResourceAgentProxy: NativeResourceAgentProxy | null): this;
+    public nativeResourceAgentProxy(
+        nativeResourceAgentProxy?: NativeResourceAgentProxy | null,
+    ): NativeResourceAgentProxy | null | this {
+        if (undefined === nativeResourceAgentProxy) {
+            return this._nativeResourceAgentProxy;
+        }
+
+        this._nativeResourceAgentProxy = nativeResourceAgentProxy;
+        return this;
+    }
+
     private concludeNullProperties(): void {
         if (null === this._tempBuffer) {
             this._tempBuffer = new UnsafeBuffer(new Uint8Array(CountersReader.METADATA_LENGTH));
@@ -3269,8 +3474,49 @@ export class MediaDriverContext extends CommonContext {
             this._receiveChannelEndpointSupplier = Configuration.receiveChannelEndpointSupplier();
         }
 
-        // The flow control and congestion control suppliers, the native resource agent command queue and the delay
-        // generators are added by the tasks that port their types.
+        if (null === this._unicastFlowControlSupplier) {
+            this._unicastFlowControlSupplier = Configuration.unicastFlowControlSupplier();
+        }
+
+        if (null === this._multicastFlowControlSupplier) {
+            this._multicastFlowControlSupplier = Configuration.multicastFlowControlSupplier();
+        }
+
+        if (null === this._congestionControlSupplier) {
+            this._congestionControlSupplier = Configuration.congestionControlSupplier();
+        }
+
+        if (null === this._nativeResourceAgentCommandQueue) {
+            this._nativeResourceAgentCommandQueue = new OneToOneConcurrentArrayQueue<() => void>(
+                Configuration.CMD_QUEUE_CAPACITY,
+            );
+        }
+
+        if (null === this._retransmitUnicastDelayGenerator) {
+            this._retransmitUnicastDelayGenerator = new StaticDelayGenerator(this._retransmitUnicastDelayNs);
+        }
+
+        if (null === this._retransmitUnicastLingerGenerator) {
+            this._retransmitUnicastLingerGenerator = new StaticDelayGenerator(this._retransmitUnicastLingerNs);
+        }
+
+        if (null === this._unicastFeedbackDelayGenerator) {
+            this._unicastFeedbackDelayGenerator = new StaticDelayGenerator(
+                this._nakUnicastDelayNs,
+                this._nakUnicastDelayNs * this._nakUnicastRetryDelayRatio,
+            );
+        }
+
+        if (null === this._multicastFeedbackDelayGenerator) {
+            this._multicastFeedbackDelayGenerator = new OptimalMulticastDelayGenerator(
+                this._nakMulticastMaxBackoffNs,
+                this._nakMulticastGroupSize,
+            );
+        }
+
+        if (null === this._terminationValidator) {
+            this._terminationValidator = Configuration.terminationValidator();
+        }
 
         if (null === this._receiverCommandQueue) {
             this._receiverCommandQueue = new OneToOneConcurrentArrayQueue<() => void>(Configuration.CMD_QUEUE_CAPACITY);
@@ -3461,8 +3707,7 @@ export class MediaDriverContext extends CommonContext {
             );
         }
 
-        // The native resource agent proxy is added by the task that ports its type; the loss report is the application's
-        // to give (there is no loss report file, spec section 3, D50).
+        // The loss report is the application's to give (there is no loss report file, spec section 3, D50).
         this._receiverProxy = new ReceiverProxy(
             this._receiverCommandQueue as OneToOneConcurrentArrayQueue<() => void>,
             systemCounters.get(SystemCounterDescriptor.RECEIVER_PROXY_FAILS),
@@ -3473,6 +3718,10 @@ export class MediaDriverContext extends CommonContext {
         );
         this._driverConductorProxy = new DriverConductorProxy(
             this._driverCommandQueue as ManyToOneConcurrentLinkedQueue<Runnable>,
+        );
+        this._nativeResourceAgentProxy = new NativeResourceAgentProxy(
+            this._nativeResourceAgentCommandQueue as OneToOneConcurrentArrayQueue<() => void>,
+            systemCounters.get(SystemCounterDescriptor.NATIVE_RESOURCE_AGENT_PROXY_FAILS),
         );
 
         if (null === this._controlTransportPoller) {
@@ -3786,14 +4035,115 @@ export class MediaDriverContext extends CommonContext {
 }
 
 /**
- * The outer class `MediaDriver`: only the nested class `Context` is ported so far (T7b); the task that ports the
- * launch (T18) adds the rest.
+ * Main class of the media driver: it concludes the {@link MediaDriverContext}, makes the agents and, as
+ * `ThreadingMode.INVOKER`, steps them from an {@link AgentInvoker} (`sharedAgentInvoker()`) in the order
+ * sender, receiver, native resource agent, conductor.
+ * <p>
+ * Whatever the context's threading mode is, the driver runs as `INVOKER`: the thread modes are out of scope (spec D3,
+ * D54). The Aeron directory, its checks and its deletion are not ported (the CnC is in memory, spec D4), nor are
+ * `main`, `launchEmbedded` (no directory name to generate), the high resolution timer and the thread factories.
  */
-export class MediaDriver {
+export class MediaDriver implements AutoCloseable {
+    public static readonly AERON_DRIVER_SENDER_THREAD_NAME = 'aeron-md-snd';
+    public static readonly AERON_DRIVER_RECEIVER_THREAD_NAME = 'aeron-md-rcv';
+    public static readonly AERON_DRIVER_SHARED_THREAD_NAME = 'aeron-md-shd';
+    public static readonly AERON_DRIVER_CONDUCTOR_THREAD_NAME = 'aeron-md-cnd';
+    public static readonly AERON_DRIVER_SHARED_NETWORK_THREAD_NAME = 'aeron-md-net';
+    public static readonly AERON_DRIVER_NATIVE_RESOURCE_THREAD_NAME = 'aeron-md-nra';
+
+    public static readonly AERON_DRIVER_SENDER_THREAD_NAME_CLASSIC = 'sender';
+    public static readonly AERON_DRIVER_RECEIVER_THREAD_NAME_CLASSIC = 'receiver';
+    public static readonly AERON_DRIVER_CONDUCTOR_THREAD_NAME_CLASSIC = 'driver-conductor';
+
     /**
      * The nested class `MediaDriver.Context`.
      */
     public static readonly Context = MediaDriverContext;
+
+    private readonly sharedInvoker: AgentInvoker;
+    private readonly ctx: MediaDriverContext;
+
+    /**
+     * Construct a media driver with the given ctx.
+     *
+     * @param ctx for the media driver parameters
+     */
+    private constructor(ctx: MediaDriverContext) {
+        this.ctx = ctx;
+        Configuration.validateSocketBufferLengths(ctx);
+
+        try {
+            ctx.conclude();
+            const systemCounters = ctx.systemCounters() as SystemCounters;
+            const errorCounter = systemCounters.get(SystemCounterDescriptor.ERRORS);
+            const errorHandler = ctx.errorHandler() as ErrorHandler;
+
+            const nativeResourceAgent = new NativeResourceAgent(ctx);
+            (ctx.nativeResourceAgentProxy() as NativeResourceAgentProxy).nativeResourceAgent(nativeResourceAgent);
+
+            const conductor = new DriverConductor(ctx);
+            const receiver = new Receiver(ctx);
+            const sender = new Sender(ctx);
+
+            (ctx.driverConductorProxy() as DriverConductorProxy).driverConductor(conductor);
+            (ctx.receiverProxy() as ReceiverProxy).receiver(receiver);
+            (ctx.senderProxy() as SenderProxy).sender(sender);
+
+            this.sharedInvoker = new AgentInvoker(
+                errorHandler,
+                errorCounter,
+                new CompositeAgent(sender, receiver, nativeResourceAgent, conductor),
+            );
+        } catch (ex) {
+            if (ex instanceof ConcurrentConcludeException) {
+                throw ex;
+            }
+            CloseHelper.quietClose({ close: () => ctx.close() });
+            throw ex;
+        }
+    }
+
+    /**
+     * Launch a MediaDriver embedded in the current process with default configuration, or with the configuration ctx.
+     *
+     * @param ctx containing the configuration options.
+     * @return the newly created MediaDriver.
+     */
+    public static launch(ctx: MediaDriverContext = new MediaDriverContext()): MediaDriver {
+        const mediaDriver = new MediaDriver(ctx);
+        mediaDriver.sharedInvoker.start();
+
+        return mediaDriver;
+    }
+
+    /**
+     * Get the {@link MediaDriver.Context} that is used by this {@link MediaDriver}.
+     *
+     * @return the {@link MediaDriver.Context} that is used by this {@link MediaDriver}.
+     */
+    public context(): MediaDriverContext {
+        return this.ctx;
+    }
+
+    /**
+     * Get the {@link AgentInvoker} for the shared agents when running without threads.
+     *
+     * @return the {@link AgentInvoker} for the shared agents when running without threads.
+     */
+    public sharedAgentInvoker(): AgentInvoker {
+        return this.sharedInvoker;
+    }
+
+    /**
+     * Shutdown the media driver by stopping all agents and freeing resources.
+     */
+    public close(): void {
+        CloseHelper.closeAll(this.sharedInvoker);
+    }
+
+    public toString(): string {
+        return 'MediaDriver{}';
+    }
 }
 
 type MediaDriverContextType = MediaDriverContext;

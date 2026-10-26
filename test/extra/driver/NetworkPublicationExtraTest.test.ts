@@ -36,7 +36,13 @@ import { StatusMessageFlyweight } from '../../../src/client/protocol/StatusMessa
 import { Configuration } from '../../../src/driver/Configuration.js';
 import { InetSocketAddress } from '../../../src/driver/jdkNet.js';
 import type { DriverConductorProxy } from '../../../src/driver/DriverConductorProxy.js';
-import type { PublicationConductor } from '../../../src/driver/NetworkPublication.js';
+import type { DriverConductor } from '../../../src/driver/DriverConductor.js';
+
+/** The members of the conductor that `NetworkPublication.onTimeEvent` calls. */
+type PublicationConductor = Pick<
+    DriverConductor,
+    'cleanupSpies' | 'cleanupPublication' | 'notifyUnavailableImageLink' | 'notifyAvailableImageLink'
+>;
 import { NetworkPublication } from '../../../src/driver/NetworkPublication.js';
 import { SystemCounterDescriptor } from '../../../src/driver/status/SystemCounterDescriptor.js';
 import type { SystemCounters } from '../../../src/driver/status/SystemCounters.js';
@@ -120,13 +126,13 @@ function connect(rig: SenderRig, position = rig.senderPosition.get()): number {
     return rig.datagrams().length;
 }
 
-function newConductor(): Fake<PublicationConductor> {
+function newConductor(): Fake<PublicationConductor> & DriverConductor {
     return {
         cleanupSpies: vi.fn<PublicationConductor['cleanupSpies']>(),
         cleanupPublication: vi.fn<PublicationConductor['cleanupPublication']>(),
         notifyUnavailableImageLink: vi.fn<PublicationConductor['notifyUnavailableImageLink']>(),
         notifyAvailableImageLink: vi.fn<PublicationConductor['notifyAvailableImageLink']>(),
-    };
+    } as unknown as Fake<PublicationConductor> & DriverConductor;
 }
 
 /** Offers `count` frames of 1024 bytes, a batch at a time, with the receiver consuming and the conductor cleaning behind. */
@@ -690,7 +696,7 @@ describe('NetworkPublicationCloseExtraTest', () => {
     }
 
     /** DRAINING -> LINGER -> DONE as the conductor drives them. */
-    function closeToDone(conductor: PublicationConductor): void {
+    function closeToDone(conductor: DriverConductor): void {
         rig.publication.decRef();
         rig.publication.onTimeEvent(rig.clock.nanoTime(), 0, conductor);
         rig.clock.advance(Configuration.publicationLingerTimeoutNs() + 1);

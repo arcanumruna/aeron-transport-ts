@@ -14,6 +14,7 @@ import { AeronCounters } from '../../../../src/client/AeronCounters.js';
 import { ChannelEndpointStatus } from '../../../../src/client/status/ChannelEndpointStatus.js';
 import { ConfigurationException } from '../../../../src/client/exceptions/ConfigurationException.js';
 import { DutyCycleTracker } from '../../../../src/driver/DutyCycleTracker.js';
+import type { DriverConductor } from '../../../../src/driver/DriverConductor.js';
 import type { DriverManagedResource } from '../../../../src/driver/DriverManagedResource.js';
 import { MediaDriverVersion } from '../../../../src/driver/MediaDriverVersion.js';
 import { SessionKey } from '../../../../src/driver/SessionKey.js';
@@ -809,7 +810,7 @@ describe('ThreadingMode and DriverManagedResource', () => {
             hasReachedEndOfLife: () => true,
         };
         resource.close();
-        resource.onTimeEvent(1, 2, {});
+        resource.onTimeEvent(1, 2, {} as unknown as DriverConductor);
         expect(resource.hasReachedEndOfLife()).toBe(true);
         expect(calls).toEqual(['close', 'onTimeEvent 1 2']);
     });

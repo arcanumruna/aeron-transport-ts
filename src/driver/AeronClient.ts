@@ -18,18 +18,8 @@
 // Port of io/aeron/driver/AeronClient.java @ 1.53.3
 import type { AtomicCounter } from '../agrona/concurrent/status/AtomicCounter.js';
 import { TimeUnit } from '../agrona/jdk.js';
+import type { DriverConductor } from './DriverConductor.js';
 import type { DriverManagedResource } from './DriverManagedResource.js';
-
-/**
- * The members of the `DriverConductor` (task T18) that {@link AeronClient.onTimeEvent} calls: the narrowest type it
- * needs, a forward reference in the manner of spec D24 (`docs/mapping.md`, "Sources"). `DriverManagedResource` still
- * declares the conductor as an opaque type until T18; a method parameter is compared bivariantly, so the class
- * satisfies the interface.
- */
-export interface AeronClientConductor {
-    clientTimeout(clientId: number): void;
-    unavailableCounter(registrationId: number, counterId: number): void;
-}
 
 /**
  * Aeron client library tracker.
@@ -58,7 +48,7 @@ export class AeronClient implements DriverManagedResource {
         this.heartbeatTimestamp.close();
     }
 
-    public onTimeEvent(_timeNs: number, timeMs: number, conductor: AeronClientConductor): void {
+    public onTimeEvent(_timeNs: number, timeMs: number, conductor: DriverConductor): void {
         if (timeMs > this.heartbeatTimestamp.get() + this.clientLivenessTimeoutMs) {
             this.reachedEndOfLife = true;
 

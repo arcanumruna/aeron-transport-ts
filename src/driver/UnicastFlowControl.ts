@@ -24,7 +24,7 @@ import { type StatusMessageFlyweight } from '../client/protocol/StatusMessageFly
 import { FlowControl } from './FlowControl.js';
 import { type InetSocketAddress } from './jdkNet.js';
 import { type UdpChannel } from './media/UdpChannel.js';
-import { type MediaDriver } from './MediaDriver.js';
+import type { MediaDriver } from './MediaDriver.js';
 
 const { computePosition } = LogBufferDescriptor;
 

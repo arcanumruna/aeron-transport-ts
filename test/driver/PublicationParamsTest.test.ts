@@ -23,7 +23,8 @@ import { CommonContext } from '../../src/client/CommonContext.js';
 import { Configuration } from '../../src/driver/Configuration.js';
 import { InvalidChannelException } from '../../src/driver/exceptions/InvalidChannelException.js';
 import { MediaDriver } from '../../src/driver/MediaDriver.js';
-import { PublicationParams, type DriverConductor, type PublicationLike } from '../../src/driver/PublicationParams.js';
+import type { DriverConductor } from '../../src/driver/DriverConductor.js';
+import { PublicationParams, type PublicationLike } from '../../src/driver/PublicationParams.js';
 import { assertThrows, assertThrowsExactly } from '../support/Assertions.js';
 
 const { SESSION_ID_PARAM_NAME, STREAM_ID_PARAM_NAME } = CommonContext;
@@ -65,7 +66,7 @@ function nextLong(): number {
 describe('PublicationParamsTest', () => {
     let ctx: MediaDriver.Context;
     let conductor: ReturnType<typeof mockDriverConductor>;
-    const asConductor = (): DriverConductor => conductor;
+    const asConductor = (): DriverConductor => conductor as unknown as DriverConductor;
 
     beforeEach(() => {
         ctx = new MediaDriver.Context();

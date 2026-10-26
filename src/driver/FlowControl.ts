@@ -26,7 +26,7 @@ import { type StatusMessageFlyweight } from '../client/protocol/StatusMessageFly
 import { Configuration } from './Configuration.js';
 import { type InetSocketAddress } from './jdkNet.js';
 import { type UdpChannel } from './media/UdpChannel.js';
-import { type MediaDriver } from './MediaDriver.js';
+import type { MediaDriver } from './MediaDriver.js';
 
 /**
  * Strategy for applying flow control to the {@link Sender} on each stream.

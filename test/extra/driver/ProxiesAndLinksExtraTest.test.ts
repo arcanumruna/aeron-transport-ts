@@ -13,9 +13,11 @@ import { IllegalStateException, TimeUnit } from '../../../src/agrona/jdk.js';
 import { InferableBoolean } from '../../../src/client/CommonContext.js';
 import { ClientProxy } from '../../../src/driver/ClientProxy.js';
 import { MediaDriver } from '../../../src/driver/MediaDriver.js';
-import { AeronClient, type AeronClientConductor } from '../../../src/driver/AeronClient.js';
+import { AeronClient } from '../../../src/driver/AeronClient.js';
+import type { DriverConductor } from '../../../src/driver/DriverConductor.js';
+import { asConductor } from '../../support/ClientCommandConductor.js';
 import { CommandProxy, type Runnable } from '../../../src/driver/CommandProxy.js';
-import { DriverConductorProxy, type DriverConductorProxyTarget } from '../../../src/driver/DriverConductorProxy.js';
+import { DriverConductorProxy } from '../../../src/driver/DriverConductorProxy.js';
 import { InetSocketAddress } from '../../../src/driver/jdkNet.js';
 import type { ReceiveChannelEndpoint } from '../../../src/driver/media/ReceiveChannelEndpoint.js';
 import type { ReceiveDestinationTransport } from '../../../src/driver/media/ReceiveDestinationTransport.js';
@@ -24,11 +26,7 @@ import type { UdpChannel } from '../../../src/driver/media/UdpChannel.js';
 import { NetworkSubscriptionLink, ResponseSetupState } from '../../../src/driver/NetworkSubscriptionLink.js';
 import { PublicationLink, type LinkedPublication } from '../../../src/driver/PublicationLink.js';
 import type { Subscribable } from '../../../src/driver/Subscribable.js';
-import {
-    SubscriptionLink,
-    type SubscriptionLinkConductor,
-    type SubscriptionLinkImage,
-} from '../../../src/driver/SubscriptionLink.js';
+import { SubscriptionLink, type SubscriptionLinkImage } from '../../../src/driver/SubscriptionLink.js';
 import { SubscriptionParams } from '../../../src/driver/SubscriptionParams.js';
 import { UntetheredSubscription, UntetheredSubscriptionState } from '../../../src/driver/UntetheredSubscription.js';
 
@@ -45,6 +43,22 @@ class TestProxy extends CommandProxy {
         this.offer(cmd);
     }
 }
+
+/** The members of the conductor that each class under test calls (formerly their narrow interfaces). */
+type DriverConductorProxyTarget = Pick<
+    DriverConductor,
+    | 'onReResolveEndpoint'
+    | 'onReResolveControl'
+    | 'closeReceiveDestination'
+    | 'responseSetup'
+    | 'responseConnected'
+    | 'receiveChannelEndpointClosed'
+    | 'sendChannelEndpointClosed'
+    | 'onCreatePublicationImage'
+    | 'onPublicationError'
+>;
+type AeronClientConductor = Pick<DriverConductor, 'clientTimeout' | 'unavailableCounter'>;
+type SubscriptionLinkConductor = Pick<DriverConductor, 'notifyUnavailableImageLink' | 'cleanupSubscriptionLink'>;
 
 describe('CommandProxy extra', () => {
     it('queues a command and counts nothing', () => {
@@ -100,7 +114,7 @@ describe('DriverConductorProxy extra', () => {
 
     let queue: ManyToOneConcurrentLinkedQueue<Runnable>;
     let proxy: DriverConductorProxy;
-    let conductor: { [K in keyof DriverConductorProxyTarget]: Mock<DriverConductorProxyTarget[K]> };
+    let conductor: { [K in keyof DriverConductorProxyTarget]: Mock<DriverConductorProxyTarget[K]> } & DriverConductor;
 
     beforeEach(() => {
         queue = new ManyToOneConcurrentLinkedQueue<Runnable>();
@@ -115,7 +129,7 @@ describe('DriverConductorProxy extra', () => {
             sendChannelEndpointClosed: vi.fn(),
             onCreatePublicationImage: vi.fn(),
             onPublicationError: vi.fn(),
-        };
+        } as unknown as typeof conductor;
         proxy.driverConductor(conductor);
     });
 
@@ -186,13 +200,13 @@ describe('AeronClient extra', () => {
     let clientTimeouts: AtomicCounter;
     let heartbeat: AtomicCounter;
     let client: AeronClient;
-    let conductor: { [K in keyof AeronClientConductor]: Mock<AeronClientConductor[K]> };
+    let conductor: { [K in keyof AeronClientConductor]: Mock<AeronClientConductor[K]> } & DriverConductor;
 
     beforeEach(() => {
         clientTimeouts = newCounter();
         heartbeat = newCounter();
         client = new AeronClient(CLIENT_ID, TIMEOUT_NS, clientTimeouts, heartbeat);
-        conductor = { clientTimeout: vi.fn(), unavailableCounter: vi.fn() };
+        conductor = { clientTimeout: vi.fn(), unavailableCounter: vi.fn() } as unknown as typeof conductor;
     });
 
     it('is alive up to the liveness timeout after its last keepalive and times out after it, once reported', () => {
@@ -282,7 +296,7 @@ describe('PublicationLink extra', () => {
         link.onTimeEvent(0, 200, undefined);
         expect(link.hasReachedEndOfLife()).toBe(false);
 
-        client.onTimeEvent(0, 100 + 5_001, { clientTimeout() {}, unavailableCounter() {} });
+        client.onTimeEvent(0, 100 + 5_001, asConductor({ clientTimeout() {}, unavailableCounter() {} }));
         link.onTimeEvent(0, 5_200, undefined);
         expect(link.hasReachedEndOfLife()).toBe(true);
     });
@@ -313,12 +327,15 @@ class TestSubscribable implements Subscribable {
 describe('SubscriptionLink extra', () => {
     let client: AeronClient;
     let params: SubscriptionParams;
-    let conductor: { [K in keyof SubscriptionLinkConductor]: Mock<SubscriptionLinkConductor[K]> };
+    let conductor: { [K in keyof SubscriptionLinkConductor]: Mock<SubscriptionLinkConductor[K]> } & DriverConductor;
 
     beforeEach(() => {
         client = new AeronClient(1, TimeUnit.SECONDS.toNanos(5), newCounter(), newCounter());
         params = new SubscriptionParams();
-        conductor = { notifyUnavailableImageLink: vi.fn(), cleanupSubscriptionLink: vi.fn() };
+        conductor = {
+            notifyUnavailableImageLink: vi.fn(),
+            cleanupSubscriptionLink: vi.fn(),
+        } as unknown as typeof conductor;
     });
 
     it('takes its flags from the params and answers Java defaults for what only a subclass knows', () => {
@@ -436,7 +453,7 @@ describe('SubscriptionLink extra', () => {
         expect(conductor.cleanupSubscriptionLink).not.toHaveBeenCalled();
 
         client.timeOfLastKeepaliveMs(0);
-        client.onTimeEvent(0, 5_001, { clientTimeout() {}, unavailableCounter() {} });
+        client.onTimeEvent(0, 5_001, asConductor({ clientTimeout() {}, unavailableCounter() {} }));
         link.onTimeEvent(0, 5_001, conductor);
 
         expect(link.hasReachedEndOfLife()).toBe(true);
