@@ -245,6 +245,11 @@ export class DriverConductor implements Agent {
     // resource registered that the agent was never told of (D55).
     private readonly senderCommandQueue: QueueCapacity | null;
     private readonly receiverCommandQueue: QueueCapacity | null;
+    // Cleanups that the timer-driven state machines asked for while a queue was full (spec D55, issue #44). Their
+    // state has already moved on, so nothing would ask again: they are retried in every duty cycle until the queue has
+    // room. The lists only grow when a queue is full, so the steady state allocates nothing.
+    private readonly pendingPublicationCleanups: NetworkPublication[] = [];
+    private readonly pendingReceiveEndpointCloses: ReceiveChannelEndpoint[] = [];
 
     public constructor(ctx: MediaDriverContext) {
         this.ctx = ctx;
@@ -336,6 +341,9 @@ export class DriverConductor implements Agent {
 
         let workCount = 0;
         workCount += this.processTimers(nowNs);
+        if (0 !== this.pendingPublicationCleanups.length || 0 !== this.pendingReceiveEndpointCloses.length) {
+            workCount += this.retryPendingCleanups();
+        }
         workCount += this.processClientCommands();
         workCount += this.drainCommandQueue();
         workCount += this.trackStreamPositions(workCount, nowNs);
@@ -606,19 +614,60 @@ export class DriverConductor implements Agent {
     }
 
     public cleanupPublication(publication: NetworkPublication): void {
+        if (!this.tryCleanupPublication(publication)) {
+            // The sender queue is full (spec D42, D55): retry in a later duty cycle (issue #44)
+            this.pendingPublicationCleanups.push(publication);
+        }
+    }
+
+    /** @return false, having done nothing, if the sender queue cannot hold the commands of the cleanup. */
+    private tryCleanupPublication(publication: NetworkPublication): boolean {
         // DriverLog.logPublicationRemoval: out of scope
+
+        const channelEndpoint = publication.channelEndpoint();
+        const shouldCloseEndpoint = channelEndpoint.shouldBeClosed();
+        if (!hasRoom(this.senderCommandQueue, shouldCloseEndpoint ? 2 : 1)) {
+            return false;
+        }
 
         this.senderProxy.removeNetworkPublication(publication);
 
-        const channelEndpoint = publication.channelEndpoint();
-        if (channelEndpoint.shouldBeClosed()) {
-            // Offer first: a full queue (spec D42) must not leave the endpoint CLOSING with no close command queued
+        if (shouldCloseEndpoint) {
             this.senderProxy.closeSendChannelEndpoint(channelEndpoint);
             channelEndpoint.indicateClosing();
         }
 
         const channel = channelEndpoint.udpChannel().canonicalForm();
         this.activeSessionSet.remove(new SessionKey(publication.sessionId(), publication.streamId(), channel));
+        return true;
+    }
+
+    private retryPendingCleanups(): number {
+        let workCount = 0;
+
+        const publications = this.pendingPublicationCleanups;
+        for (let i = publications.length - 1; i >= 0; i--) {
+            if (this.tryCleanupPublication(publications[i] as NetworkPublication)) {
+                ArrayListUtil.fastUnorderedRemove(publications, i);
+                workCount++;
+            }
+        }
+
+        const endpoints = this.pendingReceiveEndpointCloses;
+        for (let i = endpoints.length - 1; i >= 0; i--) {
+            const endpoint = endpoints[i] as ReceiveChannelEndpoint;
+            if (!endpoint.shouldBeClosed()) {
+                // referenced again, or already closing: its next removal asks again
+                ArrayListUtil.fastUnorderedRemove(endpoints, i);
+            } else if (hasRoom(this.receiverCommandQueue, 1)) {
+                endpoint.indicateClosing();
+                this.receiverProxy.closeReceiveChannelEndpoint(endpoint);
+                ArrayListUtil.fastUnorderedRemove(endpoints, i);
+                workCount++;
+            }
+        }
+
+        return workCount;
     }
 
     // TODO (Java) rename, as it isn't closed yet
@@ -680,7 +729,10 @@ export class DriverConductor implements Agent {
     public tryCloseReceiveChannelEndpoint(channelEndpoint: ReceiveChannelEndpoint): void {
         if (channelEndpoint.shouldBeClosed()) {
             if (!hasRoom(this.receiverCommandQueue, 1)) {
-                // Not closed, and not marked CLOSING: a later check closes it (spec D42, D55)
+                // Not closed, and not marked CLOSING: retried in a later duty cycle (spec D42, D55, issue #44)
+                if (!this.pendingReceiveEndpointCloses.includes(channelEndpoint)) {
+                    this.pendingReceiveEndpointCloses.push(channelEndpoint);
+                }
                 return;
             }
             channelEndpoint.indicateClosing();

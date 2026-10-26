@@ -2,9 +2,13 @@
 // publication or a subscription registered that the agent was not told of. `CommandProxy.offer` throws on a full queue
 // (Java spins), so the conductor checks the room first and waits (a command) or refuses (a removal).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CachedNanoClock } from '../../../src/agrona/concurrent/CachedNanoClock.js';
 import { OneToOneConcurrentArrayQueue } from '../../../src/agrona/concurrent/OneToOneConcurrentArrayQueue.js';
 import { ErrorCode } from '../../../src/client/ErrorCode.js';
 import { Configuration } from '../../../src/driver/Configuration.js';
+import type { SubscriptionLink } from '../../../src/driver/SubscriptionLink.js';
+import type { ReceiveChannelEndpoint } from '../../../src/driver/media/ReceiveChannelEndpoint.js';
+import { NetworkPublication } from '../../../src/driver/NetworkPublication.js';
 import { DriverConductor } from '../../../src/driver/DriverConductor.js';
 import { MediaDriver } from '../../../src/driver/MediaDriver.js';
 import { NativeResourceAgent } from '../../../src/driver/NativeResourceAgent.js';
@@ -29,9 +33,14 @@ describe('DriverConductor with a full sender or receiver queue', () => {
         senderCapacity: number,
         receiverCapacity: number,
         termLength = LogBufferDescriptor.TERM_MIN_LENGTH,
+        clock: CachedNanoClock | null = null,
     ): void {
         errors = [];
-        ctx = new MediaDriver.Context()
+        const context = new MediaDriver.Context();
+        if (null !== clock) {
+            context.nanoClock(clock).senderCachedNanoClock(clock).receiverCachedNanoClock(clock);
+        }
+        ctx = context
             .threadingMode(ThreadingMode.INVOKER)
             .publicationTermBufferLength(termLength)
             .counterValuesBufferLength(2 * 1024 * 1024)
@@ -164,5 +173,81 @@ describe('DriverConductor with a full sender or receiver queue', () => {
         }
         conductor.onRemoveSubscription(id, 77);
         expect(conductor.subscriptionLinks.length).toBe(0);
+    });
+
+    function fill(queue: OneToOneConcurrentArrayQueue<() => void>): void {
+        while (queue.remainingCapacity() > 0) {
+            queue.offer(() => {});
+        }
+    }
+
+    function drain(queue: OneToOneConcurrentArrayQueue<() => void>): void {
+        while (null !== queue.poll()) {
+            // dropped
+        }
+    }
+
+    // issue #44; mutation: cleanupPublication offers without the room check, or never retries
+    it('a publication whose linger ends while the sender queue is full is cleaned up once the queue has room Regression', () => {
+        const clock = new CachedNanoClock();
+        newConductor(CMD_QUEUE_CAPACITY, CMD_QUEUE_CAPACITY, LogBufferDescriptor.TERM_MIN_LENGTH, clock);
+        const queue = ctx.senderCommandQueue() as OneToOneConcurrentArrayQueue<() => void>;
+        const registrationId = driverProxy.addPublication('aeron:udp?endpoint=127.0.0.1:30300', 4000);
+        settle();
+        expect(conductor.networkPublications.length).toBe(1);
+        const publication = conductor.networkPublications[0] as NetworkPublication;
+        drain(queue);
+
+        driverProxy.removePublication(registrationId, false);
+        settle();
+        drain(queue);
+        fill(queue);
+        const full = sizeOf(queue);
+        const step = Configuration.timerIntervalNs();
+        for (let i = 0; i < 40 && NetworkPublication.State.DONE !== publication.state(); i++) {
+            clock.advance(step);
+            cycle();
+            // a full queue: nothing is offered, nothing throws
+            expect(sizeOf(queue)).toBe(full);
+            expect(errors).toEqual([]);
+        }
+        // the linger has ended long ago: only the queue holds the cleanup back
+        expect(publication.state()).toBe(NetworkPublication.State.DONE);
+        expect(publication.hasReachedEndOfLife()).toBe(false);
+
+        drain(queue);
+        for (let i = 0; i < 10; i++) {
+            clock.advance(step);
+            cycle();
+        }
+        // the removal of the publication and the close of the endpoint, once each
+        expect(sizeOf(queue)).toBe(2);
+        expect(errors).toEqual([]);
+    });
+
+    it('a receive endpoint that cannot be closed because the receiver queue is full is closed once it has room Regression', () => {
+        newConductor(CMD_QUEUE_CAPACITY, CMD_QUEUE_CAPACITY);
+        const queue = ctx.receiverCommandQueue() as OneToOneConcurrentArrayQueue<() => void>;
+        driverProxy.addSubscription('aeron:udp?endpoint=127.0.0.1:30400', 5000);
+        settle();
+        const link = conductor.subscriptionLinks[0] as SubscriptionLink;
+        const endpoint = link.channelEndpoint() as ReceiveChannelEndpoint;
+        drain(queue);
+        endpoint.decRefToStream(5000);
+        expect(endpoint.shouldBeClosed()).toBe(true);
+
+        fill(queue);
+        conductor.tryCloseReceiveChannelEndpoint(endpoint);
+        cycle();
+        expect(sizeOf(queue)).toBe(CMD_QUEUE_CAPACITY);
+        expect(endpoint.shouldBeClosed()).toBe(true);
+
+        drain(queue);
+        cycle();
+        expect(sizeOf(queue)).toBe(1);
+        expect(endpoint.shouldBeClosed()).toBe(false); // CLOSING
+        cycle();
+        expect(sizeOf(queue)).toBe(1); // asked once
+        expect(errors).toEqual([]);
     });
 });
