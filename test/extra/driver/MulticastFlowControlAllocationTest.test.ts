@@ -194,8 +194,14 @@ describe('MDC sender paths', () => {
         public close(): void {}
     }
 
-    function newMdcRig(destinations: number): { rig: SenderRig; sink: SinkSocket; end: number } {
-        const uri = 'aeron:udp?control-mode=manual';
+    function newMdcRig(
+        destinations: number,
+        mode: 'manual' | 'dynamic' = 'manual',
+    ): { rig: SenderRig; sink: SinkSocket; end: number } {
+        const uri =
+            'manual' === mode
+                ? 'aeron:udp?control-mode=manual'
+                : 'aeron:udp?control=127.0.0.1:40123|control-mode=dynamic';
         const rig = new SenderRig({ uri });
         rig.endpoint.allocateDestinationsCounterForMdc(
             rig.context.tempBuffer() as MutableDirectBuffer,
@@ -204,11 +210,22 @@ describe('MDC sender paths', () => {
             uri,
         );
         for (let i = 0; i < destinations; i++) {
-            rig.endpoint.addDestination(
-                ChannelUri.parse('aeron:udp?endpoint=127.0.0.1:' + (41000 + i)),
-                new InetSocketAddress('127.0.0.1', 41000 + i),
-                1000 + i,
-            );
+            if ('manual' === mode) {
+                rig.endpoint.addDestination(
+                    ChannelUri.parse('aeron:udp?endpoint=127.0.0.1:' + (41000 + i)),
+                    new InetSocketAddress('127.0.0.1', 41000 + i),
+                    1000 + i,
+                );
+            } else {
+                // a dynamic destination is added by the status message of a receiver
+                rig.sendStatusMessageFrom(
+                    1000 + i,
+                    new InetSocketAddress('127.0.0.1', 41000 + i),
+                    rig.initialTermId,
+                    0,
+                    1 << 15,
+                );
+            }
         }
         let end = 0;
         for (let i = 0; i < 40; i++) {
@@ -254,4 +271,26 @@ describe('MDC sender paths', () => {
             rig.close();
         }
     });
+
+    it.each([1, 4, 16])(
+        'Sender.doWork of a data frame to %i destinations of a dynamic MDC publication allocates nothing',
+        async (destinations) => {
+            const { rig, sink, end } = newMdcRig(destinations, 'dynamic');
+            const position = rig.senderPosition;
+            try {
+                await expectNoAllocation((n) => {
+                    for (let i = 0; i < n; i++) {
+                        if (position.get() >= end) {
+                            position.set(0);
+                        }
+                        rig.sender.doWork();
+                    }
+                }, 300_000);
+                expect(sink.sends).toBeGreaterThan(destinations * 100_000);
+                expect(rig.errors).toEqual([]);
+            } finally {
+                rig.close();
+            }
+        },
+    );
 });

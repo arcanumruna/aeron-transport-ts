@@ -82,14 +82,7 @@ export class TaggedMulticastFlowControl extends AbstractMinMulticastFlowControl 
      * {@inheritDoc}
      */
     public onError(errorFlyweight: ErrorFlyweight, receiverAddress: InetSocketAddress, timeNs: number): void {
-        this.processError(
-            errorFlyweight,
-            receiverAddress,
-            timeNs,
-            errorFlyweight.hasGroupTag() &&
-                errorFlyweight.groupTagHigh() === this.groupTagHigh() &&
-                errorFlyweight.groupTagLow() === this.groupTagLow(),
-        );
+        this.processError(errorFlyweight, receiverAddress, timeNs, this.matchesTagOfErrorFrame(errorFlyweight));
     }
 
     /**
@@ -119,5 +112,16 @@ export class TaggedMulticastFlowControl extends AbstractMinMulticastFlowControl 
         }
 
         return result;
+    }
+
+    /**
+     * Java's `matchesTag(ErrorFlyweight)`, named apart from the status message overload.
+     */
+    private matchesTagOfErrorFrame(errorFlyweight: ErrorFlyweight): boolean {
+        return (
+            errorFlyweight.hasGroupTag() &&
+            errorFlyweight.groupTagHigh() === this.groupTagHigh() &&
+            errorFlyweight.groupTagLow() === this.groupTagLow()
+        );
     }
 }

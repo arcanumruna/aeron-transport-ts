@@ -47,6 +47,8 @@ import { DataHeaderFlyweight } from '../client/protocol/DataHeaderFlyweight.js';
 import type { InetSocketAddress } from './jdkNet.js';
 import { DefaultCongestionControlSupplier } from './DefaultCongestionControlSupplier.js';
 import { DefaultDenyTerminationValidator } from './DefaultDenyTerminationValidator.js';
+import { DefaultMulticastFlowControlSupplier } from './DefaultMulticastFlowControlSupplier.js';
+import { DefaultUnicastFlowControlSupplier } from './DefaultUnicastFlowControlSupplier.js';
 import { FlowControlRegistry } from './FlowControlRegistry.js';
 import { ReceiverWindow } from './ReceiverWindow.js';
 import { PreferredMulticastFlowControlAsf } from './PreferredMulticastFlowControlAsf.js';
@@ -2035,7 +2037,7 @@ export class Configuration {
     public static unicastFlowControlSupplier(): FlowControlSupplier {
         const className = System.getProperty(Configuration.UNICAST_FLOW_CONTROL_STRATEGY_SUPPLIER_PROP_NAME);
         if (null === className) {
-            return FlowControlRegistry.newFlowControlSupplier('io.aeron.driver.DefaultUnicastFlowControlSupplier');
+            return new DefaultUnicastFlowControlSupplier();
         }
 
         return FlowControlRegistry.newFlowControlSupplier(className);
@@ -2051,7 +2053,7 @@ export class Configuration {
     public static multicastFlowControlSupplier(): FlowControlSupplier {
         const className = System.getProperty(Configuration.MULTICAST_FLOW_CONTROL_STRATEGY_SUPPLIER_PROP_NAME);
         if (null === className) {
-            return FlowControlRegistry.newFlowControlSupplier('io.aeron.driver.DefaultMulticastFlowControlSupplier');
+            return new DefaultMulticastFlowControlSupplier();
         }
 
         return FlowControlRegistry.newFlowControlSupplier(className);

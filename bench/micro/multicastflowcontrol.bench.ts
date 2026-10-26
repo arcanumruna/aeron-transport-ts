@@ -139,8 +139,12 @@ class SinkSocket {
 }
 
 /** A sender rig of a manual MDC publication (`control-mode=manual`) with `destinations` destinations and 40 frames. */
-function newMdcRig(destinations: number): { rig: SenderRig; end: number; sink: SinkSocket } {
-    const uri = 'aeron:udp?control-mode=manual';
+function newMdcRig(
+    destinations: number,
+    mode: 'manual' | 'dynamic' = 'manual',
+): { rig: SenderRig; end: number; sink: SinkSocket } {
+    const uri =
+        'manual' === mode ? 'aeron:udp?control-mode=manual' : 'aeron:udp?control=127.0.0.1:40123|control-mode=dynamic';
     const rig = new SenderRig({ uri });
     const context = rig.context;
     rig.endpoint.allocateDestinationsCounterForMdc(
@@ -151,11 +155,22 @@ function newMdcRig(destinations: number): { rig: SenderRig; end: number; sink: S
     );
     for (let i = 0; i < destinations; i++) {
         const port = 41000 + i;
-        rig.endpoint.addDestination(
-            ChannelUri.parse('aeron:udp?endpoint=127.0.0.1:' + port),
-            new InetSocketAddress('127.0.0.1', port),
-            DESTINATION_REGISTRATION_ID + i,
-        );
+        if ('manual' === mode) {
+            rig.endpoint.addDestination(
+                ChannelUri.parse('aeron:udp?endpoint=127.0.0.1:' + port),
+                new InetSocketAddress('127.0.0.1', port),
+                DESTINATION_REGISTRATION_ID + i,
+            );
+        } else {
+            // a dynamic destination is added by the status message of a receiver
+            rig.sendStatusMessageFrom(
+                DESTINATION_REGISTRATION_ID + i,
+                new InetSocketAddress('127.0.0.1', port),
+                rig.initialTermId,
+                0,
+                1 << 15,
+            );
+        }
     }
     let end = 0;
     for (let i = 0; i < FRAMES; i++) {
@@ -168,15 +183,15 @@ function newMdcRig(destinations: number): { rig: SenderRig; end: number; sink: S
     return { rig, end, sink };
 }
 
-function mdcDataBench(destinations: number): SyncBench {
+function mdcDataBench(destinations: number, mode: 'manual' | 'dynamic' = 'manual'): SyncBench {
     let rig: SenderRig;
     let end = 0;
     let sink: SinkSocket;
     return {
-        name: `Sender doWork: one data frame of 1024 B to a manual MDC publication of ${destinations} destinations`,
+        name: `Sender doWork: one data frame of 1024 B to a ${mode} MDC publication of ${destinations} destinations`,
         opsPerSample: OPS_PER_SAMPLE,
         setup: () => {
-            ({ rig, end, sink } = newMdcRig(destinations));
+            ({ rig, end, sink } = newMdcRig(destinations, mode));
             rig.sender.doWork();
             if (sink.sends < destinations) {
                 throw new Error('the MDC publication did not send to its ' + destinations + ' destinations');
@@ -212,5 +227,6 @@ export const benches: SyncBench[] = [
     ...STRATEGIES.flatMap((strategy) => RECEIVER_COUNTS.map((receivers) => statusMessageBench(strategy, receivers))),
     ...STRATEGIES.flatMap((strategy) => RECEIVER_COUNTS.map((receivers) => idleBench(strategy, receivers))),
     ...DESTINATION_COUNTS.map(mdcTimeoutsBench),
-    ...DESTINATION_COUNTS.map(mdcDataBench),
+    ...DESTINATION_COUNTS.map((destinations) => mdcDataBench(destinations)),
+    ...DESTINATION_COUNTS.map((destinations) => mdcDataBench(destinations, 'dynamic')),
 ];

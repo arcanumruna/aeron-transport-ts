@@ -209,7 +209,7 @@ show that the count does not matter. The sender rows are on a manual MDC publica
 in-memory log and a sink socket with 1, 4 and 16 destinations: the destination timeout and re-resolution check
 (`ControlTransportPoller.checkForReResolutions`, which `Sender.doWork` runs once per `reResolutionCheckInterval`; all
 destinations live) and `Sender.doWork` sending one data frame of 1024 B to every destination (`MultiSndDestination.send`
-per frame, the socket hand-off for each). None allocates (`expectNoAllocation` in `MulticastFlowControlAllocationTest`).
+per frame, the socket hand-off for each). The `dynamic` rows (`control-mode=dynamic`) get their destinations from the status messages of 1, 4 and 16 receivers, so `Sender.doWork` runs `DynamicSndMultiDestination.send` with its destination timeout check. None allocates (`expectNoAllocation` in `MulticastFlowControlAllocationTest`).
 Measured on 4 cores with a load average of 1.1 to 1.3 (`npm run bench:micro -- --file multicastflowcontrol`, 2,000
 samples, median of the repeats, n=1 run of the harness), so the p99 and p99.9 columns are information, and an `onIdle`
 of 5 to 13 ns is at the limit of what a batch of 1,000 calls resolves. The min and tagged figures grow with the receivers
@@ -242,6 +242,9 @@ because both loops walk the receiver array once per call (as Java's do); `tagged
 | Sender doWork: one data frame of 1024 B to a manual MDC publication of 1 destinations          | 555.8   | 497.8   | 1,061.6 | 1,673.7 |
 | Sender doWork: one data frame of 1024 B to a manual MDC publication of 4 destinations          | 988.3   | 844.0   | 1,738.6 | 2,701.9 |
 | Sender doWork: one data frame of 1024 B to a manual MDC publication of 16 destinations         | 2,244.5 | 1,993.9 | 3,898.2 | 4,990.9 |
+| Sender doWork: one data frame of 1024 B to a dynamic MDC publication of 1 destinations         | 589.4   | 488.2   | 1,138.0 | 2,726.6 |
+| Sender doWork: one data frame of 1024 B to a dynamic MDC publication of 4 destinations         | 893.5   | 807.2   | 1,734.5 | 3,691.4 |
+| Sender doWork: one data frame of 1024 B to a dynamic MDC publication of 16 destinations        | 1,991.4 | 1,860.7 | 3,612.1 | 4,144.4 |
 
 **The gate against the phase 2 tip (phase 3 T4).** `npm run bench:gate -- --base 2340b67` (the tip of phase 2 merged into the
 phase 3 branch) on an idle host (load average 0.8 at the start, 5 pairs): the 24 new benches are `n/a in base` and pass,

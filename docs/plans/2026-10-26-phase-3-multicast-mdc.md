@@ -1,7 +1,7 @@
 # Phase 3 plan — multicast, MDC and MDS
 
 **Spec:** [2026-10-21-aeron-transport-ts-design.md](../specs/2026-10-21-aeron-transport-ts-design.md) (§9, phase 3;
-deviations D115 to D117 are new with this plan).
+deviations D115 to D117 are new with this plan; they arrive with Stage B/C).
 **Pinned sources:** Aeron Java `1.53.3`, Agrona `2.6.1`, Aeron C `1.53.3` (interop peer).
 **Builds on:** phase 2 (`feature/phase-2-unicast`, PR #9). This branch starts from its tip and merges `main` in once
 phase 2 is merged.
@@ -120,7 +120,7 @@ Paths below are relative to `aeron-driver/src/{main,test}/java/io/aeron/driver/`
 #### T4 — Flow-control micro benches
 - `bench/micro/`:
   - `onStatusMessage` and `onIdle` for max, min and tagged, with 1, 8 and 64 receivers.
-  - The sender's `processTimeouts` with an MDC publication of 1, 4 and 16 destinations.
+  - The sender's destination timeouts (checkForReResolutions / dynamic destination timeout) with an MDC publication of 1, 4 and 16 destinations.
 - Baselines go in `bench/README.md`. `bench:gate` against the phase 2 tip.
 
 **Review A** (one Opus): T1–T4 against the Java sources. Check line-by-line fidelity, the receiver timeout and

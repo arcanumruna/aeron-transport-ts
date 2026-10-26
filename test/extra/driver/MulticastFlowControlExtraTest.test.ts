@@ -7,6 +7,7 @@ import { StatusMessageFlyweight } from '../../../src/client/protocol/StatusMessa
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { CountersManager } from '../../../src/agrona/concurrent/status/CountersManager.js';
 import { CountersReader } from '../../../src/agrona/concurrent/status/CountersReader.js';
+import { LongOverflowError } from '../../../src/agrona/jdk.js';
 import { Configuration } from '../../../src/driver/Configuration.js';
 import { MediaDriver } from '../../../src/driver/MediaDriver.js';
 import { UdpChannel } from '../../../src/driver/media/UdpChannel.js';
@@ -159,5 +160,35 @@ describe('MulticastFlowControlExtraTest', () => {
                 expect(flowControl.hasRequiredReceivers()).toBe(false);
             },
         );
+
+        it('onIdle clears the stale receiver slots after the timed out receivers are removed (StaleReceiverSlotsClearedRegression)', () => {
+            const flowControl = newTagged(URI);
+            for (const id of [1, 2, 3, 4]) {
+                const sm = statusMessage(id, []);
+                sm.groupTag(7n);
+                flowControl.onStatusMessage(sm, null as never, 0, 0, 0, id < 3 ? 0 : 1_000_000_000_000);
+            }
+            const receivers = (flowControl as unknown as { receivers: unknown[] }).receivers;
+            expect(receivers.slice(0, 4).every((r) => r !== undefined)).toBe(true);
+
+            flowControl.onIdle(1_000_000_000_000 + 1, 0, 0, false);
+
+            expect(receivers.slice(0, 2).every((r) => r !== undefined)).toBe(true);
+            expect(receivers.slice(2).every((r) => r === undefined)).toBe(true);
+        });
+    });
+
+    describe('group tags outside +/-2^53 (spec D118, D5)', () => {
+        it('the URI gtag path rejects 9223372036854775807 with a LongOverflowError', () => {
+            expect(() =>
+                UdpChannel.parse('aeron:udp?endpoint=224.20.30.39:24326|interface=localhost|gtag=9223372036854775807'),
+            ).toThrow(expect.objectContaining({ cause: expect.any(LongOverflowError) }) as unknown as Error);
+        });
+
+        it('Configuration.flowControlGroupTag rejects 9223372036854775807 with a LongOverflowError', () => {
+            System.setProperty(Configuration.FLOW_CONTROL_GROUP_TAG_PROP_NAME, '9223372036854775807');
+
+            expect(() => Configuration.flowControlGroupTag()).toThrow(LongOverflowError);
+        });
     });
 });

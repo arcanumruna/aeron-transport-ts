@@ -184,6 +184,9 @@ export abstract class AbstractMinMulticastFlowControl implements FlowControl {
         let newLength = length;
         if (removed > 0) {
             newLength = length - removed;
+            for (let i = newLength; i < length; i++) {
+                receivers[i] = undefined as unknown as Receiver;
+            }
             this.receiversLength = newLength;
             this._hasRequiredReceivers = newLength >= this._groupMinSize;
             (this.receiverCount as AtomicCounter).setRelease(newLength);
