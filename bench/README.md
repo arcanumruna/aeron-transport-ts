@@ -129,19 +129,20 @@ node with `--experimental-transform-types` (the sources use parameter properties
 | StaticWindowCongestionControl onTrackRebuild                         | 9.6     | 9.2     | 26.6    | 51.6     |
 | UnicastFlowControl onStatusMessage                                   | 26.8    | 25.3    | 42.9    | 54.4     |
 
-`npm run bench:micro -- --file transport`, one run, 2026-10-26, same Node and host (load average 0.15 at the start, 4 cores), ns
+`npm run bench:micro -- --file transport`, one run, 2026-10-26 (re-run after review batch 2; load average 0.49 at the start, 4 cores), ns
 per operation. These are the per-datagram paths of `UdpChannelTransport` (spec 4.2): `onMessage` is the `'message'` handler
 (ring offer, source address, wake-up) and `receive` copies the datagram into the poller's buffer; "two senders alternating"
-rebuilds the source address on every datagram, which is the worst case of the last-sender cache; `sendTo` / `send` copy 1408
+looks up the second sender in the bounded source address intern table (16 entries, review batch 2; before it, the
+address was rebuilt on every datagram: 242.9 ns/op, p99 441.7); `sendTo` / `send` copy 1408
 bytes to the send slot and hand them to a socket that does nothing, so these numbers are this port's own cost and not the
-kernel's. None of them allocates (`expectNoAllocation` in `UdpChannelTransportExtraTest`).
+kernel's. None of them allocates once the senders are in the intern table, which holds 16 (`expectNoAllocation` in `UdpChannelTransportExtraTest`, with 1, 2 and 16 senders); a sender that is not in the table, or was evicted round-robin from a full one, allocates one address.
 
-| Bench                                                               | ns/op | p50   | p99   | p99.9 |
-| ------------------------------------------------------------------- | ----- | ----- | ----- | ----- |
-| UdpChannelTransport onMessage+receive 128B, repeated sender         | 53.7  | 47.7  | 112.3 | 441.5 |
-| UdpChannelTransport onMessage+receive 128B, two senders alternating | 242.9 | 224.4 | 441.7 | 893.7 |
-| UdpChannelTransport sendTo 1408B (slot copy + socket.send)          | 41.1  | 39.5  | 84.0  | 198.2 |
-| UdpChannelTransport send 1408B, connected (slot copy + socket.send) | 37.4  | 34.6  | 70.9  | 136.3 |
+| Bench                                                               | ns/op | p50  | p99   | p99.9 |
+| ------------------------------------------------------------------- | ----- | ---- | ----- | ----- |
+| UdpChannelTransport onMessage+receive 128B, repeated sender         | 56.5  | 55.3 | 99.4  | 234.2 |
+| UdpChannelTransport onMessage+receive 128B, two senders alternating | 52.3  | 47.3 | 107.9 | 205.3 |
+| UdpChannelTransport sendTo 1408B (slot copy + socket.send)          | 43.3  | 40.0 | 76.0  | 99.0  |
+| UdpChannelTransport send 1408B, connected (slot copy + socket.send) | 39.7  | 39.1 | 68.3  | 125.7 |
 
 `npm run bench:micro -- --file endpoint`, one run, 2026-10-26, same Node and host (load average 0.94 at the start, 4 cores, so
 indicative only: a run before it measured the first row at 72 ns and the last two status message rows 25% lower), ns per

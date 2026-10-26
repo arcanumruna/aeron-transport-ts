@@ -105,6 +105,12 @@ function codeOf(error: Error): string | undefined {
  */
 export abstract class UdpChannelTransport implements AutoCloseable {
     /**
+     * Not in Java (spec 4.2). The senders whose `InetSocketAddress` a transport keeps; a transport that hears from more
+     * senders than this replaces them round-robin, and allocates one address for each such datagram.
+     */
+    public static readonly SOURCE_ADDRESS_CAPACITY = 16;
+
+    /**
      * Context for configuration.
      */
     protected readonly context: MediaDriverContext;
@@ -154,9 +160,16 @@ export abstract class UdpChannelTransport implements AutoCloseable {
     private readonly receiveRingDrops: AtomicCounter | null;
     private ring: ReceiveRing | null = null;
     private receivedLength_ = 0;
-    private lastSrcHost = '';
-    private lastSrcPort = -1;
-    private lastSrcAddress: InetSocketAddress | null = null;
+    // The source address intern table (spec 4.2): parallel arrays of fixed size, scanned linearly (no key is built), with
+    // the index of the last hit tried first. A miss replaces the entry at `srcNext`, round-robin, and is the only
+    // allocation.
+    private readonly srcHosts: string[] = new Array<string>(UdpChannelTransport.SOURCE_ADDRESS_CAPACITY).fill('');
+    private readonly srcPorts = new Int32Array(UdpChannelTransport.SOURCE_ADDRESS_CAPACITY).fill(-1);
+    private readonly srcAddresses: (InetSocketAddress | null)[] = new Array<InetSocketAddress | null>(
+        UdpChannelTransport.SOURCE_ADDRESS_CAPACITY,
+    ).fill(null);
+    private srcLast = 0;
+    private srcNext = 0;
     private readonly sendSlot = new Uint8Array(SetupFlyweight.MAX_UDP_PAYLOAD_LENGTH);
     private sendBlocked = false;
     private pendingReceiveError: Error | null = null;
@@ -164,6 +177,8 @@ export abstract class UdpChannelTransport implements AutoCloseable {
     private openError: Error | null = null;
     private isOpening = false;
     private isClosed = false;
+    // close() has run: it frees the managed port once. Not isClosed, which a failed open also sets (late socket errors).
+    private closeDone = false;
     private connected = false;
     private wakeUp: (() => void) | null = null;
     private readonly onMessageCallback: (message: Uint8Array, rinfo: RemoteInfo) => void;
@@ -321,10 +336,13 @@ export abstract class UdpChannelTransport implements AutoCloseable {
      * {@inheritDoc}
      */
     public close(): void {
-        if (this.isClosed) {
+        // Java has no guard; the flag only keeps a second close from freeing the managed port again (D28). A failed
+        // open does not set it, so the conductor's close after the failure frees the port.
+        if (this.closeDone) {
             return;
         }
 
+        this.closeDone = true;
         this.isClosed = true;
         const send = this.sendDatagramChannel;
         const receive = this._receiveDatagramChannel;
@@ -645,8 +663,10 @@ export abstract class UdpChannelTransport implements AutoCloseable {
      * wakes the agent. The datagram is a reference to the `Buffer` that node allocated for it, which the handler owns
      * (N7). When the ring is full the datagram is dropped and counted, as a full kernel buffer would drop it in Java.
      * <p>
-     * Java hands the same `InetSocketAddress` over while the sender stays the same (the JDK reuses the last sender's),
-     * and so does this: a new address is built only when the host or the port differs from the last datagram's.
+     * Java hands the same `InetSocketAddress` over while the sender stays the same (the JDK reuses the last sender's).
+     * This interns the addresses of the last {@link SOURCE_ADDRESS_CAPACITY} senders by (host, port): a sender that is
+     * in the table yields the same instance and allocates nothing; a new one, or one evicted (round-robin), builds an
+     * address.
      *
      * @internal public for tests
      */
@@ -656,13 +676,32 @@ export abstract class UdpChannelTransport implements AutoCloseable {
             return;
         }
 
-        let address = this.lastSrcAddress;
-        if (null === address || rinfo.port !== this.lastSrcPort || rinfo.address !== this.lastSrcHost) {
-            address = new InetSocketAddress(InetAddress.getByName(rinfo.address), rinfo.port);
-            this.lastSrcHost = rinfo.address;
-            this.lastSrcPort = rinfo.port;
-            this.lastSrcAddress = address;
+        const host = rinfo.address;
+        const port = rinfo.port;
+        const hosts = this.srcHosts;
+        const ports = this.srcPorts;
+        let index = this.srcLast;
+        if (port !== ports[index] || host !== hosts[index]) {
+            index = -1;
+            for (let i = 0; i < hosts.length; i++) {
+                if (port === ports[i] && host === hosts[i]) {
+                    index = i;
+                    break;
+                }
+            }
+
+            if (-1 === index) {
+                index = this.srcNext;
+                this.srcNext = index + 1 === hosts.length ? 0 : index + 1;
+                hosts[index] = host;
+                ports[index] = port;
+                this.srcAddresses[index] = new InetSocketAddress(InetAddress.getByName(host), port);
+            }
+
+            this.srcLast = index;
         }
+
+        const address = this.srcAddresses[index] as InetSocketAddress;
 
         if (!ring.offer(message, message.length, address)) {
             this.receiveRingDrops?.increment();
