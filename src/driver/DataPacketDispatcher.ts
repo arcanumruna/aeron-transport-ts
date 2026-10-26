@@ -451,6 +451,7 @@ export class DataPacketDispatcher {
         return !this.streamInterestByIdMap.isEmpty();
     }
 
+    /** @internal Package-private in Java: the receiver and the pending setup message call it. */
     public removeSessionInterestByState(sessionId: number, streamId: number, state: SessionState): void {
         const streamInterest = this.streamInterestByIdMap.get(streamId);
         if (null !== streamInterest) {
