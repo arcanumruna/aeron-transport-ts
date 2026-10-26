@@ -319,6 +319,13 @@ frames written by the setup and move the subscriber back to its start after the 
 cores with a load average of about 5 (other tasks were running), n=1 run of the harness (2,000 samples, median of the repeats),
 so the figures are upper bounds; the baseline for the gate is to be taken on the idle machine.
 
+**Provisional (issue #45).** This baseline was recorded under load (average about 5 on 4 cores, above the 0.5 x cores that
+the gate itself refuses), so it is provisional until it is re-recorded with `npm run bench:micro -- --file publication` on
+an idle host. Do not use it as a reference for a verdict or a regression claim; `bench:gate` against a base compares two
+runs on the same host and does not depend on it. There is no tool that records baselines (the tables here are pasted by
+hand from the output of `bench:micro`), so nothing can refuse a recording; `bench:micro` prints `PROVISIONAL` after the load average when it is over 0.5 x cores
+(the gate's own limit), and such a run must not be recorded. Write the load average at the start next to the table.
+
 | Bench                                                                               | ns/op | p50   | p99   | p99.9   |
 | ----------------------------------------------------------------------------------- | ----- | ----- | ----- | ------- |
 | ConcurrentPublication offer 64 B (claim the tail, header, copy, publish the length) | 325.0 | 296.0 | 633.6 | 3,109.8 |

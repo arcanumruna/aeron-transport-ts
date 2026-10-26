@@ -77,15 +77,17 @@ async function main(): Promise<void> {
         .sort();
 
     if (!options.json) {
-        process.stderr.write(
-            'load average ' +
-                loadavg()
-                    .map((l) => l.toFixed(2))
-                    .join(' ') +
-                ' on ' +
-                availableParallelism() +
-                ' cores\n',
-        );
+        const load = loadavg();
+        const cores = availableParallelism();
+        process.stderr.write('load average ' + load.map((l) => l.toFixed(2)).join(' ') + ' on ' + cores + ' cores\n');
+        if (load[0]! > 0.5 * cores) {
+            // the same limit as the gate (bench/lib/gate.ts): numbers from this run are not a baseline (issue #45)
+            process.stderr.write(
+                'PROVISIONAL: the 1-minute load average is over ' +
+                    0.5 * cores +
+                    ' (0.5 x cores); do not record these numbers as a baseline, re-run on an idle host\n',
+            );
+        }
     }
     const results: Result[] = [];
     for (const file of files) {
