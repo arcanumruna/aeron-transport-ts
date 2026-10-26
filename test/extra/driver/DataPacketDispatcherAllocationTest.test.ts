@@ -32,7 +32,6 @@ import { DataHeaderFlyweight } from '../../../src/client/protocol/DataHeaderFlyw
 import { HeaderFlyweight } from '../../../src/client/protocol/HeaderFlyweight.js';
 import { RttMeasurementFlyweight } from '../../../src/client/protocol/RttMeasurementFlyweight.js';
 import { SetupFlyweight } from '../../../src/client/protocol/SetupFlyweight.js';
-import type { PublicationImage, Receiver } from '../../../src/driver/DataPacketDispatcher.js';
 import { DataPacketDispatcher } from '../../../src/driver/DataPacketDispatcher.js';
 import { InetSocketAddress } from '../../../src/driver/jdkNet.js';
 import { MediaDriver } from '../../../src/driver/MediaDriver.js';
@@ -41,13 +40,14 @@ import { ReceiveChannelEndpoint } from '../../../src/driver/media/ReceiveChannel
 import { UdpChannel } from '../../../src/driver/media/UdpChannel.js';
 import { newPlainConductorProxy } from '../../support/ConductorProxyFake.js';
 import { expectNoAllocation } from '../../support/Allocation.js';
+import { type DispatcherImage, asPublicationImage, asReceiver } from '../../support/PublicationFakes.js';
 
 const ITERATIONS = 500_000;
 const STREAM = 1001;
 const SRC = new InetSocketAddress('127.0.0.1', 5000);
 const rinfo = { address: '127.0.0.1', family: 'IPv4' as const, port: 5000, size: 0 };
 
-class CountingImage implements PublicationImage {
+class CountingImage implements DispatcherImage {
     public inserted = 0;
     public destinations = 0;
     public rtts = 0;
@@ -105,7 +105,7 @@ class SinkSocket {
     public close(): void {}
 }
 
-const receiver: Receiver = { addPendingSetupMessage: () => {} };
+const receiver = asReceiver({ addPendingSetupMessage: () => {} });
 const proxy = newPlainConductorProxy();
 
 function bytesOf(length: number, build: (buffer: UnsafeBuffer) => void): Uint8Array {
@@ -190,7 +190,7 @@ function withImage(sessionId: number): CountingImage {
     dispatcher.addSubscription(STREAM);
     dispatcher.onSetupMessage(endpoint, new SetupFlyweight(new UnsafeBuffer(setupFrame(sessionId, STREAM))), SRC, 0);
     const image = new CountingImage(sessionId, STREAM);
-    dispatcher.addPublicationImage(image);
+    dispatcher.addPublicationImage(asPublicationImage(image));
     return image;
 }
 

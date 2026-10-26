@@ -25,47 +25,10 @@ import { RttMeasurementFlyweight } from '../client/protocol/RttMeasurementFlywei
 import type { SetupFlyweight } from '../client/protocol/SetupFlyweight.js';
 import { UnknownSubscriptionException } from './exceptions/UnknownSubscriptionException.js';
 import type { InetSocketAddress } from './jdkNet.js';
+import type { PublicationImage } from './PublicationImage.js';
+import type { Receiver } from './Receiver.js';
 import type { ReceiveChannelEndpoint } from './media/ReceiveChannelEndpoint.js';
 import type { DriverConductorProxy } from './DriverConductorProxy.js';
-
-/**
- * Stand-in for `PublicationImage`, which task T16 ports. It has the members that the dispatcher calls; T16 replaces it
- * with `import type { PublicationImage } from './PublicationImage.js'` (spec D24, `docs/mapping.md`). `correlationId`
- * is a `number` (a correlation id, spec 5.2).
- */
-export interface PublicationImage {
-    sessionId(): number;
-    streamId(): number;
-    correlationId(): number;
-    isEndOfStream(): boolean;
-    activate(): void;
-    deactivate(): void;
-    insertPacket(
-        termId: number,
-        termOffset: number,
-        buffer: UnsafeBuffer,
-        length: number,
-        transportIndex: number,
-        srcAddress: InetSocketAddress,
-    ): number;
-    addDestinationConnectionIfUnknown(transportIndex: number, srcAddress: InetSocketAddress): void;
-    onRttMeasurement(msg: RttMeasurementFlyweight, transportIndex: number, srcAddress: InetSocketAddress): void;
-}
-
-/**
- * Stand-in for `Receiver`, which task T16 ports. It has the member that the dispatcher calls; T16 replaces it with
- * `import type { Receiver } from './Receiver.js'` (spec D24, `docs/mapping.md`).
- */
-export interface Receiver {
-    addPendingSetupMessage(
-        sessionId: number,
-        streamId: number,
-        transportIndex: number,
-        channelEndpoint: ReceiveChannelEndpoint,
-        periodic: boolean,
-        controlAddress: InetSocketAddress | null,
-    ): void;
-}
 
 /**
  * The state of the interest in a session of a stream: the Java enum `SessionState`, a class with one `static readonly`

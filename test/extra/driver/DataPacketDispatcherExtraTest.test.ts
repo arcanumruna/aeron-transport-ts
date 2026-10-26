@@ -37,7 +37,8 @@ import { HeaderFlyweight } from '../../../src/client/protocol/HeaderFlyweight.js
 import { RttMeasurementFlyweight } from '../../../src/client/protocol/RttMeasurementFlyweight.js';
 import { SetupFlyweight } from '../../../src/client/protocol/SetupFlyweight.js';
 import { StatusMessageFlyweight } from '../../../src/client/protocol/StatusMessageFlyweight.js';
-import type { PublicationImage, Receiver } from '../../../src/driver/DataPacketDispatcher.js';
+import type { PublicationImage } from '../../../src/driver/PublicationImage.js';
+import type { Receiver } from '../../../src/driver/Receiver.js';
 import { DataPacketDispatcher, SessionState, StreamInterest } from '../../../src/driver/DataPacketDispatcher.js';
 import { UnknownSubscriptionException } from '../../../src/driver/exceptions/UnknownSubscriptionException.js';
 import { InetSocketAddress } from '../../../src/driver/jdkNet.js';
@@ -54,6 +55,7 @@ import { UdpChannel } from '../../../src/driver/media/UdpChannel.js';
 import { PendingSetupMessageFromSource } from '../../../src/driver/PendingSetupMessageFromSource.js';
 import { newFakeConductorProxy, type FakeConductorProxy } from '../../support/ConductorProxyFake.js';
 import { assertThrows } from '../../support/Assertions.js';
+import { type ImageFake, type ReceiverFake, asImageFake, asReceiverFake } from '../../support/PublicationFakes.js';
 import { type Fake, calledMembers, mock } from '../../support/Mockito.js';
 import { mulberry32 } from '../../support/Random.js';
 import { FakeSocket, freeUdpPort, waitUntil } from '../../support/Udp.js';
@@ -66,8 +68,8 @@ const LIMIT = 4;
 const SRC = new InetSocketAddress('127.0.0.1', 4510);
 const CONTROL = new InetSocketAddress('224.20.30.39', 54326);
 
-function newImage(sessionId: number, streamId: number, correlationId: number): Fake<PublicationImage> {
-    return {
+function newImage(sessionId: number, streamId: number, correlationId: number): ImageFake {
+    return asImageFake({
         sessionId: vi.fn<PublicationImage['sessionId']>(() => sessionId),
         streamId: vi.fn<PublicationImage['streamId']>(() => streamId),
         correlationId: vi.fn<PublicationImage['correlationId']>(() => correlationId),
@@ -77,15 +79,15 @@ function newImage(sessionId: number, streamId: number, correlationId: number): F
         insertPacket: vi.fn<PublicationImage['insertPacket']>(() => 0),
         addDestinationConnectionIfUnknown: vi.fn<PublicationImage['addDestinationConnectionIfUnknown']>(),
         onRttMeasurement: vi.fn<PublicationImage['onRttMeasurement']>(),
-    };
+    });
 }
 
 function newProxy(): FakeConductorProxy {
     return newFakeConductorProxy();
 }
 
-function newReceiver(): Fake<Receiver> {
-    return { addPendingSetupMessage: vi.fn<Receiver['addPendingSetupMessage']>() };
+function newReceiver(): ReceiverFake {
+    return asReceiverFake({ addPendingSetupMessage: vi.fn<Receiver['addPendingSetupMessage']>() });
 }
 
 function dataFlyweight(sessionId: number, streamId: number, termId = 7, termOffset = 64): DataHeaderFlyweight {
@@ -135,7 +137,7 @@ function packet(endOfStream: boolean): UnsafeBuffer {
 
 interface Fixture {
     proxy: FakeConductorProxy;
-    receiver: Fake<Receiver>;
+    receiver: ReceiverFake;
     dispatcher: DataPacketDispatcher;
     endpoint: ReceiveChannelEndpoint;
     sendSetup: Mock<ReceiveChannelEndpoint['sendSetupElicitingStatusMessage']>;
@@ -652,7 +654,7 @@ describe('DataPacketDispatcher: a seeded random run keeps its invariants', () =>
             const f = newFixture();
             const wildcard = new Set<number>();
             const sessionSubs = new Map<number, Set<number>>();
-            const images = new Map<string, Fake<PublicationImage>>(); // active images, by 'stream:session'
+            const images = new Map<string, ImageFake>(); // active images, by 'stream:session'
             const created = new Set<string>(); // create requests with no image yet
             const requestsBefore = (): number => f.proxy.createPublicationImage.mock.calls.length;
             let correlationId = 1000;

@@ -65,6 +65,7 @@ import { DefaultNameResolver } from './DefaultNameResolver.js';
 import type { DutyCycleTracker } from './DutyCycleTracker.js';
 import { MediaDriverVersion } from './MediaDriverVersion.js';
 import type { NameResolverAgent } from './NameResolverAgent.js';
+import { ReceiverProxy } from './ReceiverProxy.js';
 import { SenderProxy } from './SenderProxy.js';
 import { DutyCycleStallTracker } from './status/DutyCycleStallTracker.js';
 import { SystemCounterDescriptor } from './status/SystemCounterDescriptor.js';
@@ -73,6 +74,7 @@ import { ControlTransportPoller } from './media/ControlTransportPoller.js';
 import { DataTransportPoller } from './media/DataTransportPoller.js';
 import type { PortManager } from './media/PortManager.js';
 import { ReceiveChannelEndpointThreadLocals } from './media/ReceiveChannelEndpointThreadLocals.js';
+import type { LossReport } from './reports/LossReport.js';
 import { WildcardPortManager } from './media/WildcardPortManager.js';
 import type { ReceiveChannelEndpointSupplier } from './ReceiveChannelEndpointSupplier.js';
 import type { SendChannelEndpointSupplier } from './SendChannelEndpointSupplier.js';
@@ -176,8 +178,11 @@ export class MediaDriverContext extends CommonContext {
     private _dataTransportPoller: DataTransportPoller | null = null;
     private _controlTransportPoller: ControlTransportPoller | null = null;
     private _logFactory: LogFactory | null = null;
+    private _receiverCommandQueue: OneToOneConcurrentArrayQueue<() => void> | null = null;
     private _senderCommandQueue: OneToOneConcurrentArrayQueue<() => void> | null = null;
+    private _receiverProxy: ReceiverProxy | null = null;
     private _senderProxy: SenderProxy | null = null;
+    private _lossReport: LossReport | null = null;
     private _epochClock: EpochClock | null = null;
     private _nanoClock: NanoClock | null = null;
     private _cachedEpochClock: CachedEpochClock | null = null;
@@ -2159,6 +2164,31 @@ export class MediaDriverContext extends CommonContext {
     }
 
     /**
+     * The report of the loss that the images observe, for identifying loss issues on specific connections. It is
+     * {@code null} unless the application sets one: Java makes it over the memory-mapped loss report file in
+     * {@code conclude}, which the port does not have (spec section 3, D50). Added by T16.
+     *
+     * @return the loss report, or {@code null} if there is none.
+     * @internal package-private in Java
+     */
+    public lossReport(): LossReport | null;
+    /**
+     * Set the report of the loss that the images observe, for identifying loss issues on specific connections.
+     *
+     * @param lossReport for identifying loss issues on specific connections.
+     * @return this for a fluent API.
+     */
+    public lossReport(lossReport: LossReport | null): this;
+    public lossReport(lossReport?: LossReport | null): LossReport | null | this {
+        if (undefined === lossReport) {
+            return this._lossReport;
+        }
+
+        this._lossReport = lossReport;
+        return this;
+    }
+
+    /**
      * Get the group tag (gtag) to be sent in Status Messages from the Receiver.
      *
      * @return group tag value or null if not set.
@@ -2927,6 +2957,25 @@ export class MediaDriverContext extends CommonContext {
     }
 
     /**
+     * The queue of the commands for the receiver. A command is a closure (Java: a `Runnable`). Added by T16.
+     *
+     * @return the receiver command queue.
+     * @internal package-private in Java
+     */
+    public receiverCommandQueue(): OneToOneConcurrentArrayQueue<() => void> | null;
+    public receiverCommandQueue(receiverCommandQueue: OneToOneConcurrentArrayQueue<() => void> | null): this;
+    public receiverCommandQueue(
+        receiverCommandQueue?: OneToOneConcurrentArrayQueue<() => void> | null,
+    ): OneToOneConcurrentArrayQueue<() => void> | null | this {
+        if (undefined === receiverCommandQueue) {
+            return this._receiverCommandQueue;
+        }
+
+        this._receiverCommandQueue = receiverCommandQueue;
+        return this;
+    }
+
+    /**
      * The queue of the commands for the sender. A command is a closure (Java: a `Runnable`). Added by T15.
      *
      * @return the sender command queue.
@@ -2942,6 +2991,23 @@ export class MediaDriverContext extends CommonContext {
         }
 
         this._senderCommandQueue = senderCommandQueue;
+        return this;
+    }
+
+    /**
+     * The proxy that the conductor offers its commands to the receiver through. Added by T16.
+     *
+     * @return the receiver proxy.
+     * @internal package-private in Java
+     */
+    public receiverProxy(): ReceiverProxy | null;
+    public receiverProxy(receiverProxy: ReceiverProxy | null): this;
+    public receiverProxy(receiverProxy?: ReceiverProxy | null): ReceiverProxy | null | this {
+        if (undefined === receiverProxy) {
+            return this._receiverProxy;
+        }
+
+        this._receiverProxy = receiverProxy;
         return this;
     }
 
@@ -3203,8 +3269,12 @@ export class MediaDriverContext extends CommonContext {
             this._receiveChannelEndpointSupplier = Configuration.receiveChannelEndpointSupplier();
         }
 
-        // The flow control and congestion control suppliers, the other command queues and the delay generators are added
-        // by the tasks that port their types.
+        // The flow control and congestion control suppliers, the native resource agent command queue and the delay
+        // generators are added by the tasks that port their types.
+
+        if (null === this._receiverCommandQueue) {
+            this._receiverCommandQueue = new OneToOneConcurrentArrayQueue<() => void>(Configuration.CMD_QUEUE_CAPACITY);
+        }
 
         if (null === this._senderCommandQueue) {
             this._senderCommandQueue = new OneToOneConcurrentArrayQueue<() => void>(Configuration.CMD_QUEUE_CAPACITY);
@@ -3391,8 +3461,12 @@ export class MediaDriverContext extends CommonContext {
             );
         }
 
-        // The receiver and native resource agent proxies and the port managers are added by the tasks that port their
-        // types; the loss report is not ported (spec section 3).
+        // The native resource agent proxy is added by the task that ports its type; the loss report is the application's
+        // to give (there is no loss report file, spec section 3, D50).
+        this._receiverProxy = new ReceiverProxy(
+            this._receiverCommandQueue as OneToOneConcurrentArrayQueue<() => void>,
+            systemCounters.get(SystemCounterDescriptor.RECEIVER_PROXY_FAILS),
+        );
         this._senderProxy = new SenderProxy(
             this._senderCommandQueue as OneToOneConcurrentArrayQueue<() => void>,
             systemCounters.get(SystemCounterDescriptor.SENDER_PROXY_FAILS),

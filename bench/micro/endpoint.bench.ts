@@ -14,7 +14,7 @@ import { HeaderFlyweight } from '../../src/client/protocol/HeaderFlyweight.js';
 import { StatusMessageFlyweight } from '../../src/client/protocol/StatusMessageFlyweight.js';
 import { SetupFlyweight } from '../../src/client/protocol/SetupFlyweight.js';
 import { InetSocketAddress } from '../../src/driver/jdkNet.js';
-import type { DataPacketDispatcher, PublicationImage } from '../../src/driver/DataPacketDispatcher.js';
+import type { DataPacketDispatcher } from '../../src/driver/DataPacketDispatcher.js';
 import { DataPacketDispatcher as RealDataPacketDispatcher } from '../../src/driver/DataPacketDispatcher.js';
 import { MediaDriver } from '../../src/driver/MediaDriver.js';
 import { ControlTransportPoller } from '../../src/driver/media/ControlTransportPoller.js';
@@ -26,6 +26,7 @@ import type { NetworkPublication as RealNetworkPublication } from '../../src/dri
 import { SendChannelEndpoint } from '../../src/driver/media/SendChannelEndpoint.js';
 import { UdpChannel } from '../../src/driver/media/UdpChannel.js';
 import type { SyncBench } from '../lib/types.js';
+import { type DispatcherImage, asPublicationImage, asReceiver } from '../../test/support/PublicationFakes.js';
 
 /** The members of a publication that a `SendChannelEndpoint` calls. */
 type NetworkPublication = Pick<
@@ -179,7 +180,7 @@ function dataPollBench(): SyncBench {
     };
 }
 
-class CountingImage implements PublicationImage {
+class CountingImage implements DispatcherImage {
     public inserted = 0;
 
     public sessionId(): number {
@@ -226,7 +227,7 @@ function dispatchBench(): SyncBench {
             context = newContext();
             const dispatcher = new RealDataPacketDispatcher(
                 noOpConductorProxy(),
-                { addPendingSetupMessage: () => {} },
+                asReceiver({ addPendingSetupMessage: () => {} }),
                 10,
             );
             endpoint = new ReceiveChannelEndpoint(
@@ -247,7 +248,7 @@ function dispatchBench(): SyncBench {
                 .termLength(64 * 1024)
                 .mtuLength(1408);
             dispatcher.onSetupMessage(endpoint, setup, new InetSocketAddress('127.0.0.1', 5000), 0);
-            dispatcher.addPublicationImage(image);
+            dispatcher.addPublicationImage(asPublicationImage(image));
             const header = new DataHeaderFlyweight(new UnsafeBuffer(frame));
             header
                 .version(HeaderFlyweight.CURRENT_VERSION)

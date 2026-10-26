@@ -179,3 +179,20 @@ baseline for the gate is to be taken on the idle machine.
 | Sender doWork: one data frame of 1024 B (scan, copy to the send slot, socket)                   | 455.5   | 433.8   | 802.9   | 1,299.8 |
 | Sender doWork: a data frame at t=0 then a heartbeat at t=2 x timeout (two cycles per operation) | 1,070.9 | 1,013.1 | 2,059.2 | 3,146.3 |
 | NetworkPublication resend: 2 frames of 1024 B                                                   | 459.4   | 386.5   | 915.2   | 968.6   |
+
+### Receiver (T16)
+
+`bench/micro/receiver.bench.ts`: `Receiver.doWork` on a real `PublicationImage` over an in-memory log (`SharedArrayBuffer`),
+a `ReceiveChannelEndpoint` whose socket does nothing, the dispatcher and the position counters of the driver. The data bench
+puts one datagram of 64 B in the transport ring and runs one cycle (poll, validate, route, `insertPacket`, `TermRebuilder.insert`,
+the status message that follows the subscriber); every 64th operation also runs `trackRebuild` and moves the subscriber (the
+conductor's part). The heartbeat bench is a frame of length 0, the idle bench is a cycle with nothing to do. None allocates
+(`expectNoAllocation` in `PublicationImageAllocationTest`, `PublicationImageLossAllocationTest` and
+`PublicationImageTimestampAllocationTest`). Measured on 4 cores with a load average of 0.4 to 0.6 (idle host), n=1 run of the
+harness (2,000 samples, median of the repeats).
+
+| Bench                                                                                                  | ns/op   | p50     | p99     | p99.9   |
+| ------------------------------------------------------------------------------------------------------ | ------- | ------- | ------- | ------- |
+| Receiver doWork: one data frame of 64 B (ring, validate, route, insertPacket, rebuild, status message) | 1,069.5 | 1,008.2 | 2,116.9 | 2,855.1 |
+| Receiver doWork: one heartbeat (frame length 0)                                                        | 421.4   | 408.6   | 809.4   | 1,335.6 |
+| Receiver doWork: an idle cycle (no command, no datagram, the image has nothing to send)                | 96.8    | 94.1    | 188.6   | 231.3   |
