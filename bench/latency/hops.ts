@@ -1,0 +1,13 @@
+import dgram from 'node:dgram';
+const S = dgram.Socket.prototype as any;
+const log: [string, number, number][] = [];
+(globalThis as any).__hop = (n: string) => { if ((globalThis as any).__on) log.push([n + '#' + ((globalThis as any).__dcN ?? 0), performance.now(), (globalThis as any).__dcT ?? 0]); };
+const os = S.send; S.send = function (b: any, ...a: any[]) { (globalThis as any).__hop('send' + b.length + ':' + (this as any).address?.().port); return os.call(this, b, ...a); };
+const oe = S.emit; S.emit = function (e: string, m: any, ...a: any[]) { if (e === 'message') (globalThis as any).__hop('recv' + m.length + ':' + (this as any).address().port); return oe.call(this, e, m, ...a); };
+(globalThis as any).__dump = () => { const t0 = log[0][1]; console.log(log.map(([n, t]) => n + '@' + ((t - t0) * 1000).toFixed(1)).join('  ')); log.length = 0; };
+(globalThis as any).__agg = (agg: Map<string, number[]>) => { const t0 = log[0][1]; let prev = t0; log.forEach(([n, t], i) => { const k = i + ':' + n; if (!agg.has(k)) agg.set(k, []); agg.get(k)!.push((t - prev) * 1000); prev = t; }); log.length = 0; };
+(globalThis as any).__seq = () => log.map(([n]) => n).join(' ');
+(globalThis as any).__deltas = () => { let p = log[0][1]; return log.map(([, t]) => { const d = (t - p) * 1000; p = t; return d; }); };
+(globalThis as any).__clear = () => { log.length = 0; };
+(globalThis as any).__seq = () => { const n0 = +log[0][0].split('#')[1]; return log.map(([n]) => n.split('#')[0] + '#' + (+n.split('#')[1] - n0)).join(' '); };
+(globalThis as any).__deltas = () => { let p = log[0][1], q = log[0][2]; return log.map(([, t, d]) => { const r = [(t - p) * 1000, (d - q) * 1000]; p = t; q = d; return r; }); };

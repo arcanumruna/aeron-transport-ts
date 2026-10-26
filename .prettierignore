@@ -7,3 +7,4 @@ docs
 LICENSE
 NOTICE
 test/golden/*.json
+bench/latency
