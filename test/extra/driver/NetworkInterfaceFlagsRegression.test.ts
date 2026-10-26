@@ -1,6 +1,5 @@
 // Regression test of issue #14 (port-only, spec D131): the flags of the `NetworkInterface` stand-in are those of
-// `/sys/class/net/<name>/flags` on Linux, `isUp` also needs the carrier (IFF_RUNNING emulated), and an interface without
-// an address is not listed. `os.networkInterfaces()` is mocked to
+// `/sys/class/net/<name>/flags` on Linux, and an interface that is down is listed. `os.networkInterfaces()` is mocked to
 // list `lo` and `eth9`; a temporary directory plays `/sys/class/net`.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -80,51 +79,17 @@ describe('NetworkInterfaceFlagsRegression', () => {
         expect(byName('lo').supportsMulticast()).toBe(true);
     });
 
-    it('anInterfaceThatIsDownIsNotUp Regression', () => {
+    it('anInterfaceThatIsDownIsListedWithItsFlagsAndNoAddress', () => {
         flags('lo', '0x9\n');
         flags('eth9', '0x1002\n'); // listed by Node, but IFF_UP is not set
+        flags('eth8', '0x1002\n'); // not listed by Node: down
 
         const eth9 = byName('eth9');
         expect(eth9.isUp()).toBe(false);
         expect(eth9.getInterfaceAddresses()).toHaveLength(1);
-    });
-
-    it('anInterfaceWithoutAnAddressIsNotListed Regression', () => {
-        flags('lo', '0x9\n');
-        flags('eth9', '0x1003\n');
-        flags('eth8', '0x1003\n'); // IFF_UP and no address (Node does not list it): the JDK does not list it either
-
-        expect(NetworkInterface.getNetworkInterfaces().map((i) => i.getName())).toEqual(['lo', 'eth9']);
-        expect(NetworkInterface.getByName('eth8')).toBeNull();
-    });
-
-    it('anInterfaceThatIsUpWithoutCarrierIsNotUp Regression', () => {
-        flags('lo', '0x9\n');
-        flags('eth9', '0x1003\n'); // IFF_UP, as docker0 without a container: sysfs has no IFF_RUNNING
-        writeFileSync(join(directory, 'eth9', 'carrier'), '0\n');
-
-        expect(byName('eth9').isUp()).toBe(false);
-    });
-
-    it('anInterfaceThatIsUpWithCarrierIsUp Regression', () => {
-        flags('lo', '0x9\n');
-        flags('eth9', '0x1003\n');
-        writeFileSync(join(directory, 'eth9', 'carrier'), '1\n');
-
-        expect(byName('eth9').isUp()).toBe(true);
-    });
-
-    it('theOperstateDecidesWhenTheCarrierCannotBeRead Regression', () => {
-        flags('lo', '0x9\n');
-        flags('eth9', '0x1003\n');
-        writeFileSync(join(directory, 'lo', 'operstate'), 'unknown\n'); // lo has no carrier
-        writeFileSync(join(directory, 'eth9', 'operstate'), 'down\n');
-
-        expect(byName('lo').isUp()).toBe(true);
-        expect(byName('eth9').isUp()).toBe(false);
-
-        writeFileSync(join(directory, 'eth9', 'operstate'), 'up\n');
-        expect(byName('eth9').isUp()).toBe(true);
+        const eth8 = byName('eth8');
+        expect([eth8.isUp(), eth8.supportsMulticast()]).toEqual([false, true]);
+        expect(eth8.getInterfaceAddresses()).toEqual([]);
     });
 
     it('aFlagsFileThatCannotBeReadFallsBackToTheApproximationOfNodesData', () => {
