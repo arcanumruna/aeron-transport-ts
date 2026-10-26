@@ -12,6 +12,10 @@ import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { Aeron } from '../../src/client/Aeron.js';
+import type { ConcurrentPublication } from '../../src/client/ConcurrentPublication.js';
+import { ErrorCode } from '../../src/client/ErrorCode.js';
+import { RegistrationException } from '../../src/client/exceptions/RegistrationException.js';
 import { mulberry32 } from '../support/Random.js';
 import { driveUntil as driveUntilTurns } from '../support/SystemRig.js';
 
@@ -67,6 +71,42 @@ if (!interopAvailable) {
  */
 export function driveUntil(condition: () => boolean, what: string, capMs = 20_000): Promise<void> {
     return driveUntilTurns(condition, what, capMs, Number.MAX_SAFE_INTEGER);
+}
+
+/**
+ * `aeron.addPublication`, retried while the driver answers "found in CLOSING state, please retry" (error code
+ * RESOURCE_TEMPORARILY_UNAVAILABLE). Aeron's own contract (Java `DriverConductor` and C `aeron_driver_conductor`
+ * alike): the send channel endpoint of a channel whose last publication has just ended is closed by the sender, and an add
+ * for the same channel that arrives before that is refused for the caller to repeat. A test that closes a publication and
+ * adds another on the same channel straight away (the end of stream rows) is such a caller. Any other error is thrown, and
+ * the wait is the usual hard cap.
+ */
+export async function addPublicationWhenFree(
+    aeron: Aeron,
+    channel: string,
+    streamId: number,
+    capMs = 20_000,
+): Promise<ConcurrentPublication> {
+    let publication: ConcurrentPublication | null = null;
+    await driveUntil(
+        () => {
+            try {
+                publication = aeron.addPublication(channel, streamId) as ConcurrentPublication;
+                return true;
+            } catch (e) {
+                if (
+                    e instanceof RegistrationException &&
+                    e.errorCode() === ErrorCode.RESOURCE_TEMPORARILY_UNAVAILABLE
+                ) {
+                    return false;
+                }
+                throw e;
+            }
+        },
+        'the channel ' + channel + ' to be free for a new publication',
+        capMs,
+    );
+    return publication as unknown as ConcurrentPublication;
 }
 
 /** One line of JSON that a helper printed. */

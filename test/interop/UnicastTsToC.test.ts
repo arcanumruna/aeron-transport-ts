@@ -10,7 +10,7 @@ import type { SystemCounters } from '../../src/driver/status/SystemCounters.js';
 import type { MediaDriver } from '../../src/driver/MediaDriver.js';
 import { Producer, SystemNode, plan } from '../support/SystemRig.js';
 import { freeUdpPort } from '../support/Udp.js';
-import { InteropEnv, driveUntil, interopAvailable, interopSkipReason } from './InteropRig.js';
+import { InteropEnv, addPublicationWhenFree, driveUntil, interopAvailable, interopSkipReason } from './InteropRig.js';
 import type { ChildHandle, SubscriberSummary } from './InteropRig.js';
 
 const STREAM_ID = 1001;
@@ -311,7 +311,8 @@ describe.skipIf(!interopAvailable)(
                 const ended = await env.waitForEvent(sub, 'unavailable');
                 expect(ended).toMatchObject({ sessionId: firstSession, eos: true });
 
-                const next = node.aeron.addPublication(channel, STREAM_ID) as ConcurrentPublication;
+                // the first publication's send endpoint may still be closing: the driver then asks the caller to retry
+                const next = await addPublicationWhenFree(node.aeron, channel, STREAM_ID);
                 expect(next.sessionId()).not.toBe(firstSession);
                 await produce(next, SIZES_HERE, first, second);
                 const summary = await env.subscriberSummary(sub);
