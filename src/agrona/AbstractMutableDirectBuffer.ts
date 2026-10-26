@@ -27,7 +27,9 @@ import {
     Byte,
     ByteOrder,
     dataViewGetLong,
+    dataViewGetLongLE,
     dataViewSetLong,
+    dataViewSetLongLE,
     IllegalArgumentException,
     IndexOutOfBoundsException,
     Integer,
@@ -181,11 +183,12 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
             this.boundsCheck0(index, SIZE_OF_LONG);
         }
 
-        return dataViewGetLong(
-            this._dataView,
-            this._addressOffset + index,
-            undefined === byteOrder || IS_LITTLE_ENDIAN === byteOrder,
-        );
+        // the omitted `byteOrder` is Java's `getLong(index)`: the native order, through the small little endian reader
+        if (undefined === byteOrder) {
+            return dataViewGetLongLE(this._dataView, this._addressOffset + index);
+        }
+
+        return dataViewGetLong(this._dataView, this._addressOffset + index, IS_LITTLE_ENDIAN === byteOrder);
     }
 
     public getLongBigInt(index: number, byteOrder?: ByteOrder): bigint {
@@ -202,12 +205,11 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
     public putLong(index: number, value: number, byteOrder?: ByteOrder): void {
         this.ensureCapacity(index, SIZE_OF_LONG);
 
-        dataViewSetLong(
-            this._dataView,
-            this._addressOffset + index,
-            value,
-            undefined === byteOrder || IS_LITTLE_ENDIAN === byteOrder,
-        );
+        if (undefined === byteOrder) {
+            dataViewSetLongLE(this._dataView, this._addressOffset + index, value);
+        } else {
+            dataViewSetLong(this._dataView, this._addressOffset + index, value, IS_LITTLE_ENDIAN === byteOrder);
+        }
     }
 
     public putLongBigInt(index: number, value: bigint, byteOrder?: ByteOrder): void {
