@@ -24,6 +24,17 @@ const { CONTINUE, COMMIT } = ControlledFragmentHandler.Action;
 /** The term count at which the `LargePosition` cases start: a position of 2^40 for the 64 KiB terms. */
 const LARGE_TERM_COUNT = 2 ** 24;
 
+/**
+ * Interim allowance, in heap numbers per iteration, for the `LargePosition` cases (spec D16, as in
+ * `RingBufferHotPathAllocationTest`'s `LARGE_POSITION_HEAP_NUMBERS`). Above 2^31 a position is a double, and V8 boxes
+ * it into a heap number each time it crosses a call that is not inlined: the result of `offer` and of the append
+ * methods, `Position.get` and `setRelease`, and `getVolatile` of the position limit. Whether those calls are inlined
+ * depends on the JIT and on the host's load, so on CI the same loop allocates on some runs and not on others. The
+ * bound is the worst case measured with inlining off (`--no-turbo-inlining`): the fragmented case boxes about 3.3 per
+ * message, so 4. Issue #19 drives this down to 0; the position-0 cases keep 0.
+ */
+const LARGE_POSITION_HEAP_NUMBERS = 4;
+
 /** Keeps the values of the loops alive. */
 let sink = 0;
 
@@ -75,12 +86,16 @@ describe.each([
                 const start = r.image.position();
                 let read = 0;
 
-                await expectNoAllocation((n) => {
-                    for (let i = 0; i < n; i++) {
-                        produce(r, src, length);
-                        read += poll(r);
-                    }
-                }, ITERATIONS);
+                await expectNoAllocation(
+                    (n) => {
+                        for (let i = 0; i < n; i++) {
+                            produce(r, src, length);
+                            read += poll(r);
+                        }
+                    },
+                    ITERATIONS,
+                    0 === termCount ? 0 : LARGE_POSITION_HEAP_NUMBERS,
+                );
 
                 expect(read).toBeGreaterThan(0);
                 expect(r.image.position()).toBeGreaterThan(start);
