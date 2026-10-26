@@ -12,11 +12,23 @@ import { Publication } from '../../src/client/Publication.js';
 import type { Subscription } from '../../src/client/Subscription.js';
 import { MediaDriver } from '../../src/driver/MediaDriver.js';
 
-/** The most turns of the event loop a wait takes before it gives up. */
-export const MAX_TURNS = 5_000_000;
-
 /** The longest a wait takes before it gives up, in ms: real UDP needs real time, and a bounded wait. */
 export const WAIT_CAP_MS = 20_000;
+
+/**
+ * The least time one turn of the event loop takes, in ns: a turn awaits a `setImmediate`, which is never faster than
+ * this. It sizes the turn cap from the time cap, so that the time cap is the limit a slow or loaded host reaches, and
+ * the turn cap only guards a loop in which time does not pass.
+ */
+export const MIN_TURN_NS = 100;
+
+/** The most turns of the event loop a wait of `capMs` takes before it gives up: more than the time cap can allow. */
+export function maxTurnsFor(capMs: number): number {
+    return Math.ceil((capMs * 1_000_000) / MIN_TURN_NS);
+}
+
+/** The most turns of the event loop a wait takes before it gives up, by default. */
+export const MAX_TURNS = maxTurnsFor(WAIT_CAP_MS);
 
 /** A `MediaDriver` and an `Aeron` client connected to it, as an application of one process makes them. */
 export class SystemNode {
@@ -42,12 +54,15 @@ export class SystemNode {
     }
 }
 
-/** Turns of the event loop until the condition holds; fails at the cap of turns or of time. */
+/**
+ * Turns of the event loop until the condition holds; fails at the cap of time (`capMs`, the limit a slow host reaches) or
+ * of turns (`maxTurns`, by default {@link maxTurnsFor} the time cap, so it only guards a loop in which time stands still).
+ */
 export async function driveUntil(
     condition: () => boolean,
     what: string,
     capMs = WAIT_CAP_MS,
-    maxTurns = MAX_TURNS,
+    maxTurns = maxTurnsFor(capMs),
 ): Promise<void> {
     const deadline = performance.now() + capMs;
     for (let turn = 0; turn < maxTurns; turn++) {
@@ -62,7 +77,7 @@ export async function driveUntil(
         await new Promise<void>((resolve) => setImmediate(resolve));
     }
 
-    throw new Error('no ' + what + ' after ' + maxTurns + ' turns');
+    throw new Error('no ' + what + ' after the cap of ' + maxTurns + ' turns (' + capMs + ' ms cap not reached)');
 }
 
 const SEQUENCE_LENGTH = 4;
