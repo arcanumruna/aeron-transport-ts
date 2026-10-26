@@ -43,8 +43,8 @@ const { computePosition } = LogBufferDescriptor;
 export class Header {
     // The Java fields share their names with the accessors, so here they carry an underscore.
     private _context: unknown;
-    private _positionBitsToShift: number;
-    private _initialTermId: number;
+    private _positionBitsToShift: number = 0;
+    private _initialTermId: number = 0;
     private _offset = 0;
     private _buffer!: DirectBuffer;
     private _fragmentedFrameLength: number = NULL_VALUE;

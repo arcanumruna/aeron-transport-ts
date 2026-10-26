@@ -28,7 +28,7 @@ import { IllegalArgumentException } from '../jdk.js';
  */
 export class Int2IntCounterMap {
     private readonly counters = new Map<number, number>();
-    private readonly initial: number;
+    private readonly initial: number = 0;
 
     /**
      * Construct a map with the given initial value.

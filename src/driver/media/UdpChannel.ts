@@ -97,11 +97,11 @@ export class UdpChannel {
     private readonly _isMulticast: boolean;
     private readonly _hasMulticastTtl: boolean;
     private readonly _hasTag: boolean;
-    private readonly _multicastTtl: number;
-    private readonly _socketRcvbufLength: number;
-    private readonly _socketSndbufLength: number;
-    private readonly _receiverWindowLength: number;
-    private readonly _tag: number;
+    private readonly _multicastTtl: number = 0;
+    private readonly _socketRcvbufLength: number = 0;
+    private readonly _socketSndbufLength: number = 0;
+    private readonly _receiverWindowLength: number = 0;
+    private readonly _tag: number = 0;
     private readonly _remoteData: InetSocketAddress;
     private readonly _localData: InetSocketAddress;
     private readonly _remoteControl: InetSocketAddress;
@@ -111,8 +111,8 @@ export class UdpChannel {
     private readonly _localInterface: NetworkInterface | null;
     private readonly _protocolFamily: ProtocolFamily;
     private readonly _channelUri: ChannelUri;
-    private readonly _channelReceiveTimestampOffset: number;
-    private readonly _channelSendTimestampOffset: number;
+    private readonly _channelReceiveTimestampOffset: number = 0;
+    private readonly _channelSendTimestampOffset: number = 0;
     private readonly _groupTag: number | null;
     private readonly _nakDelayNs: number | null;
 

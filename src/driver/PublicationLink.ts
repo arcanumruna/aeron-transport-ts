@@ -34,7 +34,7 @@ export interface LinkedPublication {
  * Tracks an Aeron client interest registration in a {@link NetworkPublication} or {@link IpcPublication}.
  */
 export class PublicationLink implements DriverManagedResource {
-    private readonly _registrationId: number;
+    private readonly _registrationId: number = 0;
     private readonly publication: LinkedPublication;
     private readonly client: AeronClient;
     private reachedEndOfLife = false;

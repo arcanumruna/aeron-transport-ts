@@ -57,7 +57,7 @@ const EMPTY_IMAGES: PublicationImage[] = [];
  * with an optional `sessionId`.
  */
 export class Receiver implements Agent {
-    private readonly reResolutionCheckIntervalNs: number;
+    private readonly reResolutionCheckIntervalNs: number = 0;
     private reResolutionDeadlineNs = 0;
     private readonly dataTransportPoller: DataTransportPoller;
     private readonly commandQueue: OneToOneConcurrentArrayQueue<() => void>;

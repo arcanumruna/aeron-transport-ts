@@ -103,17 +103,17 @@ export class NetworkPublication implements RetransmitSender, DriverManagedResour
     public static readonly State = State;
 
     // conductor fields
-    public cleanPosition: number;
-    public timeOfLastActivityNs: number;
-    public lastSenderPosition: number;
+    public cleanPosition: number = 0;
+    public timeOfLastActivityNs: number = 0;
+    public lastSenderPosition: number = 0;
     public refCount = 0;
     public spyPositions: ReadablePosition[] = EMPTY_POSITIONS;
     public maxSpyPosition = 0;
     private readonly untetheredSubscriptions: UntetheredSubscription[] = [];
 
     // sender fields
-    private timeOfLastDataOrHeartbeatNs: number;
-    private timeOfLastSetupNs: number;
+    private timeOfLastDataOrHeartbeatNs: number = 0;
+    private timeOfLastSetupNs: number = 0;
     private _timeOfLastStatusMessageNs = 0;
     private timeOfLastUpdateReceivers = 0;
     private trackSenderLimits = false;
@@ -121,25 +121,25 @@ export class NetworkPublication implements RetransmitSender, DriverManagedResour
     private hasInitialConnection = false;
     private endpointAddress: InetSocketAddress | null = null;
 
-    private readonly _registrationId: number;
-    private readonly unblockTimeoutNs: number;
-    private readonly connectionTimeoutNs: number;
-    private readonly lingerTimeoutNs: number;
-    private readonly untetheredWindowLimitTimeoutNs: number;
-    private readonly untetheredLingerTimeoutNs: number;
-    private readonly untetheredRestingTimeoutNs: number;
-    private readonly _tag: number;
-    private readonly _responseCorrelationId: number;
-    private readonly positionBitsToShift: number;
-    private readonly _initialTermId: number;
-    private readonly _startingTermId: number;
-    private readonly _startingTermOffset: number;
-    private readonly _termBufferLength: number;
-    private readonly termLengthMask: number;
-    private readonly _mtuLength: number;
-    private readonly termWindowLength: number;
-    private readonly _sessionId: number;
-    private readonly _streamId: number;
+    private readonly _registrationId: number = 0;
+    private readonly unblockTimeoutNs: number = 0;
+    private readonly connectionTimeoutNs: number = 0;
+    private readonly lingerTimeoutNs: number = 0;
+    private readonly untetheredWindowLimitTimeoutNs: number = 0;
+    private readonly untetheredLingerTimeoutNs: number = 0;
+    private readonly untetheredRestingTimeoutNs: number = 0;
+    private readonly _tag: number = 0;
+    private readonly _responseCorrelationId: number = 0;
+    private readonly positionBitsToShift: number = 0;
+    private readonly _initialTermId: number = 0;
+    private readonly _startingTermId: number = 0;
+    private readonly _startingTermOffset: number = 0;
+    private readonly _termBufferLength: number = 0;
+    private readonly termLengthMask: number = 0;
+    private readonly _mtuLength: number = 0;
+    private readonly termWindowLength: number = 0;
+    private readonly _sessionId: number = 0;
+    private readonly _streamId: number = 0;
     private readonly _isExclusive: boolean;
     private readonly signalEos: boolean;
     private readonly isResponse: boolean;

@@ -44,11 +44,11 @@ const {
  */
 export class BroadcastTransmitter {
     private readonly buffer: AtomicBuffer;
-    private readonly _capacity: number;
-    private readonly _maxMsgLength: number;
-    private readonly tailIntentCountIndex: number;
-    private readonly tailCounterIndex: number;
-    private readonly latestCounterIndex: number;
+    private readonly _capacity: number = 0;
+    private readonly _maxMsgLength: number = 0;
+    private readonly tailIntentCountIndex: number = 0;
+    private readonly tailCounterIndex: number = 0;
+    private readonly latestCounterIndex: number = 0;
 
     /**
      * Construct a new broadcast transmitter based on an underlying {@link AtomicBuffer}.

@@ -36,15 +36,15 @@ const { HEADER_LENGTH, PADDING_MSG_TYPE_ID, RECORD_ALIGNMENT, lengthOffset, msgO
  * experienced; see {@link validate}.
  */
 export class BroadcastReceiver {
-    private cursor: number;
-    private nextRecord: number;
-    private recordOffset: number;
+    private cursor: number = 0;
+    private nextRecord: number = 0;
+    private recordOffset: number = 0;
 
-    private readonly _capacity: number;
-    private readonly tailIntentCounterIndex: number;
-    private readonly tailCounterIndex: number;
+    private readonly _capacity: number = 0;
+    private readonly tailIntentCounterIndex: number = 0;
+    private readonly tailCounterIndex: number = 0;
 
-    private readonly latestCounterIndex: number;
+    private readonly latestCounterIndex: number = 0;
     private readonly _buffer: AtomicBuffer;
 
     // Java's AtomicLong, written with setOpaque and read with getOpaque so that another thread can monitor it. A JS

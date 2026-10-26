@@ -28,7 +28,7 @@ type IpV6State = 'START_ADDR' | 'HOST' | 'SCOPE' | 'END_ADDR' | 'PORT';
 
 class ParseResult {
     public readonly host: string;
-    public readonly port: number;
+    public readonly port: number = 0;
     public constructor(host: string, port: number) {
         this.host = host;
         this.port = port;

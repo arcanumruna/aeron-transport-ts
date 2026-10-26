@@ -113,8 +113,8 @@ export class ErrorCode {
     static readonly ERROR_CODES: ErrorCode[] = ErrorCode.newErrorCodes();
 
     private readonly _name: string;
-    private readonly _ordinal: number;
-    private readonly _value: number;
+    private readonly _ordinal: number = 0;
+    private readonly _value: number = 0;
 
     private constructor(name: string, value: number) {
         this._name = name;

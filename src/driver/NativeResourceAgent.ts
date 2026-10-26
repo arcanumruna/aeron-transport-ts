@@ -51,7 +51,7 @@ export class NativeResourceAgent implements Agent {
     private readonly nameResolver: TimeTrackingNameResolver;
     private readonly taskQueue: OneToOneConcurrentArrayQueue<Task>;
     private readonly freeFailsCounter: AtomicCounter;
-    private readonly freeLimit: number;
+    private readonly freeLimit: number = 0;
     private readonly logFactory: LogFactory;
     private readonly countedErrorHandler: CountedErrorHandler;
     private wakeUp: (() => void) | null = null;

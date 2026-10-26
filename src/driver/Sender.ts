@@ -56,9 +56,9 @@ export class Sender implements Agent {
 
     private networkPublications: NetworkPublication[] = [];
 
-    private readonly statusMessageReadTimeoutNs: number;
-    private readonly reResolutionCheckIntervalNs: number;
-    private readonly dutyCycleRatio: number;
+    private readonly statusMessageReadTimeoutNs: number = 0;
+    private readonly reResolutionCheckIntervalNs: number = 0;
+    private readonly dutyCycleRatio: number = 0;
     private readonly controlTransportPoller: ControlTransportPoller;
     private readonly commandQueue: OneToOneConcurrentArrayQueue<() => void>;
     private readonly totalBytesSent: AtomicCounter;

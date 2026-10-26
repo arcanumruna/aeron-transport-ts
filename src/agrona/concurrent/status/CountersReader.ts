@@ -221,7 +221,7 @@ export class CountersReader {
     /**
      * Max counter ID.
      */
-    protected readonly _maxCounterId: number;
+    protected readonly _maxCounterId: number = 0;
 
     /**
      * Meta-data buffer.

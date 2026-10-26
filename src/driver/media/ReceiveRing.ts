@@ -39,8 +39,8 @@ export class ReceiveRing {
     private readonly buffers: (Uint8Array | null)[];
     private readonly lengths: Int32Array;
     private readonly addresses: (InetSocketAddress | null)[];
-    private readonly mask: number;
-    private readonly byteBudget: number;
+    private readonly mask: number = 0;
+    private readonly byteBudget: number = 0;
     private head = 0;
     private tail = 0;
     private bytes = 0;

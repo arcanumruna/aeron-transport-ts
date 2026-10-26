@@ -46,7 +46,7 @@ export class SessionState {
     public static readonly NO_INTEREST: SessionState = new SessionState('NO_INTEREST');
 
     private readonly _name: string;
-    private readonly _ordinal: number;
+    private readonly _ordinal: number = 0;
 
     private constructor(name: string) {
         this._name = name;
@@ -140,7 +140,7 @@ export class DataPacketDispatcher {
     private readonly streamInterestByIdMap = new Int2ObjectHashMap<StreamInterest>();
     private readonly conductorProxy: DriverConductorProxy;
     private readonly receiver: Receiver;
-    private readonly streamSessionLimit: number;
+    private readonly streamSessionLimit: number = 0;
 
     public constructor(conductorProxy: DriverConductorProxy, receiver: Receiver, streamSessionLimit: number) {
         this.conductorProxy = conductorProxy;

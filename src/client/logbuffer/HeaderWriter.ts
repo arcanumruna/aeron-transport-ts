@@ -42,11 +42,11 @@ const { FRAME_LENGTH_FIELD_OFFSET, VERSION_FIELD_OFFSET } = HeaderFlyweight;
  */
 export class HeaderWriter {
     /** The `int` of the default header at the version offset: version, flags and type. */
-    public readonly versionFlagsType: number;
+    public readonly versionFlagsType: number = 0;
     /** The session id of the default header. */
-    public readonly sessionId: number;
+    public readonly sessionId: number = 0;
     /** The stream id of the default header. */
-    public readonly streamId: number;
+    public readonly streamId: number = 0;
 
     /**
      * Construct from the default header of a stream. (The constructor of Java that takes the three `long` values is

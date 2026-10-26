@@ -51,8 +51,8 @@ export interface SubscriptionLinkImage {
  * their name with an accessor are protected with a leading underscore (`_registrationId`, ...); use the accessor.
  */
 export abstract class SubscriptionLink implements DriverManagedResource {
-    protected readonly _registrationId: number;
-    protected readonly _streamId: number;
+    protected readonly _registrationId: number = 0;
+    protected readonly _streamId: number = 0;
     protected readonly _isSparse: boolean;
     protected readonly _isTether: boolean;
     protected readonly _isResponse: boolean;
@@ -62,7 +62,7 @@ export abstract class SubscriptionLink implements DriverManagedResource {
     protected readonly _aeronClient: AeronClient;
     /** Keyed by identity (Java: `IdentityHashMap`): a JS `Map` compares object keys by identity. */
     public readonly positionBySubscribableMap: Map<Subscribable, ReadablePosition>;
-    protected _sessionId: number;
+    protected _sessionId: number = 0;
     protected _hasSessionId: boolean;
     protected reachedEndOfLife = false;
 

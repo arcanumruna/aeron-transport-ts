@@ -430,7 +430,12 @@ measured it at 134 to 141 B/msg in the 64 B stream; it took out the `UnsafeBuffe
 each duty cycle (D114), and the column went to 31.8 (the 64 B stream row above was measured once with `--runs 1`, the
 others are from before the change). What is left in `src/` is the heap numbers of D13: the `nowNs` that `Sender.doWork`,
 `Receiver.doWork` and `DriverConductor.doWork` pass on (7 to 8 B/msg each) and `ClientConductor.service` (4). The
-rest of a send is node's own (about 47 B per datagram, D113). The figures are per message of a run, so they grow with the
+rest of a send is node's own (about 47 B per datagram, D113). Issue #52 then found that the times and positions
+stored in the fields that were declared with no number (`PublicationImage.timeOfLastPacketNs`, `NetworkPublication.timeOfLastDataOrHeartbeatNs`,
+`ClientConductor.timeOfLastServiceNs`, ... 291 fields, D122) allocated a heap number per store, and the column of a later run
+went from 48.4 to 36.8 B/msg at 64 B and from 282.7 to 245.2 at 1376 B; what is left is the `nowNs` of each duty cycle (D112)
+and node's own work attributed to the runner's functions. `EndToEndAllocationTest` runs the whole path over a loopback fake
+of `dgram` and bounds the bytes per step. The figures are per message of a run, so they grow with the
 datagrams per message (1376 B) and with the cycles per message (the round trip spins the loop many times for each
 message). Recorded, not a gate. The minor
 collections are rare (0.02 per 1000 messages at 64 B).

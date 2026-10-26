@@ -25,7 +25,7 @@ import { stringHashCode } from '../agrona/jdkUtil.js';
  */
 export class SessionKey {
     public sessionId = 0;
-    public readonly streamId: number;
+    public readonly streamId: number = 0;
     public readonly channel: string;
 
     public constructor(streamId: number, channel: string);

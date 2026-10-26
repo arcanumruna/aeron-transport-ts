@@ -54,10 +54,10 @@ import type { IntObjPredicate } from './IntObjPredicate.js';
 export class Int2ObjectHashMap<V> {
     static readonly MIN_CAPACITY = 8;
 
-    private readonly loadFactorValue: number;
-    private resizeThresholdValue: number;
+    private readonly loadFactorValue: number = 0;
+    private resizeThresholdValue: number = 0;
     /** @internal accessed by the nested classes, which are in this file */
-    public _size: number;
+    public _size: number = 0;
     /** @internal */
     public readonly _shouldAvoidAllocation: boolean;
 
@@ -1417,7 +1417,7 @@ export class Int2ObjectHashMapEntryIterator<V>
  */
 export class Int2ObjectHashMapMapEntry<V> implements Entry<number, V | null> {
     private readonly map: Int2ObjectHashMap<V>;
-    private readonly k: number;
+    private readonly k: number = 0;
     private readonly v: V | null;
 
     public constructor(map: Int2ObjectHashMap<V>, k: number, v: V | null) {

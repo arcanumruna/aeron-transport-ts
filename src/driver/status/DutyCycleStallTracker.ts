@@ -27,7 +27,7 @@ import { DutyCycleTracker } from '../DutyCycleTracker.js';
 export class DutyCycleStallTracker extends DutyCycleTracker {
     private readonly _maxCycleTime: AtomicCounter;
     private readonly _cycleTimeThresholdExceededCount: AtomicCounter;
-    private readonly _cycleTimeThresholdNs: number;
+    private readonly _cycleTimeThresholdNs: number = 0;
 
     /**
      * Create a tracker to track max cycle time and excesses of a threshold.

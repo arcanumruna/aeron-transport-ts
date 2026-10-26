@@ -62,13 +62,13 @@ export class ManyToOneRingBuffer implements RingBuffer {
      */
     public static readonly INSUFFICIENT_CAPACITY: number = INSUFFICIENT_CAPACITY;
 
-    private readonly _capacity: number;
-    private readonly _maxMsgLength: number;
-    private readonly tailPositionIndex: number;
-    private readonly headCachePositionIndex: number;
-    private readonly headPositionIndex: number;
-    private readonly correlationIdCounterIndex: number;
-    private readonly consumerHeartbeatIndex: number;
+    private readonly _capacity: number = 0;
+    private readonly _maxMsgLength: number = 0;
+    private readonly tailPositionIndex: number = 0;
+    private readonly headCachePositionIndex: number = 0;
+    private readonly headPositionIndex: number = 0;
+    private readonly correlationIdCounterIndex: number = 0;
+    private readonly consumerHeartbeatIndex: number = 0;
     private readonly _buffer: AtomicBuffer;
 
     /**

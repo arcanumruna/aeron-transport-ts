@@ -88,29 +88,29 @@ export abstract class Publication {
     // The fields of Java that are package-private and that share a name with a method have a leading underscore
     // (spec D80). They are public here, `@internal`, for the conductor and the tests.
     /** @internal package-private in Java */
-    public readonly _originalRegistrationId: number;
+    public readonly _originalRegistrationId: number = 0;
     /** @internal package-private in Java */
-    public readonly _registrationId: number;
+    public readonly _registrationId: number = 0;
     /** @internal package-private in Java */
-    public readonly _maxPossiblePosition: number;
+    public readonly _maxPossiblePosition: number = 0;
     /** @internal package-private in Java */
-    public readonly _channelStatusId: number;
+    public readonly _channelStatusId: number = 0;
     /** @internal package-private in Java */
-    public readonly _streamId: number;
+    public readonly _streamId: number = 0;
     /** @internal package-private in Java */
-    public readonly _sessionId: number;
+    public readonly _sessionId: number = 0;
     /** @internal package-private in Java */
-    public readonly _maxMessageLength: number;
+    public readonly _maxMessageLength: number = 0;
     /** @internal package-private in Java */
-    public readonly maxFramedLength: number;
+    public readonly maxFramedLength: number = 0;
     /** @internal package-private in Java */
-    public readonly _initialTermId: number;
+    public readonly _initialTermId: number = 0;
     /** @internal package-private in Java */
-    public readonly _maxPayloadLength: number;
+    public readonly _maxPayloadLength: number = 0;
     /** @internal package-private in Java */
-    public readonly _positionBitsToShift: number;
+    public readonly _positionBitsToShift: number = 0;
     /** @internal package-private in Java */
-    public readonly _termBufferLength: number;
+    public readonly _termBufferLength: number = 0;
     /** @internal package-private in Java: `volatile boolean isClosed`, read by {@link isClosed} */
     public _isClosed: boolean = false;
     /** @internal package-private in Java: `revokeOnClose`, read by the conductor */

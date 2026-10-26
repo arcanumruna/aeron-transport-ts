@@ -66,7 +66,7 @@ export class DriverEventsAdapter implements MessageHandler {
     private readonly receiver: CopyBroadcastReceiver;
     private readonly conductor: ClientConductor;
     private readonly asyncCommandIdSet: LongHashSet;
-    private readonly _clientId: number;
+    private readonly _clientId: number = 0;
     private activeCorrelationId = 0;
     private _receivedCorrelationId = 0;
     private _isInvalid = false;
