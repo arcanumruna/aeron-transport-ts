@@ -21,6 +21,8 @@ const BURST = 2_000;
 /** The most datagrams `offHostBurst` sends while it waits for the kernel send buffer to fill. */
 const BURST_CAP = 50_000;
 const MTU_PAYLOAD = 1_400;
+/** A small SO_SNDBUF (Linux doubles it and enforces a floor), so a few datagrams fill the kernel buffer on any host. */
+const SMALL_SNDBUF = 4_096;
 
 /** The number of datagrams libuv reads from a socket in one loop iteration (`uv__udp_recvmsg`: 32 messages). */
 const UV_RECV_BATCH = 32;
@@ -35,6 +37,7 @@ function datagram(text: string): Buffer {
  */
 function offHostBurst(socket: Socket, ctx: TestContext): number {
     socket.bind(0, '0.0.0.0');
+    socket.setSendBufferSize(SMALL_SNDBUF);
     const chunk = Buffer.alloc(MTU_PAYLOAD);
     try {
         // synchronously, so the kernel cannot drain the buffer while it fills: it is full after a few hundred datagrams
@@ -101,7 +104,7 @@ describe('dgram contract (spec 4.2)', () => {
 
     // N3: with the kernel send buffer full, send() does not fail, libuv queues the datagram without limit and keeps a
     // reference to the caller's buffer. Needs a route off the host.
-    it('N3 a full kernel send buffer queues datagrams without limit', (ctx) => {
+    it('N3 a full kernel send buffer queues datagrams without limit', async (ctx) => {
         const sender = newSocket();
         const queued = offHostBurst(sender, ctx);
 
@@ -122,7 +125,9 @@ describe('dgram contract (spec 4.2)', () => {
         tail.fill(0x42);
         expect(sender.getSendQueueCount()).toBe(countBefore + 1);
         expect(sender.getSendQueueSize()).toBe(sizeBefore + MTU_PAYLOAD);
-        expect(completed).toBe(0); // still queued behind the burst, not sent
+        // a send callback never runs synchronously, so look one loop turn later: still queued behind the burst, not sent
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(completed).toBe(0);
     });
 
     // N4: a send error arrives only through the callback, on a later tick; with no callback it is dropped silently.
