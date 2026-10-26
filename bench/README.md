@@ -271,6 +271,24 @@ three passed (0.982, 1.017, 0.999) and the resend bench failed (1.080). Because 
 T1, T4 and the merge do not change the resend path. A second 15-pair run of d08decb against `origin/main` gave 0.972.
 No step regresses, so the single 1.080 was noise.
 
+### UnsafeBuffer int accessors (issue #8)
+
+`npm run bench:micro -- --file unsafebuffer`, 2026-10-26, Node v22.22.0, same host (4 cores, shared with other builds, so
+indicative only). One operation of the first two benches is 16 `putInt` and 16 `getInt` at distinct indices with the
+default `byteOrder`; the other two are `TermRebuilder.insert` of a 32 byte frame (9 `getInt`, 8 `putInt`, one release
+store). Median of 6 runs each, base and candidate interleaved (ABAB), ns per operation. The base is the tree before the
+fix: `boundsCheck0` called `Objects.checkFromIndexSize` (a template string in its throw, counted against the inlining
+budget of every caller), and `byteOrder` was a default parameter compared with `ByteOrder.LITTLE_ENDIAN`. The candidate
+tests the bounds inline, throws from a cold function, and takes an omitted `byteOrder` as the native order without
+loading it (Java has the two overloads).
+
+| Bench                                                  | base ns/op | candidate ns/op | ratio |
+| ------------------------------------------------------ | ---------- | --------------- | ----- |
+| UnsafeBuffer 16 putInt + 16 getInt (ArrayBuffer)       | 137.2      | 78.6            | 0.57  |
+| UnsafeBuffer 16 putInt + 16 getInt (SharedArrayBuffer) | 180.4      | 81.5            | 0.45  |
+| TermRebuilder.insert 32 B (ArrayBuffer)                | 118.7      | 94.3            | 0.79  |
+| TermRebuilder.insert 32 B (SharedArrayBuffer)          | 133.8      | 110.0           | 0.82  |
+
 ### Receiver (T16)
 
 `bench/micro/receiver.bench.ts`: `Receiver.doWork` on a real `PublicationImage` over an in-memory log (`SharedArrayBuffer`),
