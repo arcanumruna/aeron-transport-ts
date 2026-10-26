@@ -26,7 +26,10 @@ const sum = new Int32Array(1);
 
 /** A handler that only reads what it is given; `onAssembled` runs for each delivery of 3 * PAYLOAD bytes. */
 class SumHandler {
-    public constructor(private readonly onAssembled: () => void = () => {}) {}
+    private readonly onAssembled: () => void;
+    public constructor(onAssembled: () => void = () => {}) {
+        this.onAssembled = onAssembled;
+    }
 
     public onFragment(buffer: DirectBuffer, offset: number, length: number, header: Header): void {
         sum[0] = (sum[0]! + length + offset + header.sessionId()) | 0;
@@ -37,7 +40,10 @@ class SumHandler {
 }
 
 class SumControlledHandler {
-    public constructor(private readonly onAssembled: () => void = () => {}) {}
+    private readonly onAssembled: () => void;
+    public constructor(onAssembled: () => void = () => {}) {
+        this.onAssembled = onAssembled;
+    }
 
     public onFragment(buffer: DirectBuffer, offset: number, length: number, header: Header): Action {
         sum[0] = (sum[0]! + length + offset + header.sessionId()) | 0;

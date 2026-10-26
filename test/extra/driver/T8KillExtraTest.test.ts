@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { DutyCycleTracker } from '../../../src/driver/DutyCycleTracker.js';
 import { DefaultNameResolver } from '../../../src/driver/DefaultNameResolver.js';
 import { TimeTrackingNameResolver } from '../../../src/driver/TimeTrackingNameResolver.js';
 import type { NameResolver } from '../../../src/driver/NameResolver.js';
@@ -22,11 +23,11 @@ describe('T8KillExtraTest', () => {
     });
     it('M21 rejectsDoubleColonWithEightGroups', () => {
         const e = assertThrowsExactly(UnknownHostException, () => InetAddress.getByName('1:2:3:4::5:6:7:8'));
-        expect(e.message).toBe('1:2:3:4::5:6:7:8: invalid IPv6 address');
+        expect(e.message).toBe('1:2:3:4::5:6:7:8: invalid IPv6 address literal');
     });
     it('M29 emptyBrackets', () => {
         const e = assertThrowsExactly(UnknownHostException, () => InetAddress.getByName('[]'));
-        expect(e.message).toBe('[]: invalid IPv6 address');
+        expect(e.message).toBe('[]: invalid IPv6 address literal');
     });
     it('M33 ipV4TailAfterSixGroups', () => {
         expect(InetAddress.getByName('1:2:3:4:5:6:1.2.3.4').getHostAddress()).toBe('1:2:3:4:5:6:102:304');
@@ -35,10 +36,7 @@ describe('T8KillExtraTest', () => {
         const r = new TimeTrackingNameResolver(
             new DefaultNameResolver(),
             { nanoTime: () => 0 },
-            {
-                update: () => {},
-                measureAndUpdate: () => {},
-            },
+            new DutyCycleTracker(),
         );
         expect(r.name()).toBe('TimeTracking(DefaultNameResolver)');
         expect(r.roleName()).toBe('TimeTracking(DefaultNameResolver)');

@@ -4,7 +4,15 @@
 import type { RemoteInfo, Socket } from 'node:dgram';
 import { describe, expect, it } from 'vitest';
 import type { TestContext } from 'vitest';
-import { Collector, closeSocket, freeUdpPort, nextEvent, newSocket, waitUntil } from '../support/Udp.js';
+import {
+    Collector,
+    closeSocket,
+    freeUdpPort,
+    nextEvent,
+    newSocket,
+    skipUnlessRequired,
+    waitUntil,
+} from '../support/Udp.js';
 
 /** An address that no host owns (TEST-NET-1, RFC 5737), so a datagram to it goes to the default route if there is one. */
 const OFF_HOST = '192.0.2.1';
@@ -13,6 +21,11 @@ const BURST = 2_000;
 /** The most datagrams `offHostBurst` sends while it waits for the kernel send buffer to fill. */
 const BURST_CAP = 50_000;
 const MTU_PAYLOAD = 1_400;
+/** A small SO_SNDBUF (Linux doubles it and enforces a floor), so a few datagrams fill the kernel buffer on any host. */
+const SMALL_SNDBUF = 4_096;
+
+/** The number of datagrams libuv reads from a socket in one loop iteration (`uv__udp_recvmsg`: 32 messages). */
+const UV_RECV_BATCH = 32;
 
 function datagram(text: string): Buffer {
     return Buffer.from(text, 'latin1');
@@ -20,10 +33,11 @@ function datagram(text: string): Buffer {
 
 /**
  * Sends datagrams to the off-host address from an unconnected socket until BURST of them are queued. Returns the queue count, or skips the
- * test, with the reason logged, when the host has no route off the host (the sends fail instead of queueing).
+ * test (fails it under AERON_TS_REQUIRE_NET=1) when the host has no route off the host (the sends fail instead of queueing).
  */
 function offHostBurst(socket: Socket, ctx: TestContext): number {
     socket.bind(0, '0.0.0.0');
+    socket.setSendBufferSize(SMALL_SNDBUF);
     const chunk = Buffer.alloc(MTU_PAYLOAD);
     try {
         // synchronously, so the kernel cannot drain the buffer while it fills: it is full after a few hundred datagrams
@@ -32,15 +46,13 @@ function offHostBurst(socket: Socket, ctx: TestContext): number {
         }
     } catch (e) {
         const reason = 'no route off the host (' + (e as Error).message + ')';
-        console.warn('dgramContract: skipping, ' + reason);
-        ctx.skip(reason);
+        skipUnlessRequired(ctx, reason);
     }
 
     const queued = socket.getSendQueueCount();
     if (0 === queued) {
         const reason = 'no route off the host (the kernel took all ' + BURST_CAP + ' datagrams or refused them)';
-        console.warn('dgramContract: skipping, ' + reason);
-        ctx.skip(reason);
+        skipUnlessRequired(ctx, reason);
     }
 
     return queued;
@@ -92,7 +104,7 @@ describe('dgram contract (spec 4.2)', () => {
 
     // N3: with the kernel send buffer full, send() does not fail, libuv queues the datagram without limit and keeps a
     // reference to the caller's buffer. Needs a route off the host.
-    it('N3 a full kernel send buffer queues datagrams without limit', (ctx) => {
+    it('N3 a full kernel send buffer queues datagrams without limit', async (ctx) => {
         const sender = newSocket();
         const queued = offHostBurst(sender, ctx);
 
@@ -100,6 +112,22 @@ describe('dgram contract (spec 4.2)', () => {
         // (the measurement was 1,997 of 2,000 on the first host; here the loop runs until BURST are queued).
         expect(queued).toBeGreaterThanOrEqual(BURST);
         expect(sender.getSendQueueSize()).toBeGreaterThan(0);
+
+        // Each further send queues exactly one request that holds its datagram's bytes (queue count +1, queue size
+        // +length), and changing the caller's buffer afterwards neither errors nor changes that accounting: libuv keeps
+        // its own reference to the buffer, so the caller may not reuse it until the callback (spec D2, which is why the
+        // transport sends from a slot that it holds back).
+        const countBefore = sender.getSendQueueCount();
+        const sizeBefore = sender.getSendQueueSize();
+        const tail = Buffer.alloc(MTU_PAYLOAD, 0x41);
+        let completed = 0;
+        sender.send(tail, 0, tail.length, OFF_HOST_PORT, OFF_HOST, () => completed++);
+        tail.fill(0x42);
+        expect(sender.getSendQueueCount()).toBe(countBefore + 1);
+        expect(sender.getSendQueueSize()).toBe(sizeBefore + MTU_PAYLOAD);
+        // a send callback never runs synchronously, so look one loop turn later: still queued behind the burst, not sent
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(completed).toBe(0);
     });
 
     // N4: a send error arrives only through the callback, on a later tick; with no callback it is dropped silently.
@@ -220,7 +248,10 @@ describe('dgram contract (spec 4.2)', () => {
         expect(new Set(rinfos).size).toBe(rinfos.length); // an rinfo object per message
         // the first buffer still holds its datagram: the handler owns it
         expect(receiver.bytes(0)).toMatch(/^m\d{4}$/);
-        expect(Math.max(...perTurn)).toBeGreaterThan(1); // delivered in bursts
+        // delivered in bursts of exactly libuv's batch of 32 datagrams per read loop, never more (a vacuous "> 1" would
+        // pass for a burst of two)
+        expect(Math.max(...perTurn)).toBe(UV_RECV_BATCH);
+        expect(perTurn.every((n) => n <= UV_RECV_BATCH)).toBe(true);
     });
 
     // N8: close() cancels queued sends; their callbacks get ECANCELED. Needs a route off the host.

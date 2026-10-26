@@ -300,6 +300,7 @@ export class ReceiverRig {
         };
         conductorProxy.driverConductor(target as DriverConductor);
         const conductorFake: Partial<DriverConductor> = {
+            receiverQueueHasRoom: () => true,
             transitionToLinger: (image) => {
                 this.conductorCalls.transitionToLinger.push(image);
             },

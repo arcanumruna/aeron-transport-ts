@@ -52,10 +52,12 @@ class CountingImage implements DispatcherImage {
     public destinations = 0;
     public rtts = 0;
 
-    public constructor(
-        private readonly session: number,
-        private readonly stream: number,
-    ) {}
+    private readonly session: number;
+    private readonly stream: number;
+    public constructor(session: number, stream: number) {
+        this.session = session;
+        this.stream = stream;
+    }
 
     public sessionId(): number {
         return this.session;

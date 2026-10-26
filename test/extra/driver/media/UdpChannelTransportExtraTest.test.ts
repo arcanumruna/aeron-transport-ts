@@ -39,7 +39,14 @@ import { WildcardPortManager } from '../../../../src/driver/media/WildcardPortMa
 import { SystemCounterDescriptor } from '../../../../src/driver/status/SystemCounterDescriptor.js';
 import { expectNoAllocation } from '../../../support/Allocation.js';
 import { assertThrows } from '../../../support/Assertions.js';
-import { Collector, FakeSocket, freeUdpPort, hasIpv6Loopback, waitUntil } from '../../../support/Udp.js';
+import {
+    Collector,
+    FakeSocket,
+    freeUdpPort,
+    hasIpv6Loopback,
+    skipUnlessRequired,
+    waitUntil,
+} from '../../../support/Udp.js';
 
 const LOOPBACK = '127.0.0.1';
 const RECEIVE_CAPACITY = 2048;
@@ -226,6 +233,19 @@ describe('ReceiveRing', () => {
         bytes.advance(); // frees 60
         expect(bytes.byteSize()).toBe(40);
         expect(bytes.offer(new Uint8Array(60), 60, address)).toBe(true);
+    });
+
+    it('acceptsOneOversizeDatagramIntoAnEmptyRingRegression', () => {
+        const ring = new ReceiveRing(100, 8);
+        expect(ring.offer(new Uint8Array(500), 500, address)).toBe(true);
+        expect(ring.size()).toBe(1);
+        expect(ring.offer(new Uint8Array(1), 1, address)).toBe(false); // over budget and not empty
+        ring.advance();
+        expect(ring.byteSize()).toBe(0);
+        expect(ring.offer(new Uint8Array(500), 500, address)).toBe(true);
+        ring.advance();
+        expect(ring.offer(new Uint8Array(10), 10, address)).toBe(true);
+        expect(ring.offer(new Uint8Array(500), 500, address)).toBe(false); // only an empty ring takes an oversize one
     });
 
     it('derives its slot count from the byte budget, between 64 and 16,384, rounded up to a power of two', () => {
@@ -839,9 +859,25 @@ describe('open and close', () => {
         expect(statusIndicator.setRelease).toHaveBeenLastCalledWith(ChannelEndpointStatus.ERRORED);
     });
 
+    it('reportsNoSecondErrorForARefusedUpdateEndpointConnectRegression', async () => {
+        const transport = newOpenTransport();
+        const statusIndicator = { setRelease: vi.fn() } as unknown as AtomicCounter;
+        const bad = new InetSocketAddress(InetAddress.getByName('::1'), 9);
+        assertThrows(AeronException, () => transport.updateEndpoint(bad, statusIndicator));
+
+        // node emits its own 'error' event for the failed connect on the next tick; it was already handled above
+        for (let i = 0; i < 3; i++) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        const before = errors.length;
+        transport.receive(new UnsafeBuffer(new Uint8Array(64)));
+
+        expect(errors.length).toBe(before);
+    });
+
     it('opens an IPv6 loopback transport', async (ctx) => {
         if (!hasIpv6Loopback()) {
-            ctx.skip('no IPv6 loopback on this host');
+            skipUnlessRequired(ctx, 'no IPv6 loopback on this host');
         }
 
         const udpChannel = channel('aeron:udp?endpoint=[::1]:0');

@@ -34,7 +34,10 @@ function suffixOf(channel: UdpChannel, prefix: string): number {
 
 /** Resolves every name to a fixed address, or to nothing, under a chosen `name()`. */
 class FixedNameResolver implements NameResolver {
-    public constructor(private readonly displayName: string) {}
+    private readonly displayName: string;
+    public constructor(displayName: string) {
+        this.displayName = displayName;
+    }
 
     public resolve(_name: string, _uriParamName: string, _isReResolution: boolean): InetAddress | null {
         return null;
@@ -50,6 +53,51 @@ class FixedNameResolver implements NameResolver {
 }
 
 describe('UdpChannelExtraTest', () => {
+    describe('null arguments', () => {
+        it('parseOfANullUriThrowsInvalidChannelWithANullPointerCauseRegression', () => {
+            let thrown: unknown = null;
+            try {
+                UdpChannel.parse(null as unknown as string);
+            } catch (ex) {
+                thrown = ex;
+            }
+
+            expect(thrown).toBeInstanceOf(InvalidChannelException);
+            expect(getCause(thrown as Error)).toBeInstanceOf(NullPointerException);
+        });
+
+        it('parseWithANullNameResolverThrowsInvalidChannelWithANullPointerCauseRegression', () => {
+            let thrown: unknown = null;
+            try {
+                UdpChannel.parse('aeron:udp?endpoint=localhost:1234', null as unknown as NameResolver);
+            } catch (ex) {
+                thrown = ex;
+            }
+
+            expect(thrown).toBeInstanceOf(InvalidChannelException);
+            expect(getCause(thrown as Error)).toBeInstanceOf(NullPointerException);
+        });
+    });
+
+    describe('null name resolver', () => {
+        // issue #18; mutation: parse checks the resolver up front, or wraps any TypeError of a null resolver
+        it('aNullNameResolverFailsAtTheFirstLookupAndNotBeforeRegression', () => {
+            // no address to look up: Java never touches the resolver
+            const channel = UdpChannel.parse('aeron:udp?control-mode=manual', null as unknown as NameResolver);
+            expect(channel.isManualControlMode()).toBe(true);
+
+            for (const uri of [
+                'aeron:udp?endpoint=127.0.0.1:1234',
+                'aeron:udp?control=localhost:1234|control-mode=dynamic',
+            ]) {
+                const ex = assertThrowsExactly(InvalidChannelException, () =>
+                    UdpChannel.parse(uri, null as unknown as NameResolver),
+                );
+                expect(getCause(ex)).toBeInstanceOf(NullPointerException);
+            }
+        });
+    });
+
     describe('canonical form', () => {
         // Mutation: in the final `else` branch of parse, `'-' + uniqueCanonicalFormValue++` becomes
         // `'-' + uniqueCanonicalFormValue` (the increment is dropped).

@@ -50,7 +50,9 @@ class BusyAgent implements Agent {
     public runner: AgentRunner | null = null;
     private onClosed!: () => void;
 
-    public constructor(private readonly limit: number) {
+    private readonly limit: number;
+    public constructor(limit: number) {
+        this.limit = limit;
         this.closed = new Promise((resolve) => {
             this.onClosed = resolve;
         });

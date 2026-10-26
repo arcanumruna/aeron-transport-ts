@@ -27,10 +27,12 @@ type IpV4State = 'HOST' | 'PORT';
 type IpV6State = 'START_ADDR' | 'HOST' | 'SCOPE' | 'END_ADDR' | 'PORT';
 
 class ParseResult {
-    public constructor(
-        public readonly host: string,
-        public readonly port: number,
-    ) {}
+    public readonly host: string;
+    public readonly port: number;
+    public constructor(host: string, port: number) {
+        this.host = host;
+        this.port = port;
+    }
 }
 
 export class SocketAddressParser {

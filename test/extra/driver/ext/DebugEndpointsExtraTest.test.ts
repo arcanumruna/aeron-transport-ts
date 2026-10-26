@@ -61,7 +61,10 @@ class ScriptedLossGenerator implements LossGenerator {
     }[] = [];
     private next = 0;
 
-    public constructor(private readonly script: boolean[]) {}
+    private readonly script: boolean[];
+    public constructor(script: boolean[]) {
+        this.script = script;
+    }
 
     public shouldDropFrame(address: InetSocketAddress | null, buffer: UnsafeBuffer | null, length: number): boolean;
     public shouldDropFrame(

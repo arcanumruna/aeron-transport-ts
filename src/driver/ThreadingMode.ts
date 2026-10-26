@@ -16,7 +16,7 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of io/aeron/driver/ThreadingMode.java @ 1.53.3
-import { IllegalArgumentException } from '../agrona/jdk.js';
+import { IllegalArgumentException, NullPointerException } from '../agrona/jdk.js';
 
 /**
  * Threading mode to be employed by the {@link org.agrona.concurrent.Agent}s in the {@link MediaDriver}: the Java enum
@@ -75,6 +75,10 @@ export class ThreadingMode {
      * @throws IllegalArgumentException if the name is not that of a constant.
      */
     public static valueOf(name: string): ThreadingMode {
+        if (null === name || undefined === name) {
+            throw new NullPointerException('Name is null');
+        }
+
         for (const mode of ThreadingMode.values()) {
             if (mode._name === name) {
                 return mode;

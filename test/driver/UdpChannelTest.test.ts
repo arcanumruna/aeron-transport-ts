@@ -102,13 +102,24 @@ function invalidMulticastAddresses(): (ChannelUri | null)[] {
 
 /** The anonymous `NameResolver` of `shouldParseWithNameResolver`. */
 class LookupNameResolver implements NameResolver {
+    private readonly endpointName: string;
+    private readonly endpointAddress: string;
+    private readonly controlName: string | null;
+    private readonly controlAddress: string | null;
+    private readonly port: number;
     public constructor(
-        private readonly endpointName: string,
-        private readonly endpointAddress: string,
-        private readonly controlName: string | null,
-        private readonly controlAddress: string | null,
-        private readonly port: number,
-    ) {}
+        endpointName: string,
+        endpointAddress: string,
+        controlName: string | null,
+        controlAddress: string | null,
+        port: number,
+    ) {
+        this.endpointName = endpointName;
+        this.endpointAddress = endpointAddress;
+        this.controlName = controlName;
+        this.controlAddress = controlAddress;
+        this.port = port;
+    }
 
     public resolve(name: string, uriParamName: string, isReResolution: boolean): InetAddress | null {
         return DefaultNameResolver.INSTANCE.resolve(name, uriParamName, isReResolution);

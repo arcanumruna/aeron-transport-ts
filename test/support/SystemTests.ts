@@ -34,11 +34,14 @@ export class TestNode {
     public readonly clients: TestClient[] = [];
     private closed = false;
 
-    public constructor(
-        public readonly name: string,
-        public readonly driver: MediaDriver,
-        public readonly errors: Error[],
-    ) {}
+    public readonly name: string;
+    public readonly driver: MediaDriver;
+    public readonly errors: Error[];
+    public constructor(name: string, driver: MediaDriver, errors: Error[]) {
+        this.name = name;
+        this.driver = driver;
+        this.errors = errors;
+    }
 
     /** The first client, which `SystemTests.launch` connects. */
     public get aeron(): Aeron {
@@ -88,10 +91,11 @@ export class TestClient {
     public readonly invoker: AgentInvoker;
     private closed = false;
 
-    public constructor(
-        public readonly aeron: Aeron,
-        public readonly driver: MediaDriver,
-    ) {
+    public readonly aeron: Aeron;
+    public readonly driver: MediaDriver;
+    public constructor(aeron: Aeron, driver: MediaDriver) {
+        this.aeron = aeron;
+        this.driver = driver;
         this.invoker = aeron.conductorAgentInvoker() as AgentInvoker;
     }
 
@@ -121,10 +125,9 @@ export class SystemTests {
      *                    two drivers of one test apart).
      * @param manualClock true to give the drivers and clients a clock that one turn advances by 1 ms.
      */
-    public constructor(
-        public readonly testName: string,
-        manualClock = false,
-    ) {
+    public readonly testName: string;
+    public constructor(testName: string, manualClock = false) {
+        this.testName = testName;
         this.clock = manualClock ? new ManualClock() : null;
     }
 

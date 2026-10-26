@@ -614,7 +614,7 @@ export class MediaDriverContext extends CommonContext {
             return this._lowStorageWarningThreshold;
         }
 
-        this._lowStorageWarningThreshold = lowStorageWarningThreshold;
+        this._lowStorageWarningThreshold = Long.checkSafe(lowStorageWarningThreshold);
         return this;
     }
 
@@ -686,7 +686,7 @@ export class MediaDriverContext extends CommonContext {
             return this._timerIntervalNs;
         }
 
-        this._timerIntervalNs = timerIntervalNs;
+        this._timerIntervalNs = Long.checkSafe(timerIntervalNs);
         return this;
     }
 
@@ -710,7 +710,7 @@ export class MediaDriverContext extends CommonContext {
             return this._imageLivenessTimeoutNs;
         }
 
-        this._imageLivenessTimeoutNs = timeout;
+        this._imageLivenessTimeoutNs = Long.checkSafe(timeout);
         return this;
     }
 
@@ -734,7 +734,7 @@ export class MediaDriverContext extends CommonContext {
             return this._publicationLingerTimeoutNs;
         }
 
-        this._publicationLingerTimeoutNs = timeoutNs;
+        this._publicationLingerTimeoutNs = Long.checkSafe(timeoutNs);
         return this;
     }
 
@@ -760,7 +760,7 @@ export class MediaDriverContext extends CommonContext {
             return this._untetheredWindowLimitTimeoutNs;
         }
 
-        this._untetheredWindowLimitTimeoutNs = timeoutNs;
+        this._untetheredWindowLimitTimeoutNs = Long.checkSafe(timeoutNs);
         return this;
     }
 
@@ -786,7 +786,7 @@ export class MediaDriverContext extends CommonContext {
             return this._untetheredLingerTimeoutNs;
         }
 
-        this._untetheredLingerTimeoutNs = timeoutNs;
+        this._untetheredLingerTimeoutNs = Long.checkSafe(timeoutNs);
         return this;
     }
 
@@ -812,7 +812,7 @@ export class MediaDriverContext extends CommonContext {
             return this._untetheredRestingTimeoutNs;
         }
 
-        this._untetheredRestingTimeoutNs = timeoutNs;
+        this._untetheredRestingTimeoutNs = Long.checkSafe(timeoutNs);
         return this;
     }
 
@@ -836,7 +836,7 @@ export class MediaDriverContext extends CommonContext {
             return this._retransmitUnicastDelayNs;
         }
 
-        this._retransmitUnicastDelayNs = retransmitUnicastDelayNs;
+        this._retransmitUnicastDelayNs = Long.checkSafe(retransmitUnicastDelayNs);
         return this;
     }
 
@@ -860,7 +860,7 @@ export class MediaDriverContext extends CommonContext {
             return this._retransmitUnicastLingerNs;
         }
 
-        this._retransmitUnicastLingerNs = retransmitUnicastLingerNs;
+        this._retransmitUnicastLingerNs = Long.checkSafe(retransmitUnicastLingerNs);
         return this;
     }
 
@@ -885,7 +885,7 @@ export class MediaDriverContext extends CommonContext {
             return this._nakUnicastDelayNs;
         }
 
-        this._nakUnicastDelayNs = nakUnicastDelayNs;
+        this._nakUnicastDelayNs = Long.checkSafe(nakUnicastDelayNs);
         return this;
     }
 
@@ -936,7 +936,7 @@ export class MediaDriverContext extends CommonContext {
             return this._nakMulticastMaxBackoffNs;
         }
 
-        this._nakMulticastMaxBackoffNs = nakMulticastMaxBackoffNs;
+        this._nakMulticastMaxBackoffNs = Long.checkSafe(nakMulticastMaxBackoffNs);
         return this;
     }
 
@@ -984,7 +984,7 @@ export class MediaDriverContext extends CommonContext {
             return CommonContext.checkDebugTimeout(this._clientLivenessTimeoutNs, TimeUnit.NANOSECONDS);
         }
 
-        this._clientLivenessTimeoutNs = timeoutNs;
+        this._clientLivenessTimeoutNs = Long.checkSafe(timeoutNs);
         return this;
     }
 
@@ -1008,7 +1008,7 @@ export class MediaDriverContext extends CommonContext {
             return this._statusMessageTimeoutNs;
         }
 
-        this._statusMessageTimeoutNs = statusMessageTimeoutNs;
+        this._statusMessageTimeoutNs = Long.checkSafe(statusMessageTimeoutNs);
         return this;
     }
 
@@ -1032,7 +1032,7 @@ export class MediaDriverContext extends CommonContext {
             return this._counterFreeToReuseTimeoutNs;
         }
 
-        this._counterFreeToReuseTimeoutNs = counterFreeToReuseTimeoutNs;
+        this._counterFreeToReuseTimeoutNs = Long.checkSafe(counterFreeToReuseTimeoutNs);
         return this;
     }
 
@@ -1066,7 +1066,7 @@ export class MediaDriverContext extends CommonContext {
             return CommonContext.checkDebugTimeout(this._publicationUnblockTimeoutNs, TimeUnit.NANOSECONDS, 1.5);
         }
 
-        this._publicationUnblockTimeoutNs = timeoutNs;
+        this._publicationUnblockTimeoutNs = Long.checkSafe(timeoutNs);
         return this;
     }
 
@@ -1092,7 +1092,7 @@ export class MediaDriverContext extends CommonContext {
             return this._publicationConnectionTimeoutNs;
         }
 
-        this._publicationConnectionTimeoutNs = timeoutNs;
+        this._publicationConnectionTimeoutNs = Long.checkSafe(timeoutNs);
         return this;
     }
 
@@ -1893,7 +1893,7 @@ export class MediaDriverContext extends CommonContext {
             return this._flowControlReceiverTimeoutNs;
         }
 
-        this._flowControlReceiverTimeoutNs = timeoutNs;
+        this._flowControlReceiverTimeoutNs = Long.checkSafe(timeoutNs);
         return this;
     }
 
@@ -2262,7 +2262,7 @@ export class MediaDriverContext extends CommonContext {
             return this._receiverGroupTag;
         }
 
-        this._receiverGroupTag = groupTag;
+        this._receiverGroupTag = null === groupTag ? null : Long.checkSafe(groupTag);
         return this;
     }
 
@@ -2286,7 +2286,7 @@ export class MediaDriverContext extends CommonContext {
             return this._flowControlGroupTag;
         }
 
-        this._flowControlGroupTag = groupTag;
+        this._flowControlGroupTag = Long.checkSafe(groupTag);
         return this;
     }
 
@@ -2443,7 +2443,7 @@ export class MediaDriverContext extends CommonContext {
             return this._resolverNeighbourTimeoutNs;
         }
 
-        this._resolverNeighbourTimeoutNs = timeoutNs;
+        this._resolverNeighbourTimeoutNs = Long.checkSafe(timeoutNs);
         return this;
     }
 
@@ -2466,7 +2466,7 @@ export class MediaDriverContext extends CommonContext {
             return this._resolverSelfResolutionIntervalNs;
         }
 
-        this._resolverSelfResolutionIntervalNs = intervalNs;
+        this._resolverSelfResolutionIntervalNs = Long.checkSafe(intervalNs);
         return this;
     }
 
@@ -2489,7 +2489,7 @@ export class MediaDriverContext extends CommonContext {
             return this._resolverNeighborResolutionIntervalNs;
         }
 
-        this._resolverNeighborResolutionIntervalNs = intervalNs;
+        this._resolverNeighborResolutionIntervalNs = Long.checkSafe(intervalNs);
         return this;
     }
 
@@ -2512,7 +2512,7 @@ export class MediaDriverContext extends CommonContext {
             return this._resolverBootstrapNeighborResolutionIntervalNs;
         }
 
-        this._resolverBootstrapNeighborResolutionIntervalNs = intervalNs;
+        this._resolverBootstrapNeighborResolutionIntervalNs = Long.checkSafe(intervalNs);
         return this;
     }
 
@@ -2542,7 +2542,7 @@ export class MediaDriverContext extends CommonContext {
             return this._reResolutionCheckIntervalNs;
         }
 
-        this._reResolutionCheckIntervalNs = reResolutionCheckIntervalNs;
+        this._reResolutionCheckIntervalNs = Long.checkSafe(reResolutionCheckIntervalNs);
         return this;
     }
 
@@ -2568,7 +2568,7 @@ export class MediaDriverContext extends CommonContext {
             return this._conductorCycleThresholdNs;
         }
 
-        this._conductorCycleThresholdNs = thresholdNs;
+        this._conductorCycleThresholdNs = Long.checkSafe(thresholdNs);
         return this;
     }
 
@@ -2616,7 +2616,7 @@ export class MediaDriverContext extends CommonContext {
             return this._senderCycleThresholdNs;
         }
 
-        this._senderCycleThresholdNs = thresholdNs;
+        this._senderCycleThresholdNs = Long.checkSafe(thresholdNs);
         return this;
     }
 
@@ -2642,7 +2642,7 @@ export class MediaDriverContext extends CommonContext {
             return this._receiverCycleThresholdNs;
         }
 
-        this._receiverCycleThresholdNs = thresholdNs;
+        this._receiverCycleThresholdNs = Long.checkSafe(thresholdNs);
         return this;
     }
 
@@ -2668,7 +2668,7 @@ export class MediaDriverContext extends CommonContext {
             return this._nameResolverThresholdNs;
         }
 
-        this._nameResolverThresholdNs = thresholdNs;
+        this._nameResolverThresholdNs = Long.checkSafe(thresholdNs);
         return this;
     }
 
@@ -3641,6 +3641,13 @@ export class MediaDriverContext extends CommonContext {
         if (null !== this._resolverInterface && Strings.isEmpty(this._resolverName)) {
             throw new ConfigurationException('`resolverName` is required when `resolverInterface` is set');
         }
+
+        if (null !== this._resolverInterface) {
+            // spec D125: Java builds a DriverNameResolver here, which is out of scope (section 3)
+            throw new ConfigurationException(
+                'resolverInterface is set but driver name resolution (DriverNameResolver) is not supported: spec section 3',
+            );
+        }
     }
 
     private concludeCounters(): void {
@@ -3892,6 +3899,14 @@ export class MediaDriverContext extends CommonContext {
             this._isClosed +
             '\n    cncVersion=' +
             SemanticVersion.toString(CncFileDescriptor.CNC_VERSION) +
+            '\n    enabledExperimentalFeatures=' +
+            this.enableExperimentalFeatures() +
+            '\n    countersMetaDataBuffer=' +
+            this.countersMetaDataBuffer() +
+            '\n    countersValuesBuffer=' +
+            this.countersValuesBuffer() +
+            '\n    driverTimeoutMs=' +
+            this.driverTimeoutMs() +
             '\n    printConfigurationOnStart=' +
             this._printConfigurationOnStart +
             '\n    termBufferSparseFile=' +

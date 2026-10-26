@@ -245,6 +245,12 @@ export class DriverConductor implements Agent {
     // resource registered that the agent was never told of (D55).
     private readonly senderCommandQueue: QueueCapacity | null;
     private readonly receiverCommandQueue: QueueCapacity | null;
+    // Cleanups that the timer-driven state machines asked for while a queue was full (spec D55, issue #44). Their
+    // state has already moved on, so nothing would ask again: they are retried in every duty cycle until the queue has
+    // room. The lists only grow when a queue is full, so the steady state allocates nothing.
+    private readonly pendingPublicationCleanups: NetworkPublication[] = [];
+    private readonly pendingReceiveEndpointCloses: ReceiveChannelEndpoint[] = [];
+    private readonly pendingSubscriptionCleanups: SubscriptionLink[] = [];
 
     public constructor(ctx: MediaDriverContext) {
         this.ctx = ctx;
@@ -336,6 +342,13 @@ export class DriverConductor implements Agent {
 
         let workCount = 0;
         workCount += this.processTimers(nowNs);
+        if (
+            0 !== this.pendingPublicationCleanups.length ||
+            0 !== this.pendingSubscriptionCleanups.length ||
+            0 !== this.pendingReceiveEndpointCloses.length
+        ) {
+            workCount += this.retryPendingCleanups();
+        }
         workCount += this.processClientCommands();
         workCount += this.drainCommandQueue();
         workCount += this.trackStreamPositions(workCount, nowNs);
@@ -606,19 +619,81 @@ export class DriverConductor implements Agent {
     }
 
     public cleanupPublication(publication: NetworkPublication): void {
+        if (!this.tryCleanupPublication(publication)) {
+            // The sender queue is full (spec D42, D55): retry in a later duty cycle (issue #44)
+            this.pendingPublicationCleanups.push(publication);
+        }
+    }
+
+    /** @return false, having done nothing, if the sender queue cannot hold the commands of the cleanup. */
+    private tryCleanupPublication(publication: NetworkPublication): boolean {
         // DriverLog.logPublicationRemoval: out of scope
+
+        const channelEndpoint = publication.channelEndpoint();
+        // the close must come after the removal of every publication that shares the endpoint: the last one asks for it
+        const shouldCloseEndpoint =
+            channelEndpoint.shouldBeClosed() && !this.hasOtherPendingPublicationCleanup(publication, channelEndpoint);
+        if (!hasRoom(this.senderCommandQueue, shouldCloseEndpoint ? 2 : 1)) {
+            return false;
+        }
 
         this.senderProxy.removeNetworkPublication(publication);
 
-        const channelEndpoint = publication.channelEndpoint();
-        if (channelEndpoint.shouldBeClosed()) {
-            // Offer first: a full queue (spec D42) must not leave the endpoint CLOSING with no close command queued
+        if (shouldCloseEndpoint) {
             this.senderProxy.closeSendChannelEndpoint(channelEndpoint);
             channelEndpoint.indicateClosing();
         }
 
         const channel = channelEndpoint.udpChannel().canonicalForm();
         this.activeSessionSet.remove(new SessionKey(publication.sessionId(), publication.streamId(), channel));
+        return true;
+    }
+
+    private hasOtherPendingPublicationCleanup(publication: NetworkPublication, endpoint: SendChannelEndpoint): boolean {
+        const publications = this.pendingPublicationCleanups;
+        for (let i = 0, size = publications.length; i < size; i++) {
+            const other = publications[i] as NetworkPublication;
+            if (other !== publication && other.channelEndpoint() === endpoint) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private retryPendingCleanups(): number {
+        let workCount = 0;
+
+        const subscriptions = this.pendingSubscriptionCleanups;
+        for (let i = subscriptions.length - 1; i >= 0; i--) {
+            if (this.tryCleanupSubscriptionLink(subscriptions[i] as SubscriptionLink)) {
+                ArrayListUtil.fastUnorderedRemove(subscriptions, i);
+                workCount++;
+            }
+        }
+
+        const publications = this.pendingPublicationCleanups;
+        for (let i = publications.length - 1; i >= 0; i--) {
+            if (this.tryCleanupPublication(publications[i] as NetworkPublication)) {
+                ArrayListUtil.fastUnorderedRemove(publications, i);
+                workCount++;
+            }
+        }
+
+        const endpoints = this.pendingReceiveEndpointCloses;
+        for (let i = endpoints.length - 1; i >= 0; i--) {
+            const endpoint = endpoints[i] as ReceiveChannelEndpoint;
+            if (!endpoint.shouldBeClosed()) {
+                // referenced again, or already closing: its next removal asks again
+                ArrayListUtil.fastUnorderedRemove(endpoints, i);
+            } else if (hasRoom(this.receiverCommandQueue, 1)) {
+                endpoint.indicateClosing();
+                this.receiverProxy.closeReceiveChannelEndpoint(endpoint);
+                ArrayListUtil.fastUnorderedRemove(endpoints, i);
+                workCount++;
+            }
+        }
+
+        return workCount;
     }
 
     // TODO (Java) rename, as it isn't closed yet
@@ -629,28 +704,45 @@ export class DriverConductor implements Agent {
     }
 
     public cleanupSubscriptionLink(subscription: SubscriptionLink): void {
+        if (!this.tryCleanupSubscriptionLink(subscription)) {
+            // The receiver queue is full (spec D42, D55): nothing was decremented, retry in a later duty cycle (issue #44).
+            // The link has left the conductor's list already, so it is never cleaned up twice.
+            this.pendingSubscriptionCleanups.push(subscription);
+        }
+    }
+
+    /** @return false, having done nothing, if the receiver queue cannot hold the commands of the cleanup. */
+    private tryCleanupSubscriptionLink(subscription: SubscriptionLink): boolean {
         // DriverLog.logSubscriptionRemoval: out of scope
 
         const channelEndpoint = subscription.channelEndpoint();
-        if (null !== channelEndpoint) {
-            if (subscription.hasSessionId()) {
-                if (0 === channelEndpoint.decRefToStreamAndSession(subscription.streamId(), subscription.sessionId())) {
-                    this.receiverProxy.removeSubscription(
-                        channelEndpoint,
-                        subscription.streamId(),
-                        subscription.sessionId(),
-                    );
-                }
-            } else if (subscription.isResponse()) {
-                channelEndpoint.decResponseRefToStream(subscription.streamId());
-            } else {
-                if (0 === channelEndpoint.decRefToStream(subscription.streamId())) {
-                    this.receiverProxy.removeSubscription(channelEndpoint, subscription.streamId());
-                }
-            }
-
-            this.tryCloseReceiveChannelEndpoint(channelEndpoint);
+        if (null === channelEndpoint) {
+            return true;
         }
+
+        // at most the removal of the subscription and the close of the endpoint (a response one has no removal)
+        if (!hasRoom(this.receiverCommandQueue, subscription.isResponse() ? 1 : 2)) {
+            return false;
+        }
+
+        if (subscription.hasSessionId()) {
+            if (0 === channelEndpoint.decRefToStreamAndSession(subscription.streamId(), subscription.sessionId())) {
+                this.receiverProxy.removeSubscription(
+                    channelEndpoint,
+                    subscription.streamId(),
+                    subscription.sessionId(),
+                );
+            }
+        } else if (subscription.isResponse()) {
+            channelEndpoint.decResponseRefToStream(subscription.streamId());
+        } else {
+            if (0 === channelEndpoint.decRefToStream(subscription.streamId())) {
+                this.receiverProxy.removeSubscription(channelEndpoint, subscription.streamId());
+            }
+        }
+
+        this.tryCloseReceiveChannelEndpoint(channelEndpoint);
+        return true;
     }
 
     public transitionToLinger(image: PublicationImage): void {
@@ -680,7 +772,10 @@ export class DriverConductor implements Agent {
     public tryCloseReceiveChannelEndpoint(channelEndpoint: ReceiveChannelEndpoint): void {
         if (channelEndpoint.shouldBeClosed()) {
             if (!hasRoom(this.receiverCommandQueue, 1)) {
-                // Not closed, and not marked CLOSING: a later check closes it (spec D42, D55)
+                // Not closed, and not marked CLOSING: retried in a later duty cycle (spec D42, D55, issue #44)
+                if (!this.pendingReceiveEndpointCloses.includes(channelEndpoint)) {
+                    this.pendingReceiveEndpointCloses.push(channelEndpoint);
+                }
                 return;
             }
             channelEndpoint.indicateClosing();
@@ -805,19 +900,6 @@ export class DriverConductor implements Agent {
 
     public onRemoveSubscription(registrationId: number, correlationId: number): void {
         // Check the receiver has room for every command the removal can offer before anything is removed (spec D42, D55)
-        let linksToRemove = 0;
-        for (const link of this.subscriptionLinks) {
-            if (link.registrationId() === registrationId) {
-                linksToRemove++;
-            }
-        }
-        if (linksToRemove > 0 && !hasRoom(this.receiverCommandQueue, 2 * linksToRemove)) {
-            throw new ControlProtocolException(
-                ErrorCode.RESOURCE_TEMPORARILY_UNAVAILABLE,
-                'receiver command queue is full, please retry',
-            );
-        }
-
         let isAnySubscriptionFound = false;
         for (let lastIndex = this.subscriptionLinks.length - 1, i = lastIndex; i >= 0; i--) {
             const subscription = this.subscriptionLinks[i] as SubscriptionLink;

@@ -24,6 +24,36 @@ const SETTLE_MS = 10;
 
 type Collection = { detail?: { kind: number } };
 
+/** The most rounds `settleUntilQuiet` runs. */
+const MAX_SETTLE_ROUNDS = 40;
+
+/**
+ * Warms the loop up until it is in its steady state (issue #46). On a loaded host the optimizing compiler's background
+ * thread can take far longer than SETTLE_MS to install the code of a long loop, and a loop that runs in a lower tier
+ * boxes numbers and collects garbage that is not the optimized code's own (the LargePosition cases, whose positions
+ * are outside the 31-bit small integers, then counted a constant 4 collections on every attempt). A round of `warmUp`
+ * iterations that causes no minor collection means the optimized code is the code that runs. The wait is bounded by
+ * rounds, not by time, and a loop that really allocates is never quiet: it goes on to the measurement, which fails it.
+ */
+async function settleUntilQuiet(run: (iterations: number) => void, warmUp: number): Promise<void> {
+    for (let round = 0; round < MAX_SETTLE_ROUNDS; round++) {
+        await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+        const observer = new PerformanceObserver(() => {});
+        observer.observe({ entryTypes: ['gc'] });
+        await new Promise((resolve) => setImmediate(resolve));
+        observer.takeRecords();
+        run(warmUp);
+        await new Promise((resolve) => setImmediate(resolve));
+        const collections = observer
+            .takeRecords()
+            .filter((e) => (e as unknown as Collection).detail?.kind === constants.NODE_PERFORMANCE_GC_MINOR).length;
+        observer.disconnect();
+        if (0 === collections) {
+            return;
+        }
+    }
+}
+
 /**
  * The minor collections and the heap growth while `run(iterations)` runs, after a warm up.
  *
@@ -34,6 +64,7 @@ type Collection = { detail?: { kind: number } };
 export async function measure(
     run: (iterations: number) => void,
     iterations: number,
+    settle = false,
 ): Promise<{ collections: number; heapGrowth: number }> {
     const warmUp = Math.min(WARM_UP, Math.max(1_000, iterations >> 3));
     run(warmUp);
@@ -44,6 +75,9 @@ export async function measure(
     // thread a moment, then warm up once more so that the optimized code is the one that is measured.
     await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
     run(warmUp);
+    if (settle) {
+        await settleUntilQuiet(run, warmUp);
+    }
 
     const observer = new PerformanceObserver(() => {});
     observer.observe({ entryTypes: ['gc'] });
@@ -102,10 +136,13 @@ async function minimumCollections(
     n: number,
     bound: number,
     retainedGrowth: number,
+    attempts: string[],
 ): Promise<number> {
     let minimum = Infinity;
     for (let attempt = 0; attempt < MAX_ATTEMPTS && minimum > bound; attempt++) {
-        const { collections, heapGrowth } = await measure(run, n);
+        const { collections, heapGrowth } = await measure(run, n, bound <= 1);
+        // the detail of every attempt goes into the failure message (issue #42): a flake under load names its numbers
+        attempts.push(`#${attempt + 1}: ${collections} collections, heap growth ${heapGrowth} B`);
         if (collections > bound && heapGrowth > retainedGrowth) {
             return collections;
         }
@@ -127,8 +164,12 @@ export async function expectNoAllocation(
     heapNumbers = 0,
 ): Promise<void> {
     if (0 === heapNumbers) {
-        const collections = await minimumCollections(run, iterations, 1, MIN_RETAINED_HEAP_GROWTH);
-        expect(collections, 'minor collections').toBeLessThanOrEqual(1);
+        const attempts: string[] = [];
+        const collections = await minimumCollections(run, iterations, 1, MIN_RETAINED_HEAP_GROWTH, attempts);
+        expect(
+            collections,
+            `minor collections over ${iterations} iterations; attempts ${attempts.join('; ')}`,
+        ).toBeLessThanOrEqual(1);
         return;
     }
 
@@ -141,8 +182,16 @@ export async function expectNoAllocation(
     expect(controlCollections, 'minor collections of the control').toBeGreaterThan(0);
 
     const bound = heapNumbers * controlCollections + Math.max(2, controlCollections >> 3);
-    const collections = await minimumCollections(run, n, bound, Math.max(MIN_RETAINED_HEAP_GROWTH, 2 * controlGrowth));
-    expect(collections, `minor collections over ${n} iterations (control ${controlCollections})`).toBeLessThanOrEqual(
+    const attempts: string[] = [];
+    const collections = await minimumCollections(
+        run,
+        n,
         bound,
+        Math.max(MIN_RETAINED_HEAP_GROWTH, 2 * controlGrowth),
+        attempts,
     );
+    expect(
+        collections,
+        `minor collections over ${n} iterations (control ${controlCollections}, bound ${bound}); attempts ${attempts.join('; ')}`,
+    ).toBeLessThanOrEqual(bound);
 }

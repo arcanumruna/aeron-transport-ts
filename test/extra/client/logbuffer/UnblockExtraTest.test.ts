@@ -45,10 +45,11 @@ class Log {
     public readonly meta = new UnsafeBuffer(new ArrayBuffer(LOG_META_DATA_LENGTH));
     public readonly terms: UnsafeBuffer[] = [];
 
-    public constructor(
-        public readonly initial: number,
-        public readonly count: number,
-    ) {
+    public readonly initial: number;
+    public readonly count: number;
+    public constructor(initial: number, count: number) {
+        this.initial = initial;
+        this.count = count;
         for (let i = 0; i < PARTITION_COUNT; i++) {
             this.terms.push(new UnsafeBuffer(new ArrayBuffer(TERM_LENGTH)));
         }

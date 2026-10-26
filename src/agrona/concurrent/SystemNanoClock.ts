@@ -19,10 +19,15 @@
 import { performance } from 'node:perf_hooks';
 import type { NanoClock } from './NanoClock.js';
 
+/** `performance.now()` when this module was loaded: the origin of the clock (D5). */
+const BASELINE_MS = performance.now();
+
 /**
  * A {@link NanoClock} that delegates to the system monotonic clock, as {@code System.nanoTime()} does. The value is
- * the nanoseconds since the process started (spec 5.2), from {@code performance.now()}, which allocates no
- * {@code bigint} as {@code process.hrtime.bigint()} does on every call.
+ * the nanoseconds since this module was loaded (spec 5.2, D5), from {@code performance.now()}, which allocates no
+ * {@code bigint} as {@code process.hrtime.bigint()} does on every call. The origin of {@code System.nanoTime()} is
+ * arbitrary, so the value starts near 0 and saturates at 2^53 - 1 (about 104 days after the load) instead of passing
+ * the safe integer limit, where every `putLong` of it would throw (D5).
  */
 export class SystemNanoClock implements NanoClock {
     /**
@@ -31,6 +36,7 @@ export class SystemNanoClock implements NanoClock {
     public static readonly INSTANCE: SystemNanoClock = new SystemNanoClock();
 
     public nanoTime(): number {
-        return Math.floor(performance.now() * 1_000_000);
+        const ns = Math.floor((performance.now() - BASELINE_MS) * 1_000_000);
+        return ns < Number.MAX_SAFE_INTEGER ? ns : Number.MAX_SAFE_INTEGER;
     }
 }

@@ -36,10 +36,11 @@ const lineSeparator = (): string => EOL;
 export class InterfaceSearchAddress implements UnresolvedInterface {
     private static readonly WILDCARD = new InterfaceSearchAddress(new InetSocketAddress(0), 0);
 
-    public constructor(
-        public readonly address: InetSocketAddress,
-        public readonly subnetPrefix: number,
-    ) {
+    public readonly address: InetSocketAddress;
+    public readonly subnetPrefix: number;
+    public constructor(address: InetSocketAddress, subnetPrefix: number) {
+        this.address = address;
+        this.subnetPrefix = subnetPrefix;
         requireNonNull(address, 'address must not be null');
     }
 

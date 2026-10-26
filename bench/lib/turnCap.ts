@@ -17,11 +17,14 @@ export class TurnCap {
      * @param progress the progress at the moment of the failure, for example `received 3/10`.
      * @param cap the most turns; the default is `MAX_TURNS`.
      */
-    public constructor(
-        private readonly scenario: string,
-        private readonly progress: () => string,
-        private readonly cap: number = MAX_TURNS,
-    ) {}
+    private readonly scenario: string;
+    private readonly progress: () => string;
+    private readonly cap: number;
+    public constructor(scenario: string, progress: () => string, cap: number = MAX_TURNS) {
+        this.scenario = scenario;
+        this.progress = progress;
+        this.cap = cap;
+    }
 
     /** Count one turn; throws at the cap. Call it once per iteration of the loop. */
     public tick(): void {

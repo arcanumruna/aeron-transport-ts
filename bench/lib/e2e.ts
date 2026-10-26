@@ -122,7 +122,10 @@ export class Loopback {
         },
     };
 
-    private constructor(private readonly echo: boolean) {}
+    private readonly echo: boolean;
+    private constructor(echo: boolean) {
+        this.echo = echo;
+    }
 
     public static async create(echo: boolean, wake = true): Promise<Loopback> {
         const lb = new Loopback(echo);

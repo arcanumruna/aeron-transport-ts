@@ -13,7 +13,8 @@
 //   {"event":"summary",...}                        the last line, with the counts and the first error
 // `-P` makes a slow consumer: after the first message it reads, it stops polling for that many ms (once), so that the
 // window of the receiver stops moving and the publisher is back pressured; then it reads on. Default: no pause.
-//   {"event":"paused"}                             printed when the pause starts
+//   {"event":"paused","position":..}              printed when the pause starts, with the position after the last message read
+//   {"event":"resumed"}                            printed when the pause ends
 // `-D` (repeatable, D116) adds a destination to a multi-destination subscription (`control-mode=manual`) before it
 // reports ready, with `aeron_subscription_async_add_destination`.
 // `-E` makes the subscriber wait for an image to end (a publication that closes) as well as for `count` / `last`, so
@@ -54,6 +55,7 @@ typedef struct
     uint64_t available;
     uint64_t unavailable;
     uint64_t eos;
+    int64_t position; /* the position after the last fragment handed to on_fragment */
 } state_t;
 
 static state_t state;
@@ -74,6 +76,7 @@ static void on_fragment(void *clientd, const uint8_t *buffer, size_t length, aer
     aeron_header_values_t values;
     aeron_header_values(header, &values);
     int32_t session_id = values.frame.session_id;
+    state->position = aeron_header_position(header);
 
     session_t *session = NULL;
     for (int i = 0; i < state->session_count; i++)
@@ -313,10 +316,12 @@ int main(int argc, char **argv)
 
         if (pause_ms > 0 && state.count > 0)
         {
-            printf("{\"event\":\"paused\"}\n");
+            printf("{\"event\":\"paused\",\"position\":%lld}\n", (long long)state.position);
             fflush(stdout);
             usleep((useconds_t)(pause_ms * 1000));
             pause_ms = 0;
+            printf("{\"event\":\"resumed\"}\n");
+            fflush(stdout);
         }
 
         bool reached = want > 0 && state.count >= want;

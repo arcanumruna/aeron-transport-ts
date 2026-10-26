@@ -226,7 +226,24 @@ export class PublicationParams {
     private getPublicationWindowLength(channelUri: ChannelUri, ctx: MediaDriver.Context): void {
         const pubWindowParam = channelUri.get(PUBLICATION_WINDOW_LENGTH_PARAM_NAME);
         if (null !== pubWindowParam) {
-            const pubWindow = SystemUtil.parseSize(PUBLICATION_WINDOW_LENGTH_PARAM_NAME, pubWindowParam);
+            let pubWindow: number;
+            try {
+                pubWindow = SystemUtil.parseSize(PUBLICATION_WINDOW_LENGTH_PARAM_NAME, pubWindowParam);
+            } catch (ex) {
+                if (ex instanceof LongOverflowError) {
+                    // D5: Java's long compares greater than any int half term length
+                    throw new InvalidChannelException(
+                        PUBLICATION_WINDOW_LENGTH_PARAM_NAME +
+                            '=' +
+                            ex.value +
+                            ' must not exceed half the ' +
+                            TERM_LENGTH_PARAM_NAME +
+                            '=' +
+                            this.termLength,
+                    );
+                }
+                throw ex;
+            }
             if (pubWindow < this.mtuLength) {
                 throw new InvalidChannelException(
                     PUBLICATION_WINDOW_LENGTH_PARAM_NAME +
@@ -281,10 +298,22 @@ export class PublicationParams {
         }
     }
 
+    /** `(int)SystemUtil.parseSize(...)`: a value beyond 2^53 - 1 (D5) keeps the low 32 bits, as Java's cast does. */
+    private static parseSizeAsInt(name: string, value: string): number {
+        try {
+            return SystemUtil.parseSize(name, value) | 0;
+        } catch (ex) {
+            if (ex instanceof LongOverflowError) {
+                return Number(BigInt.asIntN(32, ex.value));
+            }
+            throw ex;
+        }
+    }
+
     private getTermBufferLength(channelUri: ChannelUri): void {
         const termLengthParam = channelUri.get(TERM_LENGTH_PARAM_NAME);
         if (null !== termLengthParam) {
-            const termLength = SystemUtil.parseSize(TERM_LENGTH_PARAM_NAME, termLengthParam) | 0;
+            const termLength = PublicationParams.parseSizeAsInt(TERM_LENGTH_PARAM_NAME, termLengthParam);
             LogBufferDescriptor.checkTermLength(termLength);
             PublicationParams.validateTermLength(this, termLength, channelUri);
             this.termLength = termLength;
@@ -294,7 +323,7 @@ export class PublicationParams {
     private getMtuLength(channelUri: ChannelUri): void {
         const mtuParam = channelUri.get(MTU_LENGTH_PARAM_NAME);
         if (null !== mtuParam) {
-            const mtuLength = SystemUtil.parseSize(MTU_LENGTH_PARAM_NAME, mtuParam) | 0;
+            const mtuLength = PublicationParams.parseSizeAsInt(MTU_LENGTH_PARAM_NAME, mtuParam);
             Configuration.validateMtuLength(mtuLength);
             PublicationParams.validateMtuLength(this, mtuLength, channelUri);
             this.mtuLength = mtuLength;

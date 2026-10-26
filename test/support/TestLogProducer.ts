@@ -37,10 +37,9 @@ export class TestLogProducer {
     private readonly publication: ConcurrentPublication;
     private readonly source = new UnsafeBuffer();
 
-    public constructor(
-        rawLog: RawLog,
-        private readonly start: LogStart,
-    ) {
+    private readonly start: LogStart;
+    public constructor(rawLog: RawLog, start: LogStart) {
+        this.start = start;
         this.termLength = rawLog.termLength();
         this.maxPayloadLength = start.mtuLength - HEADER_LENGTH;
         this.maxMessageLength = FrameDescriptor.computeMaxMessageLength(this.termLength);

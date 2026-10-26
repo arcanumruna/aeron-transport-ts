@@ -148,4 +148,38 @@ describe('checkTestMapping', () => {
             expect(runWith(md, exists(['test/support/B.ts'])).join('\n')).toContain('test/support/C.ts');
         });
     });
+
+    describe('unmapped Java tests (issue 5)', () => {
+        const sourcesWith = (notPorted: string[]): string =>
+            [
+                '## Sources',
+                '| Java source | TypeScript source | Notes |',
+                '|---|---|---|',
+                '| `fx:src/main/java/Widget.java` | `src/Widget.ts` | note |',
+                '',
+                '## Not ported',
+                '| Java member | Reason |',
+                '|---|---|',
+                ...notPorted,
+                '',
+            ].join('\n') + mapping([BASE_ROW, JAVA_ROW], [SKIP_ROW]);
+        const runWith = (md: string, javaTests: string[]): string[] =>
+            checkMapping(md, {
+                roots: { fx: join(fixtures, 'java') },
+                readTs: read,
+                findJavaTest: (_prefix: string, name: string) => javaTests.includes(name),
+            });
+
+        it('fails a Sources row whose Java test has neither a Tests row nor a Not ported row Regression', () => {
+            expect(runWith(sourcesWith([]), ['WidgetTest']).join('\n')).toContain('WidgetTest.java');
+        });
+
+        it('passes when the Not ported table names the test', () => {
+            expect(runWith(sourcesWith(['| `WidgetTest` (3) | reason |']), ['WidgetTest'])).toEqual([]);
+        });
+
+        it('passes when there is no Java test for the source', () => {
+            expect(runWith(sourcesWith([]), [])).toEqual([]);
+        });
+    });
 });

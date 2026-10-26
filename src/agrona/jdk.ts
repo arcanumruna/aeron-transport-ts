@@ -188,9 +188,55 @@ export const Character = {
     },
 } as const;
 
+function getInteger(name: string): number | null;
+function getInteger(name: string, def: number): number;
+function getInteger(name: string, def: number | null): number | null;
+function getInteger(name: string, def: number | null = null): number | null {
+    const value = systemProperties.get(name);
+    if (undefined !== value) {
+        try {
+            return Number(decode(value, BigInt(-2147483648), BigInt(2147483647)));
+        } catch (ex) {
+            if (!(ex instanceof NumberFormatException)) {
+                throw ex;
+            }
+        }
+    }
+
+    return def;
+}
+
 /**
  * Stand-in for `java.lang.Integer`.
  */
+/**
+ * The ASCII spelling of a string whose decimal digits may be any BMP `Nd` character, which is what
+ * `Character.digit(char, 10)` accepts: Java's `parseInt` and `parseLong` work per UTF-16 unit, so a supplementary digit
+ * (mathematical bold, U+1D7CE) is two surrogates, neither a digit, and stays as it is for the caller to refuse.
+ * A run of `Nd` characters is made of sets of ten, the first of which is zero.
+ * Not on a hot path: the ASCII case is answered by the caller's own test.
+ */
+function toAsciiDigits(s: string): string {
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+        const ch = s.charAt(i);
+        if (!/^\p{Nd}$/u.test(ch)) {
+            out += ch;
+            continue;
+        }
+
+        let unit = s.charCodeAt(i);
+        const here = unit;
+        while (unit > 0 && /^\p{Nd}$/u.test(String.fromCharCode(unit - 1))) {
+            unit--;
+        }
+
+        out += String((here - unit) % 10);
+    }
+
+    return out;
+}
+
 export const Integer = {
     MIN_VALUE: -2147483648,
     MAX_VALUE: 2147483647,
@@ -200,17 +246,18 @@ export const Integer = {
         return Math.clz32(i);
     },
 
-    /** `Integer.parseInt(String)`: decimal ASCII digits only. */
+    /** `Integer.parseInt(String)`: decimal digits, ASCII or any BMP Unicode `Nd` as `Character.digit(char)` accepts (issue 17). */
     parseInt(s: string | null): number {
         if (null === s) {
             throw new NumberFormatException('Cannot parse null string: null');
         }
 
-        if (!/^[+-]?[0-9]+$/.test(s)) {
+        const text = /^[+-]?[0-9]+$/.test(s) ? s : toAsciiDigits(s);
+        if (!/^[+-]?[0-9]+$/.test(text)) {
             throw new NumberFormatException('For input string: "' + s + '"');
         }
 
-        const result = Number(s);
+        const result = Number(text);
         if (result < Integer.MIN_VALUE || result > Integer.MAX_VALUE) {
             throw new NumberFormatException('For input string: "' + s + '"');
         }
@@ -261,20 +308,7 @@ export const Integer = {
      * `Integer.getInteger(String, Integer)`: the system property `name` decoded as an `int` (`Integer.decode`), or
      * `def` if there is no such property or it is not a number.
      */
-    getInteger<T extends number | null = null>(name: string, def: T = null as T): number | T {
-        const value = systemProperties.get(name);
-        if (undefined !== value) {
-            try {
-                return Number(decode(value, BigInt(-2147483648), BigInt(2147483647)));
-            } catch (ex) {
-                if (!(ex instanceof NumberFormatException)) {
-                    throw ex;
-                }
-            }
-        }
-
-        return def;
-    },
+    getInteger,
 } as const;
 
 /**
@@ -316,6 +350,24 @@ export const Short = {
 const INT64_MIN = -(2n ** 63n);
 const INT64_MAX = 2n ** 63n - 1n;
 
+function getLong(name: string): number | null;
+function getLong(name: string, def: number): number;
+function getLong(name: string, def: number | null): number | null;
+function getLong(name: string, def: number | null = null): number | null {
+    const value = systemProperties.get(name);
+    if (undefined !== value) {
+        try {
+            return longToNumber(decode(value, -(2n ** 63n), 2n ** 63n - 1n));
+        } catch (ex) {
+            if (!(ex instanceof NumberFormatException)) {
+                throw ex;
+            }
+        }
+    }
+
+    return def;
+}
+
 /**
  * Stand-in for `java.lang.Long`. A Java `long` that is held in a `number` is exact to +/-(2^53 - 1) (spec 5.2), so
  * {@link Long.MAX_VALUE} and {@link Long.MIN_VALUE} are the largest and smallest values that can be held.
@@ -326,7 +378,7 @@ export const Long = {
     SIZE: 64,
 
     /**
-     * `Long.parseLong(String)` (and `Long.valueOf(String)`): an optional sign and decimal ASCII digits. A value outside
+     * `Long.parseLong(String)` (and `Long.valueOf(String)`): an optional sign and decimal digits (ASCII or any BMP Unicode `Nd`, as `Character.digit(char)`). A value outside
      * Java's `long` is a `NumberFormatException`; one inside it but outside +/-(2^53 - 1) is a {@link LongOverflowError}
      * carrying the exact value (spec D5).
      */
@@ -335,11 +387,12 @@ export const Long = {
             throw new NumberFormatException('Cannot parse null string: null');
         }
 
-        if (!/^[+-]?[0-9]+$/.test(s)) {
+        const text = /^[+-]?[0-9]+$/.test(s) ? s : toAsciiDigits(s);
+        if (!/^[+-]?[0-9]+$/.test(text)) {
             throw new NumberFormatException('For input string: "' + s + '"');
         }
 
-        const value = BigInt(s);
+        const value = BigInt(text);
         if (value < -(2n ** 63n) || value > 2n ** 63n - 1n) {
             throw new NumberFormatException('For input string: "' + s + '"');
         }
@@ -394,20 +447,7 @@ export const Long = {
      * is no such property or it is not a number. A value inside Java's `long` but outside +/-(2^53 - 1) is a
      * {@link LongOverflowError} (spec D5).
      */
-    getLong<T extends number | null = null>(name: string, def: T = null as T): number | T {
-        const value = systemProperties.get(name);
-        if (undefined !== value) {
-            try {
-                return longToNumber(decode(value, -(2n ** 63n), 2n ** 63n - 1n));
-            } catch (ex) {
-                if (!(ex instanceof NumberFormatException)) {
-                    throw ex;
-                }
-            }
-        }
-
-        return def;
-    },
+    getLong,
 
     /** The 64-bit `a & b` for two `number`s holding safe integers. */
     and(a: number, b: number): number {
@@ -509,16 +549,31 @@ export class TimeUnit {
 
     /** `toMillis(duration)`: truncated towards zero, saturating at {@link Long.MAX_VALUE} and {@link Long.MIN_VALUE}. */
     public toMillis(duration: number): number {
-        const nanos = this.toNanos(duration);
-        return Math.trunc(nanos / 1_000_000);
+        return TimeUnit.MILLISECONDS.convert(duration, this);
     }
 
     /**
      * `convert(sourceDuration, sourceUnit)`: `sourceDuration` of `sourceUnit` in this unit, truncated towards zero.
+     * It converts by the ratio of the two scales (every scale divides the larger ones exactly), as Java does, and
+     * not through nanoseconds, which would saturate early.
      */
     public convert(sourceDuration: number, sourceUnit: TimeUnit): number {
-        const nanos = sourceUnit.toNanos(sourceDuration);
-        return Math.trunc(nanos / this.scale);
+        const source = sourceUnit.scale;
+        const target = this.scale;
+        if (source < target) {
+            return Math.trunc(sourceDuration / (target / source));
+        }
+
+        const ratio = source / target;
+        const max = Math.floor(Long.MAX_VALUE / ratio);
+        if (sourceDuration > max) {
+            return Long.MAX_VALUE;
+        }
+        if (sourceDuration < -max) {
+            return Long.MIN_VALUE;
+        }
+
+        return sourceDuration * ratio;
     }
 
     public toNanos(duration: number | bigint): number {

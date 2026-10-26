@@ -4,6 +4,14 @@
   "description": "TypeScript port of the Aeron UDP transport for Node.js",
   "license": "Apache-2.0",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "engines": {
     "node": ">=22.18.0"
   },
@@ -27,6 +35,7 @@
     "fetch:refs": "sh scripts/fetch-refs.sh",
     "check:mapping": "node scripts/check-test-mapping.mjs",
     "probe:multicast": "node scripts/multicast-probe.mjs",
+    "probe:offhost": "node scripts/offhost-probe.mjs",
     "bench:micro": "node --expose-gc --experimental-transform-types --import ./test/support/workerRegister.mjs --no-warnings bench/lib/runMicro.ts",
     "bench:e2e": "node --expose-gc --experimental-transform-types --import ./test/support/workerRegister.mjs --no-warnings bench/e2e/report.ts",
     "bench:gate": "node --experimental-transform-types --import ./test/support/workerRegister.mjs --no-warnings bench/lib/gate.ts"

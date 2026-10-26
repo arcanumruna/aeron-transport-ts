@@ -18,6 +18,7 @@ const STREAM_ID = 1001;
 const TERM_LENGTH = 65536;
 const FRAME_ALIGNMENT = 32;
 const HEADER_LENGTH = 32;
+const MTU = 1408;
 const QUIET_TURNS = 3000;
 
 /** The length of the frame that a message of `length` bytes takes in the log, as the publication aligns it. */
@@ -155,6 +156,10 @@ describe.each([['shared'], ['exclusive']] as const)('Unicast backpressure with a
         const producer = new Producer(publication, work, Math.max(...sizes));
         const consumed = new Consumed();
 
+        // issue #56: that the publisher is back pressured proves nothing about the consumer (a flat out publisher always
+        // is). What shows the slow consumer is the time it takes: one fragment every other turn, so at least two turns
+        // for each fragment of the stream. Mutation: poll every turn with no fragment limit, and it ends far sooner
+        let maxLead = 0;
         let turns = 0;
         await driveUntil(
             () => {
@@ -162,6 +167,7 @@ describe.each([['shared'], ['exclusive']] as const)('Unicast backpressure with a
                 if (turns++ % 2 === 0) {
                     consumed.poll(subscription, 1);
                 }
+                maxLead = Math.max(maxLead, publication.position() - subscription.imageAtIndex(0).position());
                 return consumed.sequences.length >= work.count;
             },
             'all messages (sent ' + producer.sent() + ' of ' + work.count + ')',
@@ -171,6 +177,10 @@ describe.each([['shared'], ['exclusive']] as const)('Unicast backpressure with a
         expect(consumed.sequences).toEqual(sequences(0, work.count));
         expect(consumed.lengths).toEqual(lengths(work));
         expect(producer.backPressured).toBeGreaterThan(0);
+        const fragments = picked.reduce((sum, size) => sum + Math.ceil(size / (MTU - HEADER_LENGTH)), 0);
+        expect(turns).toBeGreaterThanOrEqual(2 * fragments - 1);
+        // the consumer never fell behind by more than both windows
+        expect(maxLead).toBeLessThanOrEqual(stream.maxAhead + frameLength(Math.max(...sizes)));
         expect(publication.position()).toBeGreaterThanOrEqual(4 * TERM_LENGTH);
         expect(subscription.imageAtIndex(0).position()).toBe(publication.position());
         expectNoErrors(stream.publisher, stream.subscriber);

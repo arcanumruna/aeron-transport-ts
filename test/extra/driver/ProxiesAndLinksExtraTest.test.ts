@@ -311,7 +311,10 @@ class TestLink extends SubscriptionLink {
 class TestSubscribable implements Subscribable {
     public readonly removed: Array<[SubscriptionLink, ReadablePosition]> = [];
 
-    public constructor(private readonly id: number) {}
+    private readonly id: number;
+    public constructor(id: number) {
+        this.id = id;
+    }
 
     public subscribableRegistrationId(): number {
         return this.id;

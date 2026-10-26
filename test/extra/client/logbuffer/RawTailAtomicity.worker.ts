@@ -9,12 +9,15 @@ interface Data {
     buffer: SharedArrayBuffer;
     partition: number;
     count: number;
+    /** The adds the rotator waits for before each rotation (the overlap is bounded by iterations, not time). */
+    perRotation: number;
 }
 
 const data = workerData as Data;
 const buffer = new UnsafeBuffer(data.buffer);
 const BARRIER = 2048;
 const DONE = 2056;
+const PROGRESS = 2064;
 const MAX_SPINS = 400_000_000;
 /** The raw tail with the unsigned 32 bit `low` (packTail sign-extends a negative int offset, as Java does). */
 function raw(termId: number, low: number): bigint {
@@ -53,6 +56,7 @@ function add(): { adds: number; torn: number; first: string } {
         const offset = LogBufferDescriptor.getAndAddRawTailOffset(buffer, slot, 32, holder);
         const termId = holder[0]!;
         adds++;
+        buffer.putIntVolatile(PROGRESS, adds);
         if (offset >>> 20 !== termId && ++torn === 1) {
             first = 'termId ' + termId + ' offset ' + offset;
         }
@@ -76,6 +80,16 @@ function rotate(): number {
     let failures = 0;
     barrier();
     for (let i = 0; i < data.count; i++) {
+        // the adder is mid-flight: rotate only after it has added perRotation more, so that every rotation overlaps adds
+        // and the number of adds is fixed by iterations, whatever the speed of the host
+        const target = (i + 1) * data.perRotation;
+        let waits = 0;
+        while (buffer.getIntVolatile(PROGRESS) < target) {
+            if (++waits > MAX_SPINS) {
+                buffer.putIntVolatile(DONE, 1);
+                throw new Error('rotate: the adder made no progress');
+            }
+        }
         let attempts = 0;
         for (;;) {
             const current = LogBufferDescriptor.rawTailVolatile(buffer, data.partition);

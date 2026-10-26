@@ -22,6 +22,7 @@ import {
     Integer,
     Long,
     LongOverflowError,
+    NullPointerException,
     NumberFormatException,
 } from '../../agrona/jdk.js';
 import { objectsEquals, requireNonNull, stringHashCode } from '../../agrona/jdkUtil.js';
@@ -47,6 +48,22 @@ import { InterfaceSearchAddress } from './InterfaceSearchAddress.js';
 import { NetworkUtil } from './NetworkUtil.js';
 import { SocketAddressParser } from './SocketAddressParser.js';
 import { UnresolvedInterface } from './UnresolvedInterface.js';
+
+/**
+ * A null name resolver is used lazily in Java: its NullPointerException surfaces at the first lookup, so a channel of IP
+ * literals parses with it. This stands in for it; no TypeError is caught to find the null.
+ */
+const NULL_NAME_RESOLVER: NameResolver = {
+    resolve(): never {
+        throw new NullPointerException('nameResolver');
+    },
+    lookup(): never {
+        throw new NullPointerException('nameResolver');
+    },
+    name(): never {
+        throw new NullPointerException('nameResolver');
+    },
+};
 
 const ANY_IPV4 = new InetSocketAddress('0.0.0.0', 0);
 const ANY_IPV6 = new InetSocketAddress('::', 0);
@@ -131,17 +148,19 @@ export class UdpChannel {
      * resolver, `parse(uri, nameResolver)` and `parse(uri, nameResolver, isDestination)`.
      *
      * @param channelUriString to parse.
-     * @param nameResolver     to use for resolving names.
+     * @param nameResolverOrNull to use for resolving names; null is Java's null, which fails at the first lookup.
      * @param isDestination    to identify if it is a destination within a channel.
      * @return a new {@link UdpChannel} as the result of parsing.
      * @throws InvalidChannelException if an error occurs.
      */
     public static parse(
         channelUriString: string,
-        nameResolver: NameResolver = DefaultNameResolver.INSTANCE,
+        nameResolverOrNull: NameResolver | null = DefaultNameResolver.INSTANCE,
         isDestination: boolean = false,
     ): UdpChannel {
+        const nameResolver = null === nameResolverOrNull ? NULL_NAME_RESOLVER : nameResolverOrNull;
         try {
+            requireNonNull(channelUriString);
             const channelUri = ChannelUri.parse(channelUriString);
             UdpChannel.validateConfiguration(channelUri);
 

@@ -92,10 +92,13 @@ export class ReceiveRing {
     /**
      * Adds a datagram at the tail.
      *
+     * An empty ring takes any one datagram, even one larger than the byte budget (a small `SO_RCVBUF` must not lose
+     * every max-size datagram for good); the ring then holds only that datagram.
+     *
      * @return false, adding nothing, if the ring has no free slot or the datagram does not fit the byte budget.
      */
     public offer(buffer: Uint8Array, length: number, address: InetSocketAddress): boolean {
-        if (this.tail - this.head > this.mask || this.bytes + length > this.byteBudget) {
+        if (this.tail - this.head > this.mask || (this.bytes + length > this.byteBudget && this.tail !== this.head)) {
             return false;
         }
 

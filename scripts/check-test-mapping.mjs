@@ -149,6 +149,8 @@ function multisetDiff(a, b) {
  * @param opts.readTs reads a TS test file by its repo-relative path
  * @param opts.fileExists optional: whether a repo-relative path exists; when given, every TS file named in the
  *        "Sources" table must exist
+ * @param opts.findJavaTest optional: whether the Java test `<name>` exists under the source root `prefix`; when given,
+ *        every Sources row with such a test needs a Tests row or a Not-ported row
  * @returns error messages, empty when the mapping holds
  */
 export function checkMapping(md, opts) {
@@ -233,6 +235,23 @@ export function checkMapping(md, opts) {
         }
     }
 
+    // Every Sources row whose `<Name>Test.java` exists in the Java test tree needs a Tests row or a "Not ported" row
+    // that names the test.
+    if (opts.findJavaTest) {
+        const testsMapped = new Set(rows.map(([java]) => java.slice(java.lastIndexOf('/') + 1).replace(/\.java$/, '')));
+        const notPorted = tableRows(md, 'Not ported')
+            .map(([member]) => member ?? '')
+            .join('\n');
+        for (const [java] of tableRows(md, 'Sources')) {
+            const m = /^(\w+):.*\/(\w+)\.java$/.exec(java);
+            if (!m || m[2].endsWith('Test')) continue;
+            const test = `${m[2]}Test`;
+            if (!opts.findJavaTest(m[1], test)) continue;
+            if (!testsMapped.has(test) && !new RegExp(`\\b${test}\\b`).test(notPorted))
+                errors.push(`${test}.java: Java test of the ported ${m[2]} has no Tests row and no "Not ported" row`);
+        }
+    }
+
     const listed = tableRows(md, 'Skipped tests').map(([ts, name]) => `${ts}|${name}`);
     for (const s of multisetDiff(skips, listed)) {
         const [ts, name] = s.split('|');
@@ -243,6 +262,18 @@ export function checkMapping(md, opts) {
         errors.push(`${ts}: listed skip ${name} is not an it.skip`);
     }
     return errors;
+}
+
+/** Whether a file called `name` exists under `dir`, in a path that has a `src/<kind>` segment (skips `.git` and build output). */
+function hasFile(dir, name, kind) {
+    for (const f of readdirSync(dir)) {
+        if (f === '.git' || f === 'build' || f === 'node_modules') continue;
+        const p = join(dir, f);
+        if (statSync(p).isDirectory()) {
+            if (hasFile(p, name, kind)) return true;
+        } else if (f === name && p.includes(`/src/${kind}/`)) return true;
+    }
+    return false;
 }
 
 function main() {
@@ -263,6 +294,7 @@ function main() {
         roots,
         readTs: (p) => readFileSync(join(repo, p), 'utf8'),
         fileExists: (p) => existsSync(join(repo, p)),
+        findJavaTest: (prefix, name) => hasFile(roots[prefix], `${name}.java`, 'test'),
     });
 
     // Every TS test file under test/ (outside extras, interop, system, scripts) must have a mapping row.
