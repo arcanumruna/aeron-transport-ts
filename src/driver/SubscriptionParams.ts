@@ -198,6 +198,43 @@ export class SubscriptionParams {
         }
     }
 
+    /**
+     * Check that the initial window of a subscription fits the receive buffer of its channel: `SO_RCVBUF` of the
+     * channel when it sets one, else the OS default.
+     *
+     * @throws IllegalStateException if the initial window is greater than the receive buffer.
+     */
+    public static validateInitialWindowForRcvBuf(
+        params: SubscriptionParams,
+        channel: string,
+        channelSocketRcvbufLength: number,
+        ctx: MediaDriver.Context,
+        existingChannel: string | null,
+    ): void {
+        if (0 !== channelSocketRcvbufLength && params.receiverWindowLength > channelSocketRcvbufLength) {
+            throw new IllegalStateException(
+                'Initial window greater than SO_RCVBUF for channel: rcv-wnd=' +
+                    params.receiverWindowLength +
+                    ' so-rcvbuf=' +
+                    channelSocketRcvbufLength +
+                    (null === existingChannel ? '' : ' existingChannel=' + existingChannel) +
+                    ' channel=' +
+                    channel,
+            );
+        } else if (0 === channelSocketRcvbufLength && params.receiverWindowLength > ctx.osDefaultSocketRcvbufLength()) {
+            throw new IllegalStateException(
+                'Initial window greater than SO_RCVBUF for channel: rcv-wnd=' +
+                    params.receiverWindowLength +
+                    ' so-rcvbuf=' +
+                    ctx.osDefaultSocketRcvbufLength() +
+                    ' (OS default)' +
+                    (null === existingChannel ? '' : ' existingChannel=' + existingChannel) +
+                    ' channel=' +
+                    channel,
+            );
+        }
+    }
+
     private getUntetheredRestingTimeout(channelUri: ChannelUri, ctx: MediaDriver.Context): void {
         this.untetheredRestingTimeoutNs = SubscriptionParams.getTimeoutNs(
             channelUri,

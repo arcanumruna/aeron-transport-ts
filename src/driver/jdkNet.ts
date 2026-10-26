@@ -27,6 +27,12 @@ export class IOException extends Exception {}
 /** `java.net.SocketException`. */
 export class SocketException extends IOException {}
 
+/** `java.net.BindException`: the bind failed, for example because the address is in use or the port range is empty. */
+export class BindException extends SocketException {}
+
+/** `java.net.PortUnreachableException`: an ICMP port unreachable on a connected socket. */
+export class PortUnreachableException extends SocketException {}
+
 /** `java.net.UnknownHostException`. */
 export class UnknownHostException extends IOException {}
 

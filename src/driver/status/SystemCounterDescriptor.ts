@@ -481,6 +481,16 @@ export class SystemCounterDescriptor {
     );
 
     /**
+     * Not in Aeron (spec D1): count of datagrams a transport dropped because its receive ring was full. A drop there is
+     * the same event as a drop by the kernel in Java.
+     */
+    public static readonly RECEIVE_RING_DROPS: SystemCounterDescriptor = new SystemCounterDescriptor(
+        'RECEIVE_RING_DROPS',
+        AeronCounters.SYSTEM_COUNTER_ID_RECEIVE_RING_DROPS,
+        'Receive ring drops',
+    );
+
+    /**
      * All system counters have the same type id, i.e. system counters are the same type. Other types can exist.
      */
     public static readonly SYSTEM_COUNTER_TYPE_ID = AeronCounters.DRIVER_SYSTEM_COUNTER_TYPE_ID;
@@ -552,6 +562,7 @@ export class SystemCounterDescriptor {
             SystemCounterDescriptor.CONTROL_PROTOCOL_VERSION,
             SystemCounterDescriptor.STATUS_MESSAGES_REJECTED,
             SystemCounterDescriptor.NATIVE_RESOURCE_AGENT_PROXY_FAILS,
+            SystemCounterDescriptor.RECEIVE_RING_DROPS,
         ];
     }
 

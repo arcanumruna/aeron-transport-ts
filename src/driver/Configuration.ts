@@ -33,12 +33,14 @@ import { CountersReader } from '../agrona/concurrent/status/CountersReader.js';
 import type { StatusIndicator } from '../agrona/concurrent/status/StatusIndicator.js';
 import { ClassNotFoundException, Integer, Long, NumberFormatException, TimeUnit } from '../agrona/jdk.js';
 import { requireNonNull, System } from '../agrona/jdkLang.js';
+import { SystemErr } from '../agrona/jdkThrowable.js';
 import { LangUtil } from '../agrona/LangUtil.js';
 import { Strings } from '../agrona/Strings.js';
 import { SystemUtil } from '../agrona/SystemUtil.js';
 import { Aeron } from '../client/Aeron.js';
 import { CommonContext, type InferableBoolean } from '../client/CommonContext.js';
 import { ConfigurationException } from '../client/exceptions/ConfigurationException.js';
+import type { MediaDriverContext } from './MediaDriver.js';
 import { FrameDescriptor } from '../client/logbuffer/FrameDescriptor.js';
 import { LogBufferDescriptor } from '../client/logbuffer/LogBufferDescriptor.js';
 import { DataHeaderFlyweight } from '../client/protocol/DataHeaderFlyweight.js';
@@ -2059,6 +2061,66 @@ export class Configuration {
         if (!FrameDescriptor.isFrameAligned(mtuLength)) {
             throw new ConfigurationException(
                 'mtuLength=' + mtuLength + ' is not a multiple of FRAME_ALIGNMENT=' + FrameDescriptor.FRAME_ALIGNMENT,
+            );
+        }
+    }
+
+    /**
+     * Validate that the socket buffer lengths of the context fit the OS limits, the MTU and the initial window length.
+     * A length above what the OS allows is a warning on `System.err`; an MTU above the send buffer, or an initial
+     * window above the receive buffer, is an error.
+     *
+     * @param ctx the context to check.
+     * @throws ConfigurationException if the MTU or the initial window do not fit the socket buffers.
+     */
+    public static validateSocketBufferLengths(ctx: MediaDriverContext): void {
+        if (ctx.osMaxSocketSndbufLength() < ctx.socketSndbufLength()) {
+            SystemErr.println(
+                'WARNING: Could not set desired SO_SNDBUF, adjust OS to allow ' +
+                    Configuration.SOCKET_SNDBUF_LENGTH_PROP_NAME +
+                    ' attempted=' +
+                    ctx.socketSndbufLength() +
+                    ', actual=' +
+                    ctx.osMaxSocketSndbufLength(),
+            );
+        }
+
+        if (ctx.osMaxSocketRcvbufLength() < ctx.socketRcvbufLength()) {
+            SystemErr.println(
+                'WARNING: Could not set desired SO_RCVBUF, adjust OS to allow ' +
+                    Configuration.SOCKET_RCVBUF_LENGTH_PROP_NAME +
+                    ' attempted=' +
+                    ctx.socketRcvbufLength() +
+                    ', actual=' +
+                    ctx.osMaxSocketRcvbufLength(),
+            );
+        }
+
+        const soSndBuf = 0 === ctx.socketSndbufLength() ? ctx.osDefaultSocketSndbufLength() : ctx.socketSndbufLength();
+
+        if (ctx.mtuLength() > soSndBuf) {
+            throw new ConfigurationException(
+                'mtuLength=' +
+                    ctx.mtuLength() +
+                    ' > SO_SNDBUF=' +
+                    soSndBuf +
+                    ', increase ' +
+                    Configuration.SOCKET_SNDBUF_LENGTH_PROP_NAME +
+                    ' to match MTU',
+            );
+        }
+
+        const soRcvBuf = 0 === ctx.socketRcvbufLength() ? ctx.osDefaultSocketRcvbufLength() : ctx.socketRcvbufLength();
+
+        if (ctx.initialWindowLength() > soRcvBuf) {
+            throw new ConfigurationException(
+                'initialWindowLength=' +
+                    ctx.initialWindowLength() +
+                    ' > SO_RCVBUF=' +
+                    soRcvBuf +
+                    ', increase ' +
+                    Configuration.SOCKET_RCVBUF_LENGTH_PROP_NAME +
+                    ' limits to match initialWindowLength',
             );
         }
     }
