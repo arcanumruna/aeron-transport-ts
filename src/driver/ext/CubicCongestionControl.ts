@@ -117,7 +117,7 @@ export class CubicCongestionControl implements CongestionControl {
             this.cwnd = Math.min(INITCWND, this.maxCwnd);
             this._initialWindowLength = Math.imul(this.cwnd, this.mtu);
             this.w_max = this.maxCwnd; // initially set w_max to max window and act in the TCP and concave region initially
-            this.k = Math.cbrt((this.w_max * B) / C); // Java: StrictMath.cbrt (spec D130)
+            this.k = Math.cbrt((this.w_max * B) / C);
 
             // determine interval for adjustment based on heuristic of MTU, max window, and/or RTT estimate
             this.rttNs = CubicCongestionControlConfiguration.INITIAL_RTT_NS;
@@ -207,7 +207,7 @@ export class CubicCongestionControl implements CongestionControl {
         if (lossOccurred) {
             forceStatusMessage = true;
             this.w_max = this.cwnd;
-            this.k = Math.cbrt((this.w_max * B) / C); // Java: StrictMath.cbrt (spec D130)
+            this.k = Math.cbrt((this.w_max * B) / C);
             this.cwnd = Math.max(1, doubleToInt(this.cwnd * (1.0 - B)));
             this.windowLength = Math.imul(this.cwnd, this.mtu);
             this.windowIndicator.setRelease(this.windowLength);
