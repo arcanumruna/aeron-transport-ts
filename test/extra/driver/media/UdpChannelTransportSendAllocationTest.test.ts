@@ -26,7 +26,7 @@ const SENDS = 40_000;
 const WARM_UP_SENDS = 30_000;
 const BATCH = 100;
 const LENGTH = 1408;
-const ROUNDS = 3;
+const ROUNDS = 5;
 
 /** What the transport may allocate per send above the control: the closures of a call shape are 60 to 100 bytes. */
 const SLACK_BYTES = 40;
