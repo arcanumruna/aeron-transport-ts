@@ -92,7 +92,12 @@ describe('PublicationImageTimestampAllocationTest', () => {
 
         expect(rig.hwmPosition.get()).toBe(frames * 64);
         // the reserved value of the frames in the log is the clock's time: the two halves
-        const termBuffer = rig.rawLog.termBuffers()[0] as UnsafeBuffer;
+        // (the loop runs for as many iterations as the warm up and the settling of the measurement ask, so the term that
+        // holds the last frame is not always the first one: the first frame of the term of the last frame is checked)
+        const lastTermCount = Math.floor(((frames - 1) * 64) / LogBufferDescriptor.TERM_MIN_LENGTH);
+        const termBuffer = rig.rawLog.termBuffers()[
+            lastTermCount % LogBufferDescriptor.PARTITION_COUNT
+        ] as UnsafeBuffer;
         expect(termBuffer.getInt(24, ByteOrder.LITTLE_ENDIAN)).toBe(0x12345678);
         expect(termBuffer.getInt(28, ByteOrder.LITTLE_ENDIAN)).toBe(0x1234);
     });
