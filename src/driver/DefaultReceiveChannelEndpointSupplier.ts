@@ -19,7 +19,7 @@
 import type { AtomicCounter } from '../agrona/concurrent/status/AtomicCounter.js';
 import type { MediaDriverContext } from './MediaDriver.js';
 import { ReceiveChannelEndpoint } from './media/ReceiveChannelEndpoint.js';
-import type { DataPacketDispatcher } from './media/ReceiveChannelEndpoint.js';
+import type { DataPacketDispatcher } from './DataPacketDispatcher.js';
 import type { UdpChannel } from './media/UdpChannel.js';
 import type { ReceiveChannelEndpointSupplier } from './ReceiveChannelEndpointSupplier.js';
 

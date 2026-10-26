@@ -38,6 +38,7 @@ import { StatusMessageFlyweight } from '../../client/protocol/StatusMessageFlywe
 import { ChannelEndpointStatus } from '../../client/status/ChannelEndpointStatus.js';
 import { LocalSocketAddressStatus } from '../../client/status/LocalSocketAddressStatus.js';
 import type { InetSocketAddress } from '../jdkNet.js';
+import type { DataPacketDispatcher } from '../DataPacketDispatcher.js';
 import type { MediaDriverContext } from '../MediaDriver.js';
 import { SystemCounterDescriptor } from '../status/SystemCounterDescriptor.js';
 import type { ImageConnection } from './ImageConnection.js';
@@ -49,36 +50,6 @@ import type { UdpChannel } from './UdpChannel.js';
 import { UdpChannelTransport } from './UdpChannelTransport.js';
 
 const { SEND_SETUP_FLAG } = StatusMessageFlyweight;
-
-/**
- * Stand-in for `DataPacketDispatcher`, which task T14 ports. It has the members that a `ReceiveChannelEndpoint` calls;
- * T14 replaces it with `import type { DataPacketDispatcher } from '../DataPacketDispatcher.js'` (spec D24,
- * `docs/mapping.md`).
- */
-export interface DataPacketDispatcher {
-    onDataPacket(
-        channelEndpoint: ReceiveChannelEndpoint,
-        header: DataHeaderFlyweight,
-        buffer: UnsafeBuffer,
-        length: number,
-        srcAddress: InetSocketAddress,
-        transportIndex: number,
-    ): number;
-
-    onSetupMessage(
-        channelEndpoint: ReceiveChannelEndpoint,
-        msg: SetupFlyweight,
-        srcAddress: InetSocketAddress,
-        transportIndex: number,
-    ): void;
-
-    onRttMeasurement(
-        channelEndpoint: ReceiveChannelEndpoint,
-        msg: RttMeasurementFlyweight,
-        srcAddress: InetSocketAddress,
-        transportIndex: number,
-    ): void;
-}
 
 /**
  * Aggregator of multiple subscriptions onto a single transport channel for the receiving of data and setup frames

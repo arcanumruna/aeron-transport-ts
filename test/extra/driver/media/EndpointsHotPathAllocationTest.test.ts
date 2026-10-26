@@ -39,11 +39,11 @@ import { RttMeasurementFlyweight } from '../../../../src/client/protocol/RttMeas
 import { SetupFlyweight } from '../../../../src/client/protocol/SetupFlyweight.js';
 import { StatusMessageFlyweight } from '../../../../src/client/protocol/StatusMessageFlyweight.js';
 import { InetSocketAddress } from '../../../../src/driver/jdkNet.js';
+import type { DataPacketDispatcher } from '../../../../src/driver/DataPacketDispatcher.js';
 import { MediaDriver } from '../../../../src/driver/MediaDriver.js';
 import { ControlTransportPoller } from '../../../../src/driver/media/ControlTransportPoller.js';
 import { DataTransportPoller } from '../../../../src/driver/media/DataTransportPoller.js';
 import { ImageConnection } from '../../../../src/driver/media/ImageConnection.js';
-import type { DataPacketDispatcher } from '../../../../src/driver/media/ReceiveChannelEndpoint.js';
 import { ReceiveChannelEndpoint } from '../../../../src/driver/media/ReceiveChannelEndpoint.js';
 import type { DriverConductorProxy, NetworkPublication } from '../../../../src/driver/media/SendChannelEndpoint.js';
 import { SendChannelEndpoint } from '../../../../src/driver/media/SendChannelEndpoint.js';
@@ -55,7 +55,7 @@ const LOOPBACK = '127.0.0.1';
 const ITERATIONS = 500_000;
 
 /** A dispatcher that counts what it is given. */
-class CountingDispatcher implements DataPacketDispatcher {
+class CountingDispatcher {
     public data = 0;
     public setup = 0;
     public rtt = 0;
@@ -185,8 +185,13 @@ afterEach(() => {
     expect(errors).toEqual([]);
 });
 
-function newReceive(dispatcher: DataPacketDispatcher, uri = 'aeron:udp?endpoint=127.0.0.1:0'): ReceiveChannelEndpoint {
-    const endpoint = new ReceiveChannelEndpoint(UdpChannel.parse(uri), dispatcher, status(), context);
+function newReceive(dispatcher: CountingDispatcher, uri = 'aeron:udp?endpoint=127.0.0.1:0'): ReceiveChannelEndpoint {
+    const endpoint = new ReceiveChannelEndpoint(
+        UdpChannel.parse(uri),
+        dispatcher as unknown as DataPacketDispatcher,
+        status(),
+        context,
+    );
     closeables.push(endpoint);
     endpoint.openDatagramChannel(null);
     return endpoint;

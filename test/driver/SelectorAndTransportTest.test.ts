@@ -19,6 +19,7 @@
 import dgram from 'node:dgram';
 import type { Socket } from 'node:dgram';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { BitUtil } from '../../src/agrona/BitUtil.js';
 import type { ErrorHandler } from '../../src/agrona/ErrorHandler.js';
 import { CachedNanoClock } from '../../src/agrona/concurrent/CachedNanoClock.js';
@@ -29,10 +30,10 @@ import { DataHeaderFlyweight } from '../../src/client/protocol/DataHeaderFlyweig
 import { HeaderFlyweight } from '../../src/client/protocol/HeaderFlyweight.js';
 import { StatusMessageFlyweight } from '../../src/client/protocol/StatusMessageFlyweight.js';
 import { InetSocketAddress } from '../../src/driver/jdkNet.js';
+import { DataPacketDispatcher } from '../../src/driver/DataPacketDispatcher.js';
 import { MediaDriver } from '../../src/driver/MediaDriver.js';
 import { ControlTransportPoller } from '../../src/driver/media/ControlTransportPoller.js';
 import { DataTransportPoller } from '../../src/driver/media/DataTransportPoller.js';
-import type { DataPacketDispatcher } from '../../src/driver/media/ReceiveChannelEndpoint.js';
 import { ReceiveChannelEndpoint } from '../../src/driver/media/ReceiveChannelEndpoint.js';
 import { ReceiveChannelEndpointThreadLocals } from '../../src/driver/media/ReceiveChannelEndpointThreadLocals.js';
 import type { DriverConductorProxy, NetworkPublication } from '../../src/driver/media/SendChannelEndpoint.js';
@@ -70,12 +71,7 @@ describe('SelectorAndTransportTest', () => {
     const mockSendStatusIndicator = mock(AtomicCounter).mock;
     const mockReceiveStatusIndicator = mock(AtomicCounter).mock;
 
-    // mock(DataPacketDispatcher.class): the placeholder type of ReceiveChannelEndpoint.ts (T14 ports the class)
-    const mockDispatcher: Fake<DataPacketDispatcher> = {
-        onDataPacket: vi.fn<DataPacketDispatcher['onDataPacket']>(),
-        onSetupMessage: vi.fn<DataPacketDispatcher['onSetupMessage']>(),
-        onRttMeasurement: vi.fn<DataPacketDispatcher['onRttMeasurement']>(),
-    };
+    const mockDispatcher = mock(DataPacketDispatcher).mock;
     // mock(NetworkPublication.class): the placeholder type of SendChannelEndpoint.ts (T15 ports the class)
     const mockPublication: Fake<NetworkPublication> = {
         sessionId: vi.fn<NetworkPublication['sessionId']>(),
@@ -118,7 +114,7 @@ describe('SelectorAndTransportTest', () => {
         sendChannelEndpoint = null;
         receiveChannelEndpoint = null;
         for (const spy of Object.values(mockDispatcher)) {
-            spy.mockReset();
+            (spy as Mock).mockReset();
         }
         for (const spy of Object.values(mockPublication)) {
             spy.mockReset();
@@ -228,7 +224,7 @@ describe('SelectorAndTransportTest', () => {
     it('shouldSendEmptyDataFrameUnicastFromSourceToReceiver', async () => {
         let dataHeadersReceived = 0;
 
-        mockDispatcher.onDataPacket.mockImplementation(() => {
+        vi.mocked(mockDispatcher.onDataPacket).mockImplementation(() => {
             dataHeadersReceived++;
             return 0;
         });
@@ -267,7 +263,7 @@ describe('SelectorAndTransportTest', () => {
     it('shouldSendMultipleDataFramesPerDatagramUnicastFromSourceToReceiver', async () => {
         let dataHeadersReceived = 0;
 
-        mockDispatcher.onDataPacket.mockImplementation(() => {
+        vi.mocked(mockDispatcher.onDataPacket).mockImplementation(() => {
             dataHeadersReceived++;
             return 0;
         });

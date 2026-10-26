@@ -46,6 +46,7 @@ import { SetupFlyweight } from '../../../../src/client/protocol/SetupFlyweight.j
 import { StatusMessageFlyweight } from '../../../../src/client/protocol/StatusMessageFlyweight.js';
 import { ChannelEndpointStatus } from '../../../../src/client/status/ChannelEndpointStatus.js';
 import { Configuration } from '../../../../src/driver/Configuration.js';
+import type { DataPacketDispatcher } from '../../../../src/driver/DataPacketDispatcher.js';
 import { DefaultReceiveChannelEndpointSupplier } from '../../../../src/driver/DefaultReceiveChannelEndpointSupplier.js';
 import { DefaultSendChannelEndpointSupplier } from '../../../../src/driver/DefaultSendChannelEndpointSupplier.js';
 import { ClosedChannelException, InetAddress, InetSocketAddress } from '../../../../src/driver/jdkNet.js';
@@ -53,7 +54,6 @@ import { MediaDriver } from '../../../../src/driver/MediaDriver.js';
 import { ControlTransportPoller } from '../../../../src/driver/media/ControlTransportPoller.js';
 import { DataTransportPoller } from '../../../../src/driver/media/DataTransportPoller.js';
 import { ImageConnection } from '../../../../src/driver/media/ImageConnection.js';
-import type { DataPacketDispatcher } from '../../../../src/driver/media/ReceiveChannelEndpoint.js';
 import { ReceiveChannelEndpoint } from '../../../../src/driver/media/ReceiveChannelEndpoint.js';
 import { ReceiveChannelEndpointThreadLocals } from '../../../../src/driver/media/ReceiveChannelEndpointThreadLocals.js';
 import { ReceiveDestinationTransport } from '../../../../src/driver/media/ReceiveDestinationTransport.js';
@@ -89,13 +89,16 @@ function counterValue(descriptor: SystemCounterDescriptor): number {
     return systemCounters().get(descriptor).get();
 }
 
+/** The members of the dispatcher that the endpoints call. */
+type DispatcherMembers = Pick<DataPacketDispatcher, 'onDataPacket' | 'onSetupMessage' | 'onRttMeasurement'>;
+
 /** A dispatcher that records what it is called with, and answers what a Mockito mock answers (0). */
-function newDispatcher(): Fake<DataPacketDispatcher> {
+function newDispatcher(): Fake<DispatcherMembers> & DataPacketDispatcher {
     return {
         onDataPacket: vi.fn<DataPacketDispatcher['onDataPacket']>(() => 0),
         onSetupMessage: vi.fn<DataPacketDispatcher['onSetupMessage']>(),
         onRttMeasurement: vi.fn<DataPacketDispatcher['onRttMeasurement']>(),
-    };
+    } as unknown as Fake<DispatcherMembers> & DataPacketDispatcher;
 }
 
 /** A publication that records what it is called with. */

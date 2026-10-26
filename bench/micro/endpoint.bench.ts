@@ -1,7 +1,8 @@
-// Micro benches of the per-datagram paths of the channel endpoints and the transport pollers (phase 2, T13): the data
+// Micro benches of the per-datagram paths of the channel endpoints and the transport pollers (phase 2, T13, T14): the data
 // poller (a datagram in the ring, one poll: pop and copy, frame validation, routing, the endpoint callback, a dispatcher
 // that counts), the control poller (a status message to a publication that counts), the send of a packet on the connected
 // socket with and without the channel send timestamp, and the receiver's status message with and without a group tag.
+// With the real `DataPacketDispatcher` (T14) the data poller bench continues to the stream, the session and the image.
 // The sockets take a datagram and do nothing, so the numbers are this port's own cost and not the kernel's.
 import type { Socket } from 'node:dgram';
 import type { ErrorHandler } from '../../src/agrona/ErrorHandler.js';
@@ -11,12 +12,14 @@ import type { CountersManager } from '../../src/agrona/concurrent/status/Counter
 import { DataHeaderFlyweight } from '../../src/client/protocol/DataHeaderFlyweight.js';
 import { HeaderFlyweight } from '../../src/client/protocol/HeaderFlyweight.js';
 import { StatusMessageFlyweight } from '../../src/client/protocol/StatusMessageFlyweight.js';
+import { SetupFlyweight } from '../../src/client/protocol/SetupFlyweight.js';
 import { InetSocketAddress } from '../../src/driver/jdkNet.js';
+import type { DataPacketDispatcher, PublicationImage } from '../../src/driver/DataPacketDispatcher.js';
+import { DataPacketDispatcher as RealDataPacketDispatcher } from '../../src/driver/DataPacketDispatcher.js';
 import { MediaDriver } from '../../src/driver/MediaDriver.js';
 import { ControlTransportPoller } from '../../src/driver/media/ControlTransportPoller.js';
 import { DataTransportPoller } from '../../src/driver/media/DataTransportPoller.js';
 import { ImageConnection } from '../../src/driver/media/ImageConnection.js';
-import type { DataPacketDispatcher } from '../../src/driver/media/ReceiveChannelEndpoint.js';
 import { ReceiveChannelEndpoint } from '../../src/driver/media/ReceiveChannelEndpoint.js';
 import type { NetworkPublication } from '../../src/driver/media/SendChannelEndpoint.js';
 import { SendChannelEndpoint } from '../../src/driver/media/SendChannelEndpoint.js';
@@ -27,7 +30,7 @@ const OPS_PER_SAMPLE = 1_000;
 const MTU = 1408;
 const rinfo = { address: '127.0.0.1', family: 'IPv4' as const, port: 5000, size: 128 };
 
-class CountingDispatcher implements DataPacketDispatcher {
+class CountingDispatcher {
     public count = 0;
 
     public onDataPacket(): number {
@@ -120,7 +123,7 @@ function dataPollBench(): SyncBench {
             context = newContext();
             endpoint = new ReceiveChannelEndpoint(
                 UdpChannel.parse('aeron:udp?endpoint=127.0.0.1:0'),
-                dispatcher,
+                dispatcher as unknown as DataPacketDispatcher,
                 status(context),
                 context,
             );
@@ -143,6 +146,102 @@ function dataPollBench(): SyncBench {
             poller.close();
             context.close();
             if (bytes < 0 || dispatcher.count < 0) {
+                throw new Error('unreachable');
+            }
+        },
+    };
+}
+
+class CountingImage implements PublicationImage {
+    public inserted = 0;
+
+    public sessionId(): number {
+        return -7;
+    }
+
+    public streamId(): number {
+        return 1001;
+    }
+
+    public correlationId(): number {
+        return 77;
+    }
+
+    public isEndOfStream(): boolean {
+        return false;
+    }
+
+    public activate(): void {}
+
+    public deactivate(): void {}
+
+    public insertPacket(_termId: number, _termOffset: number, _buffer: UnsafeBuffer, length: number): number {
+        this.inserted++;
+        return length;
+    }
+
+    public addDestinationConnectionIfUnknown(): void {}
+
+    public onRttMeasurement(): void {}
+}
+
+function dispatchBench(): SyncBench {
+    let context: MediaDriver.Context;
+    let endpoint: ReceiveChannelEndpoint;
+    let poller: DataTransportPoller;
+    const image = new CountingImage();
+    const frame = new Uint8Array(128);
+    let bytes = 0;
+    return {
+        name: 'DataTransportPoller poll: data frame 128B to DataPacketDispatcher to PublicationImage.insertPacket',
+        opsPerSample: OPS_PER_SAMPLE,
+        setup: () => {
+            context = newContext();
+            const dispatcher = new RealDataPacketDispatcher(
+                {
+                    reResolveEndpoint: () => {},
+                    reResolveControl: () => {},
+                    responseSetup: () => {},
+                    createPublicationImage: () => {},
+                },
+                { addPendingSetupMessage: () => {} },
+                10,
+            );
+            endpoint = new ReceiveChannelEndpoint(
+                UdpChannel.parse('aeron:udp?endpoint=127.0.0.1:0'),
+                dispatcher,
+                status(context),
+                context,
+            );
+            endpoint.openDatagramChannel(null);
+            poller = new DataTransportPoller(context.countedErrorHandler() as ErrorHandler);
+            poller.registerForRead(endpoint, endpoint, 0);
+            dispatcher.addSubscription(1001);
+            const setup = new SetupFlyweight(new UnsafeBuffer(new Uint8Array(SetupFlyweight.HEADER_LENGTH)));
+            setup
+                .sessionId(-7)
+                .streamId(1001)
+                .termOffset(0)
+                .termLength(64 * 1024)
+                .mtuLength(1408);
+            dispatcher.onSetupMessage(endpoint, setup, new InetSocketAddress('127.0.0.1', 5000), 0);
+            dispatcher.addPublicationImage(image);
+            const header = new DataHeaderFlyweight(new UnsafeBuffer(frame));
+            header
+                .version(HeaderFlyweight.CURRENT_VERSION)
+                .flags(DataHeaderFlyweight.BEGIN_AND_END_FLAGS)
+                .headerType(HeaderFlyweight.HDR_TYPE_DATA)
+                .frameLength(128);
+            header.sessionId(-7).streamId(1001).termId(5).termOffset(64);
+        },
+        op: () => {
+            endpoint.onMessage(frame, rinfo);
+            bytes += poller.pollTransports();
+        },
+        teardown: () => {
+            poller.close();
+            context.close();
+            if (bytes < 0 || image.inserted < 0) {
                 throw new Error('unreachable');
             }
         },
@@ -248,7 +347,7 @@ function statusMessageBench(name: string, uri: string): SyncBench {
             context = newContext();
             endpoint = new ReceiveChannelEndpoint(
                 UdpChannel.parse(uri),
-                new CountingDispatcher(),
+                new CountingDispatcher() as unknown as DataPacketDispatcher,
                 status(context),
                 context,
             );
@@ -272,6 +371,7 @@ function statusMessageBench(name: string, uri: string): SyncBench {
 
 export const benches: SyncBench[] = [
     dataPollBench(),
+    dispatchBench(),
     controlPollBench(),
     sendBench(
         'SendChannelEndpoint send 1408B, connected (slot copy + socket.send)',

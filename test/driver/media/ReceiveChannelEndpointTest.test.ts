@@ -17,32 +17,28 @@
  */
 // Port of io/aeron/driver/media/ReceiveChannelEndpointTest.java @ 1.53.3
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { CachedNanoClock } from '../../../src/agrona/concurrent/CachedNanoClock.js';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { AtomicCounter } from '../../../src/agrona/concurrent/status/AtomicCounter.js';
 import { SetupFlyweight } from '../../../src/client/protocol/SetupFlyweight.js';
 import { InetSocketAddress } from '../../../src/driver/jdkNet.js';
 import { MediaDriver } from '../../../src/driver/MediaDriver.js';
-import type { DataPacketDispatcher } from '../../../src/driver/media/ReceiveChannelEndpoint.js';
+import { DataPacketDispatcher } from '../../../src/driver/DataPacketDispatcher.js';
 import { ReceiveChannelEndpoint } from '../../../src/driver/media/ReceiveChannelEndpoint.js';
 import { ReceiveChannelEndpointThreadLocals } from '../../../src/driver/media/ReceiveChannelEndpointThreadLocals.js';
 import { UdpChannel } from '../../../src/driver/media/UdpChannel.js';
 import { WildcardPortManager } from '../../../src/driver/media/WildcardPortManager.js';
 import { SystemCounterDescriptor } from '../../../src/driver/status/SystemCounterDescriptor.js';
 import { SystemCounters } from '../../../src/driver/status/SystemCounters.js';
-import { type Fake, calledMembers, mock } from '../../support/Mockito.js';
+import { calledMembers, mock } from '../../support/Mockito.js';
 
 describe('ReceiveChannelEndpointTest', () => {
     const systemCounters = mock(SystemCounters).mock;
     const statusIndicator = mock(AtomicCounter).mock;
     const udpChannel = mock(UdpChannel).mock;
     const nanoClock = new CachedNanoClock();
-    // mock(DataPacketDispatcher.class): the placeholder type of ReceiveChannelEndpoint.ts (T14 ports the class)
-    const dataPacketDispatcher: Fake<DataPacketDispatcher> = {
-        onDataPacket: vi.fn<DataPacketDispatcher['onDataPacket']>(),
-        onSetupMessage: vi.fn<DataPacketDispatcher['onSetupMessage']>(),
-        onRttMeasurement: vi.fn<DataPacketDispatcher['onRttMeasurement']>(),
-    };
+    const dataPacketDispatcher = mock(DataPacketDispatcher).mock;
     const context = new MediaDriver.Context()
         .systemCounters(systemCounters)
         .cachedNanoClock(nanoClock)
@@ -56,7 +52,7 @@ describe('ReceiveChannelEndpointTest', () => {
 
     beforeEach(() => {
         for (const spy of Object.values(dataPacketDispatcher)) {
-            spy.mockClear();
+            (spy as Mock).mockClear();
         }
         for (const descriptor of SystemCounterDescriptor.values()) {
             counters[descriptor.id()] = mock(AtomicCounter).mock;
@@ -93,9 +89,7 @@ describe('ReceiveChannelEndpointTest', () => {
         // verifyNoMoreInteractions(invalidPackets)
         expect(calledMembers(invalidPackets)).toEqual(['increment']);
         // verifyNoInteractions(dataPacketDispatcher)
-        for (const spy of Object.values(dataPacketDispatcher)) {
-            expect(spy).not.toHaveBeenCalled();
-        }
+        expect(calledMembers(dataPacketDispatcher)).toEqual([]);
     });
 
     it('shouldAcceptValidSetupMessage', () => {

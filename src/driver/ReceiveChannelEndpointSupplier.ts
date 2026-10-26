@@ -18,7 +18,8 @@
 // Port of io/aeron/driver/ReceiveChannelEndpointSupplier.java @ 1.53.3
 import type { AtomicCounter } from '../agrona/concurrent/status/AtomicCounter.js';
 import type { MediaDriverContext } from './MediaDriver.js';
-import type { DataPacketDispatcher, ReceiveChannelEndpoint } from './media/ReceiveChannelEndpoint.js';
+import type { DataPacketDispatcher } from './DataPacketDispatcher.js';
+import type { ReceiveChannelEndpoint } from './media/ReceiveChannelEndpoint.js';
 import type { UdpChannel } from './media/UdpChannel.js';
 
 /**

@@ -143,19 +143,22 @@ kernel's. None of them allocates (`expectNoAllocation` in `UdpChannelTransportEx
 | UdpChannelTransport sendTo 1408B (slot copy + socket.send)          | 41.1  | 39.5  | 84.0  | 198.2 |
 | UdpChannelTransport send 1408B, connected (slot copy + socket.send) | 37.4  | 34.6  | 70.9  | 136.3 |
 
-`npm run bench:micro -- --file endpoint`, one run, 2026-10-26, same Node and host (load average 0.37 at the start, 4 cores), ns
-per operation. These are the per-datagram paths of the channel endpoints (T13): a poll is `onMessage` (a datagram into the ring)
-and one `pollTransports()` (ring pop and copy, frame validation, routing by type, the endpoint callback, a dispatcher or
-publication that counts); `send` and `sendStatusMessage` end at a socket that does nothing, so these numbers are this port's own
-cost and not the kernel's. The status message poll includes the three counter updates of a status message on real counters
-(`incrementRelease` of a shared counter); the timestamp bench stamps four begin frames of one packet. None of them allocates
-(`expectNoAllocation` in `EndpointsHotPathAllocationTest`).
+`npm run bench:micro -- --file endpoint`, one run, 2026-10-26, same Node and host (load average 0.94 at the start, 4 cores, so
+indicative only: a run before it measured the first row at 72 ns and the last two status message rows 25% lower), ns per
+operation. These are the per-datagram paths of the channel endpoints (T13) and of the dispatcher (T14): a poll is `onMessage`
+(a datagram into the ring) and one `pollTransports()` (ring pop and copy, frame validation, routing by type, the endpoint
+callback, and then a dispatcher or publication that counts, or the real `DataPacketDispatcher` that finds the stream and the
+session and calls an image that counts); `send` and `sendStatusMessage` end at a socket that does nothing, so these numbers
+are this port's own cost and not the kernel's. The status message poll includes the three counter updates of a status
+message on real counters (`incrementRelease` of a shared counter); the timestamp bench stamps four begin frames of one packet.
+None of them allocates (`expectNoAllocation` in `EndpointsHotPathAllocationTest` and `DataPacketDispatcherAllocationTest`).
 
-| Bench                                                                                                | ns/op | p50   | p99   | p99.9   |
-| ---------------------------------------------------------------------------------------------------- | ----- | ----- | ----- | ------- |
-| DataTransportPoller poll: ReceiveChannelEndpoint data frame 128B (ring, validate, route, dispatcher) | 71.9  | 68.2  | 132.1 | 188.4   |
-| ControlTransportPoller poll: SendChannelEndpoint status message (ring, validate, route, publication) | 269.3 | 253.6 | 527.9 | 818.2   |
-| SendChannelEndpoint send 1408B, connected (slot copy + socket.send)                                  | 43.1  | 38.6  | 90.4  | 232.9   |
-| SendChannelEndpoint send 1408B, connected, channel send timestamp on 4 begin frames                  | 472.9 | 414.7 | 851.3 | 1,175.6 |
-| ReceiveChannelEndpoint sendStatusMessage (frame, slot copy + socket.send)                            | 254.5 | 245.0 | 435.7 | 550.4   |
-| ReceiveChannelEndpoint sendStatusMessage with a group tag                                            | 190.6 | 187.0 | 255.5 | 373.5   |
+| Bench                                                                                                | ns/op | p50   | p99   | p99.9 |
+| ---------------------------------------------------------------------------------------------------- | ----- | ----- | ----- | ----- |
+| DataTransportPoller poll: ReceiveChannelEndpoint data frame 128B (ring, validate, route, dispatcher) | 69.6  | 64.4  | 133.5 | 551.3 |
+| DataTransportPoller poll: data frame 128B to DataPacketDispatcher to PublicationImage.insertPacket   | 119.5 | 106.7 | 256.6 | 487.6 |
+| ControlTransportPoller poll: SendChannelEndpoint status message (ring, validate, route, publication) | 269.1 | 247.3 | 515.3 | 852.6 |
+| SendChannelEndpoint send 1408B, connected (slot copy + socket.send)                                  | 33.4  | 31.4  | 76.7  | 122.7 |
+| SendChannelEndpoint send 1408B, connected, channel send timestamp on 4 begin frames                  | 319.5 | 313.0 | 645.0 | 710.0 |
+| ReceiveChannelEndpoint sendStatusMessage (frame, slot copy + socket.send)                            | 220.3 | 206.0 | 436.2 | 606.7 |
+| ReceiveChannelEndpoint sendStatusMessage with a group tag                                            | 285.0 | 268.1 | 547.6 | 1,216 |
