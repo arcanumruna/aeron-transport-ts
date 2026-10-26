@@ -46,6 +46,21 @@ flyweights against it and needs no C driver. To regenerate it:
    `GOLDEN_BASE_PORT`. Receiver ids and RTT timestamps differ from run to run, so a re-run changes `frames.json`; the
    test only needs it to be self-consistent.
 
+## Interop with the Aeron C driver
+
+`test/interop` runs the TS transport against the real Aeron C 1.53.3 media driver (`aeronmd`) and C helper programs on
+the loopback: a TS publication to a C subscriber and a C publication to a TS subscription, with fragmentation, term
+rotation, loss, and subscribers and publications that leave and join. It is not part of `npm test`. Build the C driver
+and client library as above (`ninja -C "$AERON_C_BUILD" aeronmd aeron` is enough; the samples are not needed), then:
+
+```sh
+export AERON_C_BUILD="$PWD/.refs/aeron-build"   # default: .refs/aeron/build
+npm run test:interop
+```
+
+The helpers (`test/interop/c`) are built on first use by `test/interop/build-c.mjs` with `cc`. Without the C build the
+suite skips every test and says why. CI has an `interop` job that builds Aeron C at the tag (cached) and runs it.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

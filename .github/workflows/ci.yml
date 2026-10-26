@@ -31,3 +31,40 @@ jobs:
           # the 1,000,000- and 10,000,000-iteration loops of the Java tests run in full on one job only
           AERON_TS_FULL_ITERATIONS: ${{ matrix.node == 24 && '1' || '' }}
       - run: npm run check:mapping
+
+  # Interop with the real Aeron C 1.53.3 media driver (T23, spec 8.3, D105): the C driver and client library are built at
+  # the pinned tag (cached by the tag), the C helpers of test/interop/c are built against them, and the suite runs.
+  interop:
+    runs-on: ubuntu-latest
+    env:
+      AERON_C_BUILD: ${{ github.workspace }}/.refs/aeron-build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: .refs
+          key: refs-aeron-1.53.3-agrona-2.6.1
+      - run: npm ci
+      - run: npm run fetch:refs
+      - name: Cache the Aeron C build
+        id: aeron-c
+        uses: actions/cache@v4
+        with:
+          path: .refs/aeron-build
+          key: aeron-c-1.53.3-${{ runner.os }}
+      - name: Build Aeron C 1.53.3 (driver and client library)
+        if: steps.aeron-c.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build uuid-dev
+          cmake -G Ninja -S .refs/aeron -B "$AERON_C_BUILD" -DCMAKE_BUILD_TYPE=Release \
+            -DAERON_TESTS=OFF -DAERON_UNIT_TESTS=OFF -DAERON_SYSTEM_TESTS=OFF -DAERON_BUILD_DOCUMENTATION=OFF \
+            -DAERON_INSTALL_TARGETS=OFF -DBUILD_AERON_ARCHIVE_API=OFF -DAERON_BUILD_SAMPLES=OFF
+          ninja -C "$AERON_C_BUILD" aeronmd aeron
+      - name: Build the C helpers
+        run: node test/interop/build-c.mjs
+      - run: npm run test:interop

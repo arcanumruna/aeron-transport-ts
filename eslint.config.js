@@ -13,7 +13,7 @@ export default tseslint.config(
         },
     },
     {
-        files: ['scripts/**/*.mjs'],
+        files: ['scripts/**/*.mjs', 'test/interop/**/*.mjs'],
         languageOptions: { globals: { process: 'readonly', console: 'readonly' } },
     },
     {
