@@ -1,6 +1,6 @@
 // Interop helper (T23): a C subscriber that checks what it reads against the payload pattern of interop_publisher.
 //
-//   interop_subscriber -d <aeron dir> -c <channel> [-s <stream>] [-n <count>] [-l <last sequence>] [-S <len,len,...>] [-t <deadline ms>] [-q <quiet ms>]
+//   interop_subscriber -d <aeron dir> -c <channel> [-s <stream>] [-n <count>] [-l <last sequence>] [-S <len,len,...>] [-t <deadline ms>] [-q <quiet ms>] [-P <pause ms>]
 //
 // It reads whole messages (fragment assembler) and checks, for each session, that the sequence numbers go up by one
 // from the first message it reads, and that every byte is the pattern of the sequence number (a message of 1..3
@@ -11,6 +11,9 @@
 //   {"event":"available","sessionId":..,"joinPosition":..}   an image was created
 //   {"event":"unavailable","sessionId":..,"eos":true|false}  an image ended; `eos` is the end of stream flag
 //   {"event":"summary",...}                        the last line, with the counts and the first error
+// `-P` makes a slow consumer: after the first message it reads, it stops polling for that many ms (once), so that the
+// window of the receiver stops moving and the publisher is back pressured; then it reads on. Default: no pause.
+//   {"event":"paused"}                             printed when the pause starts
 // Exit code 0 when the summary has no error and the count was reached.
 #include <poll.h>
 #include <sched.h>
@@ -182,10 +185,10 @@ int main(int argc, char **argv)
     int32_t stream_id = 1001;
     uint64_t want = 0;
     int64_t last_target = -1;
-    int64_t deadline_ms = 60000, quiet_ms = 300;
+    int64_t deadline_ms = 60000, quiet_ms = 300, pause_ms = 0;
     int opt;
 
-    while ((opt = getopt(argc, argv, "d:c:s:n:l:S:t:q:")) != -1)
+    while ((opt = getopt(argc, argv, "d:c:s:n:l:S:t:q:P:")) != -1)
     {
         switch (opt)
         {
@@ -207,6 +210,7 @@ int main(int argc, char **argv)
             }
             case 't': deadline_ms = strtoll(optarg, NULL, 10); break;
             case 'q': quiet_ms = strtoll(optarg, NULL, 10); break;
+            case 'P': pause_ms = strtoll(optarg, NULL, 10); break;
             default: fprintf(stderr, "bad option\n"); return 2;
         }
     }
@@ -266,6 +270,14 @@ int main(int argc, char **argv)
         {
             fprintf(stderr, "poll: %s\n", aeron_errmsg());
             goto cleanup;
+        }
+
+        if (pause_ms > 0 && state.count > 0)
+        {
+            printf("{\"event\":\"paused\"}\n");
+            fflush(stdout);
+            usleep((useconds_t)(pause_ms * 1000));
+            pause_ms = 0;
         }
 
         bool reached = want > 0 && state.count >= want;

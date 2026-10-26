@@ -20,6 +20,8 @@ const HEADER_LENGTH = 32;
 const MAX_MESSAGE = TERM_LENGTH / 8;
 const LONG_CAP_MS = 90_000;
 const INT32_MAX = 2147483647;
+/** How long the slow C subscriber stops polling after its first message, in ms. */
+const PAUSE_MS = 500;
 
 /** The message sizes of spec 8.3: 1 B, MTU - 32, MTU - 31, 2 x MTU, term length / 8 (the maximum message). */
 const SIZES = [1, MTU - HEADER_LENGTH, MTU - HEADER_LENGTH + 1, 2 * MTU, MAX_MESSAGE];
@@ -65,6 +67,7 @@ describe.skipIf(!interopAvailable)(
             params = 'term-length=' + TERM_LENGTH,
             loss?: { rate: number; seed: number; mask: number },
             last = args.count - 1,
+            subscriberArgs: string[] = [],
         ): Promise<Stream> {
             const cDir = await env.startDriver({ loss });
             const port = freeUdpPort();
@@ -78,6 +81,7 @@ describe.skipIf(!interopAvailable)(
                 args.sizes.join(','),
                 '-t',
                 String(LONG_CAP_MS),
+                ...subscriberArgs,
             ]);
             const node = newNode();
             const channel = subscriberChannel + '|' + params;
@@ -180,6 +184,24 @@ describe.skipIf(!interopAvailable)(
             const summary = await env.subscriberSummary(sub);
 
             expect(publication.position()).toBeGreaterThan(8 * TERM_LENGTH);
+            expectConsumed(summary, publication.sessionId(), 0, count);
+            expectNoErrors(node);
+        });
+
+        it('slowCSubscriberBackPressuresTheTsPublisher', async () => {
+            // the C subscriber stops polling for a while after its first message (-P); the TS publisher offers flat out
+            const sizes = [100, 1400, 3000];
+            const count = 1500;
+            const { node, publication, sub } = await open({ sizes, count }, undefined, undefined, count - 1, [
+                '-P',
+                String(PAUSE_MS),
+            ]);
+
+            const producer = await produce(publication, sizes, 0, count);
+            const summary = await env.subscriberSummary(sub);
+
+            expect(sub.count('paused')).toBe(1);
+            expect(producer.backPressured).toBeGreaterThan(0);
             expectConsumed(summary, publication.sessionId(), 0, count);
             expectNoErrors(node);
         });

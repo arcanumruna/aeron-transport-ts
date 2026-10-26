@@ -244,6 +244,44 @@ describe.skipIf(!interopAvailable)(
             expectNoErrors(stream.side.node);
         });
 
+        it('slowTsSubscriberBackPressuresTheCPublisher', async () => {
+            // the TS side does not poll while the C publisher offers flat out; the C publisher prints its counts only at
+            // the end, so the stall is found from the TS driver: the bytes it received stop growing (the window of the
+            // receiver is full) while the C publisher has not offered all its messages
+            const sizes = [100, 1400, 3000];
+            const count = 1500;
+            const stream = await open();
+            const pub = publish(stream, sizes, count);
+            const received = (): number => counter(stream.side.node.driver, SystemCounterDescriptor.BYTES_RECEIVED);
+
+            let last = -1;
+            let still = 0;
+            await driveUntil(
+                () => {
+                    const bytes = received();
+                    still = bytes === last ? still + 1 : 0;
+                    last = bytes;
+                    return bytes > 0 && still >= 5000;
+                },
+                'a stalled C publisher (bytes received ' + received() + ')',
+            );
+            expect(pub.count('sent')).toBe(0);
+            expect(stream.subscription.imageCount()).toBe(1);
+            expect(stream.subscription.imageAtIndex(0).position()).toBe(0);
+            // the receiver took at most its window: half a term
+            expect(last).toBeLessThanOrEqual(TERM_LENGTH / 2 + MTU);
+            expect(last).toBeGreaterThan(0);
+
+            const consumed = new Consumed();
+            await consume(stream.subscription, consumed, count);
+            const sent = await env.publisherSent(pub);
+
+            expect(sent.backPressured).toBeGreaterThan(0);
+            expect(sent.sent).toBe(count);
+            expectConsumed(consumed, sizes, 0, count, sent.sessionId);
+            expectNoErrors(stream.side.node);
+        });
+
         describe('with frames lost', () => {
             it('statusMessagesAndNaksLostByTheCDriverDoNotLoseOrReorderMessages', async () => {
                 const count = 1500;
