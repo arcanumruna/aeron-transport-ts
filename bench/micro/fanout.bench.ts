@@ -1,5 +1,5 @@
 // The fan-out end-to-end benches of phase 3 T14 (D121), in the gate with the other end-to-end benches (e2e.bench.ts):
-// multicast with 1 and 3 subscriptions, MDC dynamic and manual with 2 and 4 destinations, MDS with 2 destinations, each as
+// multicast with 1 and 3 subscriptions, MDC dynamic and manual with 2 and 4 destinations, MDS with 2 destinations, MDS with one session merged over 2 destinations (D133), each as
 // a latency bench (one 32 B message offered at a time, a sample is the ns until the last subscriber has read it; 5 pairs)
 // and a throughput bench (a 64 B stream, a sample is the ns per message of a window of 100 read by the slowest
 // subscriber; 3 pairs). The drivers and clients are those of bench/lib/fanout.ts. The unicast reference of the report is

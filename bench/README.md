@@ -354,7 +354,9 @@ control); the publisher is one more. The scenarios: a unicast reference; **multi
 `interface=localhost`) with 1 and 3 subscriptions; **MDC dynamic** (`control-mode=dynamic`, receivers join with
 `control=`) and **MDC manual** (`control-mode=manual`, `addDestination`) with 2 and 4 destinations; **MDS** with 2
 destinations (one `control-mode=manual` subscription, two publications on one driver, one for each destination, the offers
-alternating between them). The multicast and MDC publications have `fc=min,g:/N` (as the interop rows of D116), so the
+alternating between them) and **MDS merge** (the same subscription with 2 destinations, but ONE `control-mode=manual`
+publication with both destinations added, so every message arrives over both transports and the image drops the
+duplicates: the merge path of D133). The multicast and MDC publications have `fc=min,g:/N` (as the interop rows of D116), so the
 stream starts when all N receivers are counted and the slowest paces it.
 
 - **Latency**: one 32 B message at a time, the ns from `offer` until the LAST subscriber has read it.
@@ -365,7 +367,7 @@ stream starts when all N receivers are counted and the slowest paces it.
   so they are interleaved with each other and run in the same process after the unicast sections above; allocation
   per message as D112 measures it (sampling heap profiler, split by file) for the 64 B stream, with the top
   allocation sites of `src/`.
-- **In the gate** (`bench/micro/fanout.bench.ts`, `npm run bench:micro -- --file fanout`): the 7 non-unicast
+- **In the gate** (`bench/micro/fanout.bench.ts`, `npm run bench:micro -- --file fanout`): the 8 non-unicast
   scenarios as latency benches (5 pairs) and as throughput benches (3 pairs). The unicast reference is the
   `Unicast` benches of `e2e.bench.ts`. The file imports a phase 3 module, so a base without phase 3 reports it
   `n/a in base`. The non-gating CI job `bench-e2e` posts the report and `--file fanout` to the run summary.

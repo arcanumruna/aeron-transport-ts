@@ -9,7 +9,7 @@
 //   allocation       bytes per message by where they were allocated, minor collections per 1000 messages
 //   after idle       the first message after the runners have been idle, with and without `MediaDriver.wake()` (D101)
 //   fan-out          phase 3 (T14, D121): unicast, multicast (1 and 3 subscriptions), MDC dynamic and manual (2 and 4
-//                    destinations) and MDS (2 destinations), one way, offer to the read of the last subscriber: 32 B
+//                    destinations), MDS (2 destinations) and MDS with one session merged over 2 destinations, one way, offer to the read of the last subscriber: 32 B
 //                    latency (--runs runs of --rtt messages) and a 64 B stream (--stream-runs runs), the scenarios taken
 //                    in turn within each run (the order alternates), and the allocation of the stream
 import { availableParallelism, cpus, loadavg } from 'node:os';
