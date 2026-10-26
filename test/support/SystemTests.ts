@@ -182,6 +182,29 @@ export class SystemTests {
         throw new Error('no ' + what() + ' after ' + maxTurns + ' turns; errors: [' + this.errors().map(String) + ']');
     }
 
+    /**
+     * `Tests.executeUntil(condition, iterationConsumer, maxIterations, timeoutNs)`: the iteration, then (if the condition
+     * does not hold yet) a turn, until the condition holds, `maxIterations` iterations have run or `timeoutNs` has passed.
+     * It stops at the limits and does not fail, as Java's does. The time is the turns taken, 1 ms of the manual clock each
+     * (`CYCLE_NS`): no wall time is read. Returns the number of iterations run.
+     */
+    public async executeUntil(
+        condition: () => boolean,
+        iteration: (i: number) => void,
+        maxIterations: number,
+        timeoutNs: number,
+    ): Promise<number> {
+        const startTurns = this.turns;
+        for (let i = 0; ; i++) {
+            iteration(i);
+            if (condition() || (this.turns - startTurns) * CYCLE_NS >= timeoutNs || i >= maxIterations) {
+                return i + 1;
+            }
+            this.cycle();
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+    }
+
     /** `Tests.awaitConnected(Publication)` */
     public awaitConnectedPublication(publication: Publication, maxTurns = DEFAULT_MAX_TURNS): Promise<void> {
         return this.drainUntil(

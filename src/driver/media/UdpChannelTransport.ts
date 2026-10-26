@@ -268,7 +268,14 @@ export abstract class UdpChannelTransport implements AutoCloseable {
                     this._receiveDatagramChannel = this.newSocket(true);
                 }
 
-                this.bindChecked(this._receiveDatagramChannel, this.endPointAddress.getPort(), null);
+                // Java: bind(new InetSocketAddress(port)) on a channel with IP_MULTICAST_ALL off (spec D119). A node socket
+                // cannot turn the option off, so an IPv4 socket on a host with the option on is bound to the group instead
+                // and the kernel gives it that group only.
+                this.bindChecked(
+                    this._receiveDatagramChannel,
+                    this.endPointAddress.getPort(),
+                    UdpChannelTransport.multicastBindHost(this._udpChannel, this.endPointAddress),
+                );
                 this.join(this._receiveDatagramChannel);
             } else {
                 this.bindAddress = this.portManager.getManagedPort(this._udpChannel, this.bindAddress);
@@ -819,6 +826,15 @@ export abstract class UdpChannelTransport implements AutoCloseable {
         }
 
         return view;
+    }
+
+    /** The host a multicast receive socket is bound to: the group of an IPv4 channel (D119), otherwise the wildcard (null). */
+    private static multicastBindHost(udpChannel: UdpChannel, endPointAddress: InetSocketAddress): string | null {
+        if ('win32' === process.platform || StandardProtocolFamily.INET !== udpChannel.protocolFamily()) {
+            return null;
+        }
+
+        return UdpChannelTransport.hostAddress(endPointAddress);
     }
 
     private newSocket(reuseAddress: boolean): Socket {
