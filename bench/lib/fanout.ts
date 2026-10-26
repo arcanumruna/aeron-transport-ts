@@ -19,6 +19,7 @@ import type { FragmentHandler } from '../../src/client/logbuffer/FragmentHandler
 import { Publication } from '../../src/client/Publication.js';
 import type { Subscription } from '../../src/client/Subscription.js';
 import { Node, freePort, message, turn, until } from './e2e.js';
+import { MAX_TURNS, TurnCap } from './turnCap.js';
 
 const STREAM_ID = 1003;
 const TERM_LENGTH = 1 << 20;
@@ -207,7 +208,7 @@ export class Fanout {
 }
 
 /** `out.length` messages of `size` bytes, one at a time: ns from `offer` until every subscriber has read it. */
-export async function fanoutLatency(f: Fanout, size: number, out: Float64Array): Promise<void> {
+export async function fanoutLatency(f: Fanout, size: number, out: Float64Array, maxTurns = MAX_TURNS): Promise<void> {
     const buffer = message(size);
     for (let i = 0; i < out.length; i++) {
         const t0 = performance.now();
@@ -224,7 +225,9 @@ export async function fanoutLatency(f: Fanout, size: number, out: Float64Array):
             await turn();
             f.poll(64);
         }
+        const cap = new TurnCap(f.scenario.name, () => 'received ' + f.minReceived() + '/' + target, maxTurns);
         while (f.minReceived() < target) {
+            cap.tick();
             await turn();
             f.poll(1);
         }
@@ -238,6 +241,7 @@ export async function fanoutStream(
     size: number,
     window: number,
     out: Float64Array,
+    maxTurns = MAX_TURNS,
 ): Promise<{ messages: number; bytes: number }> {
     const buffer = message(size);
     const start = f.minReceived();
@@ -245,7 +249,13 @@ export async function fanoutStream(
     let sent = 0;
     let mark = 0;
     let t0 = performance.now();
+    const cap = new TurnCap(
+        f.scenario.name + ' stream',
+        () => 'received ' + (f.minReceived() - start) + '/' + total + ', sent ' + sent,
+        maxTurns,
+    );
     while (mark < out.length) {
+        cap.tick();
         for (let i = 0; i < 32 && sent < total; i++) {
             const result = f.tryOffer(buffer, size);
             if (result > 0) {

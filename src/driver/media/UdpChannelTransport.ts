@@ -269,8 +269,10 @@ export abstract class UdpChannelTransport implements AutoCloseable {
                 }
 
                 // Java: bind(new InetSocketAddress(port)) on a channel with IP_MULTICAST_ALL off (spec D119). A node socket
-                // cannot turn the option off, so a socket on a host with the option on is bound to the group instead (IPv4 and
-                // IPv6) and the kernel gives it that group only. It then no longer receives unicast to the port.
+                // cannot turn the option off, so the socket is bound to the group instead and the kernel gives it that group
+                // only; it then no longer receives unicast to the port. This is unconditional except on Windows (which binds
+                // the wildcard address) and for an IPv6 link-local group (scope 2 or less) without an interface, which also
+                // binds the wildcard address; see multicastBindHost.
                 this.bindChecked(
                     this._receiveDatagramChannel,
                     this.endPointAddress.getPort(),
