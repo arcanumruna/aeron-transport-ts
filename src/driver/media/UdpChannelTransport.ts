@@ -37,7 +37,6 @@ import { ResponseSetupFlyweight } from '../../client/protocol/ResponseSetupFlywe
 import { RttMeasurementFlyweight } from '../../client/protocol/RttMeasurementFlyweight.js';
 import { SetupFlyweight } from '../../client/protocol/SetupFlyweight.js';
 import { StatusMessageFlyweight } from '../../client/protocol/StatusMessageFlyweight.js';
-import { Configuration } from '../Configuration.js';
 import {
     Inet4Address,
     InetAddress,
@@ -158,13 +157,14 @@ export abstract class UdpChannelTransport implements AutoCloseable {
     private lastSrcHost = '';
     private lastSrcPort = -1;
     private lastSrcAddress: InetSocketAddress | null = null;
-    private readonly sendSlot = new Uint8Array(Configuration.MAX_UDP_PAYLOAD_LENGTH);
+    private readonly sendSlot = new Uint8Array(SetupFlyweight.MAX_UDP_PAYLOAD_LENGTH);
     private sendBlocked = false;
     private pendingReceiveError: Error | null = null;
     private pendingSendError: Error | null = null;
     private openError: Error | null = null;
     private isOpening = false;
     private isClosed = false;
+    private connected = false;
     private wakeUp: (() => void) | null = null;
     private readonly onMessageCallback: (message: Uint8Array, rinfo: RemoteInfo) => void;
     private readonly onSocketErrorCallback: (error: Error) => void;
@@ -339,6 +339,15 @@ export abstract class UdpChannelTransport implements AutoCloseable {
             this.ring = null;
             this.portManager.freeManagedPort(this.bindAddress);
         }
+    }
+
+    /**
+     * Is the send socket connected (Java: `DatagramChannel.isConnected()`)? A connect that node refused is not.
+     *
+     * @return true if the send socket is open and connected.
+     */
+    public isConnected(): boolean {
+        return this.connected && !this.isClosed;
     }
 
     /**
@@ -568,6 +577,7 @@ export abstract class UdpChannelTransport implements AutoCloseable {
             if (null !== socket) {
                 this.isOpening = true;
                 this.openError = null;
+                this.connected = false;
                 try {
                     socket.disconnect();
                 } catch (ex) {
@@ -790,6 +800,8 @@ export abstract class UdpChannelTransport implements AutoCloseable {
         } catch {
             throw new IOException('connect failed: ' + address);
         }
+
+        this.connected = true;
     }
 
     private throwOpenError(): void {

@@ -142,3 +142,20 @@ kernel's. None of them allocates (`expectNoAllocation` in `UdpChannelTransportEx
 | UdpChannelTransport onMessage+receive 128B, two senders alternating | 242.9 | 224.4 | 441.7 | 893.7 |
 | UdpChannelTransport sendTo 1408B (slot copy + socket.send)          | 41.1  | 39.5  | 84.0  | 198.2 |
 | UdpChannelTransport send 1408B, connected (slot copy + socket.send) | 37.4  | 34.6  | 70.9  | 136.3 |
+
+`npm run bench:micro -- --file endpoint`, one run, 2026-10-26, same Node and host (load average 0.37 at the start, 4 cores), ns
+per operation. These are the per-datagram paths of the channel endpoints (T13): a poll is `onMessage` (a datagram into the ring)
+and one `pollTransports()` (ring pop and copy, frame validation, routing by type, the endpoint callback, a dispatcher or
+publication that counts); `send` and `sendStatusMessage` end at a socket that does nothing, so these numbers are this port's own
+cost and not the kernel's. The status message poll includes the three counter updates of a status message on real counters
+(`incrementRelease` of a shared counter); the timestamp bench stamps four begin frames of one packet. None of them allocates
+(`expectNoAllocation` in `EndpointsHotPathAllocationTest`).
+
+| Bench                                                                                                | ns/op | p50   | p99   | p99.9   |
+| ---------------------------------------------------------------------------------------------------- | ----- | ----- | ----- | ------- |
+| DataTransportPoller poll: ReceiveChannelEndpoint data frame 128B (ring, validate, route, dispatcher) | 71.9  | 68.2  | 132.1 | 188.4   |
+| ControlTransportPoller poll: SendChannelEndpoint status message (ring, validate, route, publication) | 269.3 | 253.6 | 527.9 | 818.2   |
+| SendChannelEndpoint send 1408B, connected (slot copy + socket.send)                                  | 43.1  | 38.6  | 90.4  | 232.9   |
+| SendChannelEndpoint send 1408B, connected, channel send timestamp on 4 begin frames                  | 472.9 | 414.7 | 851.3 | 1,175.6 |
+| ReceiveChannelEndpoint sendStatusMessage (frame, slot copy + socket.send)                            | 254.5 | 245.0 | 435.7 | 550.4   |
+| ReceiveChannelEndpoint sendStatusMessage with a group tag                                            | 190.6 | 187.0 | 255.5 | 373.5   |

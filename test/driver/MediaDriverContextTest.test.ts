@@ -197,10 +197,21 @@ describe('MediaDriverContextTest', () => {
         expect(errorCounter.get()).toBe(1);
     });
 
-    // ControlTransportPoller and DataTransportPoller are ported by T13 (plan T13), and the Context creates them then.
+    // ControlTransportPoller (T13) takes the DriverConductorProxy that T17 ports, and conclude creates it with it then.
     it.skip('shouldCreateControlTransportPollerWithCountedErrorHandler', () => {});
 
-    it.skip('shouldCreateDataTransportPollerWithCountedErrorHandler', () => {});
+    it('shouldCreateDataTransportPollerWithCountedErrorHandler', () => {
+        context.dataTransportPoller(null);
+
+        context.conclude();
+
+        const dataTransportPoller = context.dataTransportPoller();
+        expect(dataTransportPoller).not.toBeNull();
+
+        // getErrorHandler(transportPoller): the protected field `errorHandler` of UdpTransportPoller, read by reflection
+        const errorHandler = (dataTransportPoller as unknown as { errorHandler: unknown }).errorHandler;
+        expect(errorHandler).toBe(context.countedErrorHandler());
+    });
 
     it.each([4096, 2 * 1024 * 1024])('shouldAddFilePageSizeToTheCncFile %s', (filePageSize) => {
         context.filePageSize(filePageSize);
