@@ -23,6 +23,13 @@ jobs:
           key: refs-aeron-1.53.3-agrona-2.6.1
       - run: npm ci
       - run: npm run fetch:refs
+      # The runner's loopback has no MULTICAST flag and no IPv6 multicast route, so a datagram sent to an IPv6 group on lo
+      # is never looped back. Turn both on (#64).
+      - name: Enable IPv6 multicast on loopback
+        run: |
+          sudo ip link set lo multicast on
+          sudo ip -6 route replace multicast ff00::/8 dev lo table local
+          sudo ip -6 route replace ff00::/8 dev lo
       - run: npm run probe:multicast
         env:
           # a runner without IPv6 multicast fails here instead of skipping the IPv6 multicast tests silently (#64)
