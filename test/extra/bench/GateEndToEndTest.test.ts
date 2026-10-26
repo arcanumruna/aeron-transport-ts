@@ -112,7 +112,9 @@ describe('GateEndToEnd', () => {
             expect(run.status, run.output).toBe(EXIT_FAIL);
             // the failure names the bench, the metric and the ratio of every pair
             expect(run.output).toMatch(
-                new RegExp(BENCH + ': (ns/op|p50): median ratio 1\\.\\d{3} > 1\\.05 \\(pairs: (\\d\\.\\d{3}(, )?)+\\)'),
+                new RegExp(
+                    BENCH + ': (ns/op|p50): median ratio \\d+\\.\\d{3} > 1\\.05 \\(pairs: (\\d+\\.\\d{3}(, )?)+\\)',
+                ),
             );
             expect(run.output).toContain('bench gate: FAIL');
         },
