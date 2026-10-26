@@ -162,3 +162,20 @@ None of them allocates (`expectNoAllocation` in `EndpointsHotPathAllocationTest`
 | SendChannelEndpoint send 1408B, connected, channel send timestamp on 4 begin frames                  | 319.5 | 313.0 | 645.0 | 710.0 |
 | ReceiveChannelEndpoint sendStatusMessage (frame, slot copy + socket.send)                            | 220.3 | 206.0 | 436.2 | 606.7 |
 | ReceiveChannelEndpoint sendStatusMessage with a group tag                                            | 285.0 | 268.1 | 547.6 | 1,216 |
+
+### Sender (T15)
+
+`bench/micro/sender.bench.ts`: `Sender.doWork` on a real `NetworkPublication` over an in-memory log (`SharedArrayBuffer`),
+a `SendChannelEndpoint` whose socket does nothing and the position counters of the driver (64-bit atomics). The data bench
+scans and sends one frame of 1024 B per cycle (term scan, copy to the send slot, socket hand-off, control poll, retransmit
+timers) and moves the sender position back at the end of the 40 frames of the log. The heartbeat bench is two cycles: a data
+frame at t=0 and the heartbeat at twice the timeout (so that the clock values stay small integers). The resend bench is
+`NetworkPublication.resend` of two frames. None allocates (`expectNoAllocation` in `NetworkPublicationAllocationTest`).
+Measured on a host with a load average of 6 on 4 cores (other tasks were running), so the figures are upper bounds; the
+baseline for the gate is to be taken on the idle machine.
+
+| Bench                                                                                           | ns/op   | p50     | p99     | p99.9   |
+| ----------------------------------------------------------------------------------------------- | ------- | ------- | ------- | ------- |
+| Sender doWork: one data frame of 1024 B (scan, copy to the send slot, socket)                   | 455.5   | 433.8   | 802.9   | 1,299.8 |
+| Sender doWork: a data frame at t=0 then a heartbeat at t=2 x timeout (two cycles per operation) | 1,070.9 | 1,013.1 | 2,059.2 | 3,146.3 |
+| NetworkPublication resend: 2 frames of 1024 B                                                   | 459.4   | 386.5   | 915.2   | 968.6   |

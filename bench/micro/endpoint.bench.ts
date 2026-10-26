@@ -22,10 +22,26 @@ import { DataTransportPoller } from '../../src/driver/media/DataTransportPoller.
 import { ImageConnection } from '../../src/driver/media/ImageConnection.js';
 import type { DriverConductorProxy } from '../../src/driver/DriverConductorProxy.js';
 import { ReceiveChannelEndpoint } from '../../src/driver/media/ReceiveChannelEndpoint.js';
-import type { NetworkPublication } from '../../src/driver/media/SendChannelEndpoint.js';
+import type { NetworkPublication as RealNetworkPublication } from '../../src/driver/NetworkPublication.js';
 import { SendChannelEndpoint } from '../../src/driver/media/SendChannelEndpoint.js';
 import { UdpChannel } from '../../src/driver/media/UdpChannel.js';
 import type { SyncBench } from '../lib/types.js';
+
+/** The members of a publication that a `SendChannelEndpoint` calls. */
+type NetworkPublication = Pick<
+    RealNetworkPublication,
+    | 'sessionId'
+    | 'streamId'
+    | 'termBufferLength'
+    | 'isValidStatusMessage'
+    | 'timeOfLastStatusMessageNs'
+    | 'triggerSendSetupFrame'
+    | 'onStatusMessage'
+    | 'onError'
+    | 'onNak'
+    | 'onRttMeasurement'
+    | 'responseCorrelationId'
+>;
 
 const OPS_PER_SAMPLE = 1_000;
 
@@ -274,7 +290,7 @@ function controlPollBench(): SyncBench {
             endpoint.openDatagramChannel(null);
             poller = new ControlTransportPoller(context.countedErrorHandler() as ErrorHandler, noOpConductorProxy());
             poller.registerForRead(endpoint);
-            endpoint.registerForSend(publication);
+            endpoint.registerForSend(publication as unknown as RealNetworkPublication);
             const sm = new StatusMessageFlyweight(new UnsafeBuffer(frame));
             sm.version(HeaderFlyweight.CURRENT_VERSION)
                 .headerType(HeaderFlyweight.HDR_TYPE_SM)

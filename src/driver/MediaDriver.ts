@@ -27,6 +27,7 @@ import { CountedErrorHandler } from '../agrona/concurrent/CountedErrorHandler.js
 import type { EpochClock } from '../agrona/concurrent/EpochClock.js';
 import type { EpochNanoClock } from '../agrona/concurrent/EpochNanoClock.js';
 import type { IdleStrategy } from '../agrona/concurrent/IdleStrategy.js';
+import { OneToOneConcurrentArrayQueue } from '../agrona/concurrent/OneToOneConcurrentArrayQueue.js';
 import type { NanoClock } from '../agrona/concurrent/NanoClock.js';
 import { SystemEpochClock } from '../agrona/concurrent/SystemEpochClock.js';
 import { SystemEpochNanoClock } from '../agrona/concurrent/SystemEpochNanoClock.js';
@@ -54,6 +55,8 @@ import { ControlProtocolEvents } from '../client/command/ControlProtocolEvents.j
 import { AeronException } from '../client/exceptions/AeronException.js';
 import { ConfigurationException } from '../client/exceptions/ConfigurationException.js';
 import { LogBufferDescriptor } from '../client/logbuffer/LogBufferDescriptor.js';
+import { MemoryLogFactory } from './buffer/MemoryLogFactory.js';
+import type { LogFactory } from './buffer/LogFactory.js';
 import { ClientProxy } from './ClientProxy.js';
 import type { Runnable } from './CommandProxy.js';
 import { Configuration } from './Configuration.js';
@@ -62,6 +65,7 @@ import { DefaultNameResolver } from './DefaultNameResolver.js';
 import type { DutyCycleTracker } from './DutyCycleTracker.js';
 import { MediaDriverVersion } from './MediaDriverVersion.js';
 import type { NameResolverAgent } from './NameResolverAgent.js';
+import { SenderProxy } from './SenderProxy.js';
 import { DutyCycleStallTracker } from './status/DutyCycleStallTracker.js';
 import { SystemCounterDescriptor } from './status/SystemCounterDescriptor.js';
 import { SystemCounters } from './status/SystemCounters.js';
@@ -171,6 +175,9 @@ export class MediaDriverContext extends CommonContext {
     private _receiveChannelEndpointThreadLocals: ReceiveChannelEndpointThreadLocals | null = null;
     private _dataTransportPoller: DataTransportPoller | null = null;
     private _controlTransportPoller: ControlTransportPoller | null = null;
+    private _logFactory: LogFactory | null = null;
+    private _senderCommandQueue: OneToOneConcurrentArrayQueue<() => void> | null = null;
+    private _senderProxy: SenderProxy | null = null;
     private _epochClock: EpochClock | null = null;
     private _nanoClock: NanoClock | null = null;
     private _cachedEpochClock: CachedEpochClock | null = null;
@@ -216,7 +223,7 @@ export class MediaDriverContext extends CommonContext {
         if (!this._isClosed) {
             this._isClosed = true;
 
-            // Java also closes the log factory here: CloseHelper.close(errorHandler, logFactory) (added by T15).
+            CloseHelper.close(this._errorHandler, this._logFactory);
             CloseHelper.close(this._errorHandler, this._countedErrorHandler);
 
             if (null !== this._systemCounters) {
@@ -2902,6 +2909,60 @@ export class MediaDriverContext extends CommonContext {
     }
 
     /**
+     * The factory of the log buffers of publications and images (a {@link MemoryLogFactory} unless set, spec D4). Added
+     * by T15.
+     *
+     * @return the log factory.
+     * @internal package-private in Java
+     */
+    public logFactory(): LogFactory | null;
+    public logFactory(logFactory: LogFactory | null): this;
+    public logFactory(logFactory?: LogFactory | null): LogFactory | null | this {
+        if (undefined === logFactory) {
+            return this._logFactory;
+        }
+
+        this._logFactory = logFactory;
+        return this;
+    }
+
+    /**
+     * The queue of the commands for the sender. A command is a closure (Java: a `Runnable`). Added by T15.
+     *
+     * @return the sender command queue.
+     * @internal package-private in Java
+     */
+    public senderCommandQueue(): OneToOneConcurrentArrayQueue<() => void> | null;
+    public senderCommandQueue(senderCommandQueue: OneToOneConcurrentArrayQueue<() => void> | null): this;
+    public senderCommandQueue(
+        senderCommandQueue?: OneToOneConcurrentArrayQueue<() => void> | null,
+    ): OneToOneConcurrentArrayQueue<() => void> | null | this {
+        if (undefined === senderCommandQueue) {
+            return this._senderCommandQueue;
+        }
+
+        this._senderCommandQueue = senderCommandQueue;
+        return this;
+    }
+
+    /**
+     * The proxy that the conductor offers its commands to the sender through. Added by T15.
+     *
+     * @return the sender proxy.
+     * @internal package-private in Java
+     */
+    public senderProxy(): SenderProxy | null;
+    public senderProxy(senderProxy: SenderProxy | null): this;
+    public senderProxy(senderProxy?: SenderProxy | null): SenderProxy | null | this {
+        if (undefined === senderProxy) {
+            return this._senderProxy;
+        }
+
+        this._senderProxy = senderProxy;
+        return this;
+    }
+
+    /**
      * The default `SO_RCVBUF` of a datagram socket of this OS, probed once.
      *
      * @return the length in bytes.
@@ -3142,8 +3203,12 @@ export class MediaDriverContext extends CommonContext {
             this._receiveChannelEndpointSupplier = Configuration.receiveChannelEndpointSupplier();
         }
 
-        // The flow control and congestion control suppliers, the command queues and the delay generators are added by
-        // the tasks that port their types.
+        // The flow control and congestion control suppliers, the other command queues and the delay generators are added
+        // by the tasks that port their types.
+
+        if (null === this._senderCommandQueue) {
+            this._senderCommandQueue = new OneToOneConcurrentArrayQueue<() => void>(Configuration.CMD_QUEUE_CAPACITY);
+        }
 
         if (null === this._applicationSpecificFeedback) {
             this._applicationSpecificFeedback = Configuration.applicationSpecificFeedback();
@@ -3326,8 +3391,12 @@ export class MediaDriverContext extends CommonContext {
             );
         }
 
-        // The sender, receiver and native resource agent proxies, the log factory and the port managers are added by
-        // the tasks that port their types; the loss report is not ported (spec section 3).
+        // The receiver and native resource agent proxies and the port managers are added by the tasks that port their
+        // types; the loss report is not ported (spec section 3).
+        this._senderProxy = new SenderProxy(
+            this._senderCommandQueue as OneToOneConcurrentArrayQueue<() => void>,
+            systemCounters.get(SystemCounterDescriptor.SENDER_PROXY_FAILS),
+        );
         this._driverConductorProxy = new DriverConductorProxy(
             this._driverCommandQueue as ManyToOneConcurrentLinkedQueue<Runnable>,
         );
@@ -3341,6 +3410,16 @@ export class MediaDriverContext extends CommonContext {
 
         if (null === this._dataTransportPoller) {
             this._dataTransportPoller = new DataTransportPoller(this._countedErrorHandler);
+        }
+
+        if (null === this._logFactory) {
+            // Java: new FileStoreLogFactory(aeronDirectoryName(), filePageSize, performStorageChecks,
+            // lowStorageWarningThreshold, errorHandler, BYTES_CURRENTLY_MAPPED); the logs are in memory (spec D4, D35)
+            this._logFactory = new MemoryLogFactory(
+                this._filePageSize,
+                this._errorHandler,
+                systemCounters.get(SystemCounterDescriptor.BYTES_CURRENTLY_MAPPED),
+            );
         }
 
         if (null === this._conductorDutyCycleTracker) {

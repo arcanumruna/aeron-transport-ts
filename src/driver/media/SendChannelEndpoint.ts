@@ -47,6 +47,7 @@ import { LocalSocketAddressStatus } from '../../client/status/LocalSocketAddress
 import type { DriverConductorProxy } from '../DriverConductorProxy.js';
 import type { InetAddress, InetSocketAddress } from '../jdkNet.js';
 import type { MediaDriverContext } from '../MediaDriver.js';
+import type { NetworkPublication } from '../NetworkPublication.js';
 import { MdcDestinations } from '../status/MdcDestinations.js';
 import { SystemCounterDescriptor } from '../status/SystemCounterDescriptor.js';
 import type { UdpChannel } from './UdpChannel.js';
@@ -59,34 +60,6 @@ const { NAK_MESSAGES_RECEIVED, STATUS_MESSAGES_RECEIVED, STATUS_MESSAGES_REJECTE
     SystemCounterDescriptor;
 
 const DESTINATION_TIMEOUT: number = TimeUnit.SECONDS.toNanos(5);
-
-/**
- * Stand-in for `NetworkPublication`, which task T15 ports. It has the members that a `SendChannelEndpoint` calls; T15
- * replaces it with `import type { NetworkPublication } from '../NetworkPublication.js'` (spec D24, `docs/mapping.md`).
- * `responseCorrelationId` is a `number` (a correlation id, spec 5.2).
- */
-export interface NetworkPublication {
-    sessionId(): number;
-    streamId(): number;
-    termBufferLength(): number;
-    isValidStatusMessage(msg: StatusMessageFlyweight): boolean;
-    timeOfLastStatusMessageNs(): number;
-    triggerSendSetupFrame(msg: StatusMessageFlyweight, srcAddress: InetSocketAddress): void;
-    onStatusMessage(
-        msg: StatusMessageFlyweight,
-        srcAddress: InetSocketAddress,
-        conductorProxy: DriverConductorProxy,
-    ): void;
-    onError(
-        msg: ErrorFlyweight,
-        srcAddress: InetSocketAddress,
-        destinationRegistrationId: number,
-        conductorProxy: DriverConductorProxy,
-    ): void;
-    onNak(msg: NakFlyweight): void;
-    onRttMeasurement(msg: RttMeasurementFlyweight, srcAddress: InetSocketAddress): void;
-    responseCorrelationId(): number;
-}
 
 /**
  * Aggregator of multiple {@link NetworkPublication}s onto a single transport channel for the

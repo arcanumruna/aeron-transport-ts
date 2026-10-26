@@ -45,7 +45,10 @@ import { MediaDriver } from '../../../src/driver/MediaDriver.js';
 import { ControlTransportPoller } from '../../../src/driver/media/ControlTransportPoller.js';
 import { DataTransportPoller } from '../../../src/driver/media/DataTransportPoller.js';
 import { ReceiveChannelEndpoint } from '../../../src/driver/media/ReceiveChannelEndpoint.js';
-import type { NetworkPublication } from '../../../src/driver/media/SendChannelEndpoint.js';
+import {
+    asNetworkPublication,
+    type EndpointPublication as NetworkPublication,
+} from '../../support/PublicationFakes.js';
 import { SendChannelEndpoint } from '../../../src/driver/media/SendChannelEndpoint.js';
 import { UdpChannel } from '../../../src/driver/media/UdpChannel.js';
 import { PendingSetupMessageFromSource } from '../../../src/driver/PendingSetupMessageFromSource.js';
@@ -877,7 +880,7 @@ describe('the real path: a receive endpoint with the dispatcher, a send endpoint
             onRttMeasurement: vi.fn<NetworkPublication['onRttMeasurement']>(),
             responseCorrelationId: vi.fn<NetworkPublication['responseCorrelationId']>(() => -1),
         };
-        send.registerForSend(publication);
+        send.registerForSend(asNetworkPublication(publication));
 
         // the conductor: it makes an image for the request and adds it to the dispatcher
         const image = newImage(sessionId, streamId, 4242);

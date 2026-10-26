@@ -45,7 +45,10 @@ import { ControlTransportPoller } from '../../../../src/driver/media/ControlTran
 import { DataTransportPoller } from '../../../../src/driver/media/DataTransportPoller.js';
 import { ImageConnection } from '../../../../src/driver/media/ImageConnection.js';
 import { ReceiveChannelEndpoint } from '../../../../src/driver/media/ReceiveChannelEndpoint.js';
-import type { NetworkPublication } from '../../../../src/driver/media/SendChannelEndpoint.js';
+import {
+    asNetworkPublication,
+    type EndpointPublication as NetworkPublication,
+} from '../../../support/PublicationFakes.js';
 import { SendChannelEndpoint } from '../../../../src/driver/media/SendChannelEndpoint.js';
 import { UdpChannel } from '../../../../src/driver/media/UdpChannel.js';
 import { newPlainConductorProxy } from '../../../support/ConductorProxyFake.js';
@@ -291,7 +294,7 @@ describe('the receive path of the control poller allocates nothing per datagram'
         closeables.push(poller);
         poller.registerForRead(endpoint);
         const publication = new CountingPublication(Integer.MIN_VALUE, Integer.MAX_VALUE);
-        endpoint.registerForSend(publication);
+        endpoint.registerForSend(asNetworkPublication(publication));
         const sm = bytesOf(StatusMessageFlyweight.HEADER_LENGTH, (buffer) => {
             const flyweight = new StatusMessageFlyweight(buffer);
             flyweight

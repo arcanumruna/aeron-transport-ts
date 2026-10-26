@@ -47,7 +47,7 @@ import {
     PublicationParams,
     type DriverConductor,
     type PublicationLike,
-    type RawLog,
+    type RawLogMetaData as RawLog,
 } from '../../../src/driver/PublicationParams.js';
 import { SystemCounterDescriptor } from '../../../src/driver/status/SystemCounterDescriptor.js';
 import { SubscriptionParams } from '../../../src/driver/SubscriptionParams.js';
