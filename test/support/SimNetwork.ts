@@ -139,11 +139,13 @@ export class SimNetwork {
     private burstLeft = 0;
     private newestDelivered = new Map<SimSocket, number>();
 
-    public constructor(
-        private readonly seed: number,
-        private readonly model: FaultModel,
-        private readonly clock: SimClock,
-    ) {
+    private readonly seed: number;
+    private readonly model: FaultModel;
+    private readonly clock: SimClock;
+    public constructor(seed: number, model: FaultModel, clock: SimClock) {
+        this.seed = seed;
+        this.model = model;
+        this.clock = clock;
         this.random = mulberry32(seed);
     }
 
@@ -481,10 +483,12 @@ export class SimSocket {
     private multicastLoopbackValue = true;
     private multicastInterfaceValue: string | null = null;
 
-    public constructor(
-        private readonly network: SimNetwork,
-        private readonly reuseAddr = false,
-    ) {}
+    private readonly network: SimNetwork;
+    private readonly reuseAddr;
+    public constructor(network: SimNetwork, reuseAddr = false) {
+        this.network = network;
+        this.reuseAddr = reuseAddr;
+    }
 
     public on(event: string, listener: (...args: never[]) => void): this {
         if ('message' === event) {

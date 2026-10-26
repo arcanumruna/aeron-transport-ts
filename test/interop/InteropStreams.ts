@@ -201,10 +201,12 @@ function publicationChannels(
 }
 
 export class ToReceivers {
-    public constructor(
-        private readonly env: InteropEnv,
-        private readonly nodes: SystemNode[],
-    ) {}
+    private readonly env: InteropEnv;
+    private readonly nodes: SystemNode[];
+    public constructor(env: InteropEnv, nodes: SystemNode[]) {
+        this.env = env;
+        this.nodes = nodes;
+    }
 
     /** The C subscribers first (each in a C driver of its own), then the TS publication, then its destinations. */
     public async open(kind: PublicationKind, options: ToReceiversOptions): Promise<ToReceiversStream> {
@@ -310,10 +312,12 @@ export interface FromPublisherStream {
 }
 
 export class FromPublisher {
-    public constructor(
-        private readonly env: InteropEnv,
-        private readonly nodes: SystemNode[],
-    ) {}
+    private readonly env: InteropEnv;
+    private readonly nodes: SystemNode[];
+    public constructor(env: InteropEnv, nodes: SystemNode[]) {
+        this.env = env;
+        this.nodes = nodes;
+    }
 
     /** A TS subscription, a C driver, and, when `relays` are given, a lossy relay on each destination. */
     public async open(

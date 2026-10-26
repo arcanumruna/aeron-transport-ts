@@ -271,11 +271,14 @@ export class NetworkUtil {
 }
 
 class FilterResult {
-    public constructor(
-        private readonly interfaceAddress: InterfaceAddress,
-        public readonly networkInterface: NetworkInterface,
-        private readonly isLoopback: boolean,
-    ) {}
+    private readonly interfaceAddress: InterfaceAddress;
+    public readonly networkInterface: NetworkInterface;
+    private readonly isLoopback: boolean;
+    public constructor(interfaceAddress: InterfaceAddress, networkInterface: NetworkInterface, isLoopback: boolean) {
+        this.interfaceAddress = interfaceAddress;
+        this.networkInterface = networkInterface;
+        this.isLoopback = isLoopback;
+    }
 
     public compareTo(other: FilterResult): number {
         if (this.isLoopback === other.isLoopback) {

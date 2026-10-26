@@ -108,7 +108,9 @@ export class Consumed {
     /**
      * @param modulo when it is not 0, the sequence numbers are taken modulo it: for the messages of 1 byte.
      */
-    public constructor(private readonly modulo = 0) {
+    private readonly modulo;
+    public constructor(modulo = 0) {
+        this.modulo = modulo;
         this.assembler = new FragmentAssembler({
             onFragment: (buffer: DirectBuffer, offset: number, length: number, header: Header): void => {
                 const result = checkMessage(buffer, offset, length);
@@ -152,11 +154,11 @@ export class Producer {
     public notConnected = 0;
     public adminActions = 0;
 
-    public constructor(
-        private readonly publication: Offering,
-        private readonly work: Plan,
-        maxLength: number,
-    ) {
+    private readonly publication: Offering;
+    private readonly work: Plan;
+    public constructor(publication: Offering, work: Plan, maxLength: number) {
+        this.publication = publication;
+        this.work = work;
         this.next = work.first;
         this.buffer = new UnsafeBuffer(new Uint8Array(maxLength));
     }

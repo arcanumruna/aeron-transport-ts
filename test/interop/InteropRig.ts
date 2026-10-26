@@ -158,12 +158,9 @@ export class ChildHandle {
     private pending = '';
     private readonly child: ChildProcess;
 
-    public constructor(
-        public readonly name: string,
-        command: string,
-        args: readonly string[],
-        env: Record<string, string>,
-    ) {
+    public readonly name: string;
+    public constructor(name: string, command: string, args: readonly string[], env: Record<string, string>) {
+        this.name = name;
         this.child = spawn(command, args, { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
         this.child.stdout?.setEncoding('utf8');
         this.child.stderr?.setEncoding('utf8');
@@ -423,13 +420,19 @@ export class LossyRelay {
     private sender: { port: number; address: string } | null = null;
     private readonly random: () => number;
 
+    private readonly targetPort: number;
+    private readonly rate: number;
+    private readonly dropOn: 'forward' | 'return';
     private constructor(
         frontPort: number,
-        private readonly targetPort: number,
-        private readonly rate: number,
+        targetPort: number,
+        rate: number,
         seed: number,
-        private readonly dropOn: 'forward' | 'return',
+        dropOn: 'forward' | 'return',
     ) {
+        this.targetPort = targetPort;
+        this.rate = rate;
+        this.dropOn = dropOn;
         this.random = mulberry32(seed);
         this.front = dgram.createSocket({ type: 'udp4', recvBufferSize: 8 << 20, sendBufferSize: 8 << 20 });
         this.back = dgram.createSocket({ type: 'udp4', recvBufferSize: 8 << 20, sendBufferSize: 8 << 20 });

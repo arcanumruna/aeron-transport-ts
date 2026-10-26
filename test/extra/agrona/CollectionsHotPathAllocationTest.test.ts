@@ -64,7 +64,10 @@ async function expectNoAllocation(run: (iterations: number) => void, heapNumbers
 }
 
 class Key {
-    public constructor(public readonly id: number) {}
+    public readonly id: number;
+    public constructor(id: number) {
+        this.id = id;
+    }
 
     public equals(o: unknown): boolean {
         return o instanceof Key && o.id === this.id;

@@ -22,10 +22,12 @@ export const NO_LOSS: LossGenerator = {
 
 /** `DebugSendChannelEndpoint`s with the given generators: `data` for what the sender sends, `control` for SMs, NAKs it gets. */
 export class LossySendSupplier implements SendChannelEndpointSupplier {
-    public constructor(
-        private readonly data: LossGenerator,
-        private readonly control: LossGenerator = NO_LOSS,
-    ) {}
+    private readonly data: LossGenerator;
+    private readonly control: LossGenerator;
+    public constructor(data: LossGenerator, control: LossGenerator = NO_LOSS) {
+        this.data = data;
+        this.control = control;
+    }
 
     public newInstance(
         udpChannel: UdpChannel,
@@ -38,10 +40,12 @@ export class LossySendSupplier implements SendChannelEndpointSupplier {
 
 /** `DebugReceiveChannelEndpoint`s: `data` for the setup and data frames it gets, `control` for the SMs and NAKs it sends. */
 export class LossyReceiveSupplier implements ReceiveChannelEndpointSupplier {
-    public constructor(
-        private readonly data: LossGenerator,
-        private readonly control: LossGenerator = NO_LOSS,
-    ) {}
+    private readonly data: LossGenerator;
+    private readonly control: LossGenerator;
+    public constructor(data: LossGenerator, control: LossGenerator = NO_LOSS) {
+        this.data = data;
+        this.control = control;
+    }
 
     public newInstance(
         udpChannel: UdpChannel,
@@ -67,7 +71,10 @@ export class LossyReceiveSupplier implements ReceiveChannelEndpointSupplier {
 export class DropFirstFrames implements LossGenerator {
     public dropped = 0;
 
-    public constructor(private readonly count: number) {}
+    private readonly count: number;
+    public constructor(count: number) {
+        this.count = count;
+    }
 
     public shouldDropFrame(_address: unknown, _buffer: unknown, _streamId: number, sessionId?: number): boolean {
         if (undefined === sessionId && this.dropped < this.count) {
@@ -84,7 +91,10 @@ export class Counting implements LossGenerator {
     public seen = 0;
     public dropped = 0;
 
-    public constructor(private readonly inner: LossGenerator) {}
+    private readonly inner: LossGenerator;
+    public constructor(inner: LossGenerator) {
+        this.inner = inner;
+    }
 
     public shouldDropFrame(
         address: never,

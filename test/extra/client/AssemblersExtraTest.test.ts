@@ -53,11 +53,17 @@ class Stream {
     public readonly flyweight = new DataHeaderFlyweight();
     public readonly header = new Header(INITIAL_TERM_ID, POSITION_BITS_TO_SHIFT);
 
+    public readonly sessionId: number;
+    private readonly assembler: { onFragment(b: DirectBuffer, o: number, l: number, h: Header): unknown };
+    public readonly termId;
     public constructor(
-        public readonly sessionId: number,
-        private readonly assembler: { onFragment(b: DirectBuffer, o: number, l: number, h: Header): unknown },
-        public readonly termId = INITIAL_TERM_ID,
+        sessionId: number,
+        assembler: { onFragment(b: DirectBuffer, o: number, l: number, h: Header): unknown },
+        termId = INITIAL_TERM_ID,
     ) {
+        this.sessionId = sessionId;
+        this.assembler = assembler;
+        this.termId = termId;
         const buffer = new UnsafeBuffer(new Uint8Array(64));
         this.flyweight.wrap(buffer, 16, HEADER_LENGTH);
         this.header.buffer(buffer);

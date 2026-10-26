@@ -34,7 +34,10 @@ function suffixOf(channel: UdpChannel, prefix: string): number {
 
 /** Resolves every name to a fixed address, or to nothing, under a chosen `name()`. */
 class FixedNameResolver implements NameResolver {
-    public constructor(private readonly displayName: string) {}
+    private readonly displayName: string;
+    public constructor(displayName: string) {
+        this.displayName = displayName;
+    }
 
     public resolve(_name: string, _uriParamName: string, _isReResolution: boolean): InetAddress | null {
         return null;

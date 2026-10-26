@@ -8,11 +8,13 @@ export class ByteBuffer {
     private pos = 0;
     private lim: number;
 
-    private constructor(
-        private readonly buffer: ArrayBufferLike,
-        private readonly offset: number,
-        private readonly cap: number,
-    ) {
+    private readonly buffer: ArrayBufferLike;
+    private readonly offset: number;
+    private readonly cap: number;
+    private constructor(buffer: ArrayBufferLike, offset: number, cap: number) {
+        this.buffer = buffer;
+        this.offset = offset;
+        this.cap = cap;
         this.view = new DataView(buffer, offset, cap);
         this.lim = cap;
     }

@@ -438,10 +438,12 @@ describe('Long2LongHashMap extra', () => {
 
 describe('Object2ObjectHashMap extra', () => {
     class Key {
-        public constructor(
-            public readonly id: number,
-            public readonly hash: number,
-        ) {}
+        public readonly id: number;
+        public readonly hash: number;
+        public constructor(id: number, hash: number) {
+            this.id = id;
+            this.hash = hash;
+        }
 
         public equals(o: unknown): boolean {
             return o instanceof Key && o.id === this.id;

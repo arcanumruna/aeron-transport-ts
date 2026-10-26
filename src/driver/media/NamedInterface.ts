@@ -32,10 +32,12 @@ const { getProtocolFamily } = NetworkUtil;
 export class NamedInterface implements UnresolvedInterface {
     public static readonly OPENING_CHAR = '{';
 
-    public constructor(
-        public readonly name: string,
-        public readonly port: number,
-    ) {}
+    public readonly name: string;
+    public readonly port: number;
+    public constructor(name: string, port: number) {
+        this.name = name;
+        this.port = port;
+    }
 
     public resolve(_multicast: boolean, protocolFamily: ProtocolFamily): ResolvedInterface {
         const localInterface = NetworkInterface.getByName(this.name);

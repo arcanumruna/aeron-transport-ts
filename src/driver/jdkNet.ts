@@ -52,7 +52,10 @@ export class StandardProtocolFamily implements ProtocolFamily {
     public static readonly INET = new StandardProtocolFamily('INET');
     public static readonly INET6 = new StandardProtocolFamily('INET6');
 
-    private constructor(private readonly _name: string) {}
+    private readonly _name: string;
+    private constructor(_name: string) {
+        this._name = _name;
+    }
 
     public name(): string {
         return this._name;
@@ -309,10 +312,12 @@ export abstract class InetAddress {
      */
     public static readonly nameCache = new Map<string, InetAddress>();
 
-    protected constructor(
-        protected readonly address: Uint8Array,
-        protected readonly hostName: string | null,
-    ) {}
+    protected readonly address: Uint8Array;
+    protected readonly hostName: string | null;
+    protected constructor(address: Uint8Array, hostName: string | null) {
+        this.address = address;
+        this.hostName = hostName;
+    }
 
     /** `InetAddress.getByName(String)`. */
     public static getByName(host: string | null): InetAddress {
@@ -476,13 +481,17 @@ export class Inet4Address extends InetAddress {
 
 /** Stand-in for `java.net.Inet6Address`. A scope is a number, and an interface name as well when it was given. */
 export class Inet6Address extends InetAddress {
+    private readonly scopeId: number | null;
+    private readonly scopeIfName: string | null;
     public constructor(
         hostName: string | null,
         address: Uint8Array,
-        private readonly scopeId: number | null,
-        private readonly scopeIfName: string | null,
+        scopeId: number | null,
+        scopeIfName: string | null,
     ) {
         super(address, hostName);
+        this.scopeId = scopeId;
+        this.scopeIfName = scopeIfName;
     }
 
     /** `Inet6Address.getScopeId()`: 0 when there is none. */
@@ -704,11 +713,14 @@ export class InetSocketAddress {
 
 /** Stand-in for `java.net.InterfaceAddress`. */
 export class InterfaceAddress {
-    public constructor(
-        private readonly address: InetAddress,
-        private readonly broadcast: InetAddress | null,
-        private readonly maskLength: number,
-    ) {}
+    private readonly address: InetAddress;
+    private readonly broadcast: InetAddress | null;
+    private readonly maskLength: number;
+    public constructor(address: InetAddress, broadcast: InetAddress | null, maskLength: number) {
+        this.address = address;
+        this.broadcast = broadcast;
+        this.maskLength = maskLength;
+    }
 
     public getAddress(): InetAddress {
         return this.address;
@@ -752,12 +764,21 @@ export interface NetworkInterfaceFlags {
  * and have an address; `supportsMulticast` is true for every interface that is not internal, as Node reports no flag).
  */
 export class NetworkInterface {
+    private readonly name: string;
+    private readonly displayName: string;
+    private readonly addresses: readonly InterfaceAddress[];
+    private readonly flags: NetworkInterfaceFlags;
     public constructor(
-        private readonly name: string,
-        private readonly displayName: string,
-        private readonly addresses: readonly InterfaceAddress[],
-        private readonly flags: NetworkInterfaceFlags,
-    ) {}
+        name: string,
+        displayName: string,
+        addresses: readonly InterfaceAddress[],
+        flags: NetworkInterfaceFlags,
+    ) {
+        this.name = name;
+        this.displayName = displayName;
+        this.addresses = addresses;
+        this.flags = flags;
+    }
 
     /** `NetworkInterface.getNetworkInterfaces()`: an array where Java returns an `Enumeration`. */
     public static getNetworkInterfaces(): NetworkInterface[] {

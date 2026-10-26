@@ -57,7 +57,10 @@ export class Fanout {
     private nextPublication = 0;
     private readonly handlers: FragmentHandler[] = [];
 
-    private constructor(public readonly scenario: FanoutScenario) {}
+    public readonly scenario: FanoutScenario;
+    private constructor(scenario: FanoutScenario) {
+        this.scenario = scenario;
+    }
 
     public static async create(scenario: FanoutScenario): Promise<Fanout> {
         const f = new Fanout(scenario);

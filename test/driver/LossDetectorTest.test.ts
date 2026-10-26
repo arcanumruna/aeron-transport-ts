@@ -86,7 +86,10 @@ function verifyNoMoreInteractions(handler: Handler, ...verified: Gap[]): void {
 class InOrder {
     private cursor = -1;
 
-    public constructor(private readonly handler: Handler) {}
+    private readonly handler: Handler;
+    public constructor(handler: Handler) {
+        this.handler = handler;
+    }
 
     private matching(gap: Gap): number[] {
         const result: number[] = [];
