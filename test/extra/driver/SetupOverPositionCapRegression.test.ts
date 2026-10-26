@@ -91,8 +91,21 @@ describe('SetupOverPositionCapRegression', () => {
     });
 
     it('aSetupAtThePositionCapIsStillAccepted', () => {
+        // 16 MiB terms: the cap is 2^53 - 2^24, which termCount 2^29 - 1 at offset 0 reaches exactly
+        const termCount = 2 ** 29 - 1;
         const newImageLog = vi.spyOn(ctx.nativeResourceAgentProxy() as NativeResourceAgentProxy, 'newImageLog');
-        setup(0, 3, 0, LogBufferDescriptor.TERM_MIN_LENGTH);
+        const removeInit = vi.spyOn(ctx.receiverProxy() as ReceiverProxy, 'removeInitInProgress');
+        const errorsBefore = errors.length;
+
+        setup(0, termCount, 0, TERM_16_MIB);
         expect(newImageLog).toHaveBeenCalledTimes(1);
+        expect(removeInit).not.toHaveBeenCalled();
+        expect(errors.length - errorsBefore).toBe(0);
+
+        // 32 bytes further is over the cap: rejected, with exactly one error
+        setup(0, termCount, 32, TERM_16_MIB);
+        expect(newImageLog).toHaveBeenCalledTimes(1);
+        expect(removeInit).toHaveBeenCalledTimes(1);
+        expect(errors.length - errorsBefore).toBe(1);
     });
 });

@@ -1419,9 +1419,10 @@ export class ClientConductor implements Agent {
                         );
                         this.timeOfLastKeepAliveNs = nowNs;
                     } catch (ex) {
-                        // Java: catch (final RuntimeException ex). A TypeError or another programming error of the port is
-                        // not a race with the driver and must not be hidden (spec D128).
-                        if (!(ex instanceof RuntimeException)) {
+                        // Java: catch (final RuntimeException ex). TypeError and RangeError stand in for Java's
+                        // NullPointerException, ClassCastException, ArrayIndexOutOfBoundsException and ArithmeticException,
+                        // which are RuntimeExceptions; only what Java does not catch (a JavaError) is rethrown (spec D128).
+                        if (!(ex instanceof RuntimeException || ex instanceof TypeError || ex instanceof RangeError)) {
                             throw ex;
                         }
 

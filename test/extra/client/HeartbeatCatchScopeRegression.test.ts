@@ -1,8 +1,10 @@
 // Regression test of issue #59 (item 3, port-only, spec D128): the heartbeat counter lookup of `ClientConductor`
-// catches what Java's `catch (final RuntimeException ex)` catches, so a programming error (a `TypeError`) is not
-// turned into "unexpected close of heartbeat timestamp counter".
+// catches what Java's `catch (final RuntimeException ex)` catches: a `RuntimeException`, and the `TypeError` and
+// `RangeError` that stand in for Java's NullPointerException and the like, are turned into "unexpected close of heartbeat
+// timestamp counter"; a `JavaError` is not.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IllegalStateException } from '../../../src/agrona/jdk.js';
+import { JavaError } from '../../../src/agrona/jdkLang.js';
 import { AeronException } from '../../../src/client/exceptions/AeronException.js';
 import { EmbeddedRig } from '../../support/EmbeddedRig.js';
 import { freeUdpPort } from '../../support/Udp.js';
@@ -37,12 +39,27 @@ describe('HeartbeatCatchScopeRegression', () => {
         return r.errors;
     }
 
-    it('aTypeErrorOfTheHeartbeatLookupIsNotWrappedInAnAeronException', async () => {
-        const cause = new TypeError('a programming error');
+    it('aTypeErrorOfTheHeartbeatLookupIsHandledLikeARuntimeException', async () => {
+        const cause = new TypeError('stands in for a NullPointerException');
         const errors = await heartbeatFailsWith(cause);
 
-        expect(errors[0]).toBe(cause);
-        expect(errors.some((e) => e instanceof AeronException)).toBe(false);
+        expect(errors[0]).toBeInstanceOf(AeronException);
+        expect((errors[0] as AeronException).message).toContain('unexpected close of heartbeat timestamp counter: ');
+        expect((errors[0] as AeronException).cause).toBe(cause);
+    });
+
+    it('aRangeErrorOfTheHeartbeatLookupIsHandledLikeARuntimeException', async () => {
+        const cause = new RangeError('stands in for an ArrayIndexOutOfBoundsException');
+        const errors = await heartbeatFailsWith(cause);
+
+        expect(errors[0]).toBeInstanceOf(AeronException);
+        expect((errors[0] as AeronException).cause).toBe(cause);
+    });
+
+    it('aJavaErrorOfTheHeartbeatLookupIsRethrownAndNotWrappedInAnAeronException', async () => {
+        const cause = new JavaError('an Error is not caught by catch (RuntimeException)');
+
+        await expect(heartbeatFailsWith(cause)).rejects.toBe(cause);
     });
 
     it('aRuntimeExceptionOfTheHeartbeatLookupIsWrappedInAnAeronExceptionAsInJava', async () => {
