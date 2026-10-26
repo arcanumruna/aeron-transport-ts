@@ -288,6 +288,17 @@ harness (2,000 samples, median of the repeats).
 | Receiver doWork: one heartbeat (frame length 0)                                                        | 421.4   | 408.6   | 809.4   | 1,335.6 |
 | Receiver doWork: an idle cycle (no command, no datagram, the image has nothing to send)                | 96.8    | 94.1    | 188.6   | 231.3   |
 
+The MTU bench (issue #43) is one datagram of 1408 B (a data frame of 1376 B of payload, and the padding frame that ends each
+64 KiB term), with the conductor's `trackRebuild` and the subscriber every 4th operation. Frames of the MTU pass the 2^30 that
+a small integer holds within one run of the harness (6.2 million operations are 8.7 GB), so the bench makes 10 rigs in
+`setup` and moves to the next one after 700,000 frames (985 MB, below 2^30): a rig takes 2 to 3 ms to make, which a timed
+sample must not contain. One run of the harness, 2026-10-26, same Node and host (load average 3.4 at the start, 4 cores,
+so indicative only), 2,000 samples:
+
+| Bench                                                                                                           | ns/op   | p50     | p99     | p99.9   |
+| --------------------------------------------------------------------------------------------------------------- | ------- | ------- | ------- | ------- |
+| Receiver doWork: one data frame of 1408 B (the MTU), padding at the end of each term, positions of 1 GB per rig | 1,626.8 | 1,507.6 | 3,123.9 | 6,400.8 |
+
 ### Publications and images (T20)
 
 `bench/micro/publication.bench.ts`: `offer` and `tryClaim` + `commit` of a `ConcurrentPublication` (one atomic add of the raw

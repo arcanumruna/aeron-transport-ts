@@ -10,6 +10,8 @@ import { expectNoAllocation } from '../../support/Allocation.js';
 import { ReceiverRig } from '../../support/ReceiverRig.js';
 
 const ITERATIONS = 300_000;
+/** A long run: 2 million iterations of 600 ns on the clock stay below 2^31, which V8 keeps in a small integer. */
+const LONG_RUN = 2_000_000;
 const MASK = LogBufferDescriptor.TERM_MIN_LENGTH - 1;
 
 class SinkSocket {
@@ -105,5 +107,48 @@ describe('PublicationImageLossAllocationTest', () => {
         expect(rig.counter(SystemCounterDescriptor.LOSS_GAP_FILLS)).toBe(pairs);
         expect(rig.counter(SystemCounterDescriptor.NAK_MESSAGES_SENT)).toBe(0);
         expect(rig.rebuildPosition.get()).toBe(pairs * 128);
+    });
+    // Issue #43: the NAK and the insert of the retransmit in one loop, last in the file, so that it runs in whatever state
+    // of the optimizing compiler the tests before it have left, and for 2 million iterations (7 times the others). The
+    // frame after the lost one arrives, the gap is found and NAKed, and the retransmit fills it. The clock of the run
+    // stays below 2^31 (2 million iterations of 600 ns): above it every `clock.nanoTime()` that the loop passes to a call is
+    // a heap number, which is the loop's own and is where the 2 to 3 minor collections of longer runs came from (the
+    // first version of this loop advanced the clock by 2,000 ns, and passed 2^31 after a million iterations).
+    it('Adversarial: the NAK of a gap and the insert of its retransmit, over many terms, run last in the file', async () => {
+        newRig({ lossRetryDelayNs: 300 });
+        const { bytes, header } = frameHeader(64);
+        const image = rig.image;
+        const receiver = rig.receiver;
+        const clock = rig.clock;
+        const endpoint = rig.endpoint;
+        const subscriber = rig.subscriberPosition;
+        const rebuild = rig.rebuildPosition;
+        const initialTermId = rig.initialTermId;
+        let pairs = 0;
+
+        await expectNoAllocation((n) => {
+            for (let i = 0; i < n; i++) {
+                const position = 128 * pairs;
+                header.termOffset((position + 64) & MASK); // the frame after the lost one
+                header.termId((initialTermId + ((position + 64) >>> 16)) | 0);
+                endpoint.onMessage(bytes, ReceiverRig.SOURCE);
+                receiver.doWork();
+                clock.advance(300);
+                image.trackRebuild(clock.nanoTime()); // the gap is found
+                receiver.doWork(); // and NAKed
+                header.termOffset(position & MASK); // the retransmit
+                header.termId((initialTermId + (position >>> 16)) | 0);
+                endpoint.onMessage(bytes, ReceiverRig.SOURCE);
+                receiver.doWork();
+                clock.advance(300);
+                image.trackRebuild(clock.nanoTime());
+                subscriber.setRelease(rebuild.get());
+                pairs++;
+            }
+        }, LONG_RUN);
+
+        expect(rig.counter(SystemCounterDescriptor.NAK_MESSAGES_SENT)).toBeGreaterThanOrEqual(pairs);
+        expect(rig.rebuildPosition.get()).toBe(pairs * 128);
+        expect(pairs * 128).toBeGreaterThan(8 * LogBufferDescriptor.TERM_MIN_LENGTH);
     });
 });
