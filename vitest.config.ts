@@ -5,6 +5,7 @@ import { defineConfig } from 'vitest/config';
 // test counts the receivers of its group), so they run one file at a time in a project of their own. The rest run in parallel
 // and use free ports.
 const SERIAL_PORT_TESTS = [
+    'test/extra/driver/media/UdpChannelTransportMulticastExtraTest.test.ts',
     'test/system/ChannelEndpointStatusTest.test.ts',
     'test/system/MaxFlowControlStrategySystemTest.test.ts',
     'test/system/MdsAndMdcInteractionTest.test.ts',

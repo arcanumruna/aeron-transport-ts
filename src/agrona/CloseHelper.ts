@@ -35,10 +35,17 @@ function hasOnError(arg: unknown): arg is ErrorHandler {
  * Whether the arguments of {@code closeAll} are an error handler and the closeables to close. An object with
  * {@code onError} is the handler when it cannot be closed, or when closeables follow it: a {@code CountedErrorHandler} is
  * both an {@link ErrorHandler} and an {@link AutoCloseable}, and Java tells its overload by the static type (spec D120).
- * Alone, a closeable error handler is a closeable.
+ * Alone, a closeable error handler is a closeable. An object whose {@code onError} declares more than one parameter is
+ * not an {@link ErrorHandler} (its {@code onError} takes the throwable only), so it is closed as a closeable.
  */
 function startsWithErrorHandler(args: unknown[]): boolean {
-    return hasOnError(args[0]) && ('function' !== typeof (args[0] as Partial<AutoCloseable>).close || args.length > 1);
+    const first = args[0];
+    return (
+        hasOnError(first) &&
+        // an ErrorHandler.onError takes one argument; an object with a longer onError (SendChannelEndpoint.onError) is no handler
+        first.onError.length <= 1 &&
+        ('function' !== typeof (first as Partial<AutoCloseable>).close || args.length > 1)
+    );
 }
 
 /**

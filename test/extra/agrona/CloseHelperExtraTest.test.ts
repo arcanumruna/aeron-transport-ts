@@ -162,4 +162,15 @@ describe('CloseHelperExtra', () => {
 
         expect(handler.isClosed()).toBe(true);
     });
+
+    it('closeAllClosesACloseableWhoseOnErrorTakesMoreThanTheThrowable Regression', () => {
+        // SendChannelEndpoint has onError(msg, buffer, length, src, conductorProxy) and close(): it is no ErrorHandler
+        const first = { onError: (_a: unknown, _b: unknown, _c: unknown, _d: unknown) => {}, close: vi.fn() };
+        const other = closeable();
+
+        CloseHelper.closeAll(first as unknown as AutoCloseable, other);
+
+        expect(first.close).toHaveBeenCalledTimes(1);
+        expect(other.close).toHaveBeenCalledTimes(1);
+    });
 });

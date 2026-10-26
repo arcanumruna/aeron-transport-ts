@@ -63,10 +63,24 @@ export class TestNode {
         // the test closes the driver (a destination added the moment before the close, say, whose transport is open). The
         // driver here runs only when it is invoked: let it finish them, so that no socket outlives its driver.
         const invoker = this.driver.sharedAgentInvoker();
-        for (let i = 0; i < QUIESCE_CYCLES && 0 !== invoker.invoke(); i++) {
-            // until a cycle has no work
+        let quiet = false;
+        for (let i = 0; i < QUIESCE_CYCLES; i++) {
+            if (0 === invoker.invoke()) {
+                quiet = true;
+                break;
+            }
         }
         this.driver.close();
+        if (!quiet) {
+            // a close path that keeps producing work (a leak, a command that requeues itself) must not hide behind the cap
+            throw new Error(
+                'driver ' +
+                    this.name +
+                    ' still had work after ' +
+                    QUIESCE_CYCLES +
+                    ' duty cycles when its test closed it',
+            );
+        }
     }
 }
 
