@@ -496,6 +496,32 @@ export class ThreadLocalRandom {
         return origin + Math.floor(Math.random() * (bound! - origin));
     }
 
+    // xorshift128 state (Marsaglia), seeded from Math.random. `Math.random()` allocates a heap number per call in V8, so
+    // `nextDouble`, which the feedback delay generators call per NAK, runs on its own integer generator instead.
+    private s0 = Math.floor(Math.random() * TWO_POW_32) | 1;
+    private s1 = Math.floor(Math.random() * TWO_POW_32) | 0;
+    private s2 = Math.floor(Math.random() * TWO_POW_32) | 0;
+    private s3 = Math.floor(Math.random() * TWO_POW_32) | 0;
+
+    private nextBits(): number {
+        let t = this.s3;
+        const s = this.s0;
+        this.s3 = this.s2;
+        this.s2 = this.s1;
+        this.s1 = s;
+        t ^= t << 11;
+        t ^= t >>> 8;
+        this.s0 = t ^ s ^ (s >>> 19);
+        return this.s0 >>> 0;
+    }
+
+    /** `Random.nextDouble()`: a uniform `double` in [0, 1) with 53 random bits, as Java's. */
+    public nextDouble(): number {
+        const high = this.nextBits() >>> 5;
+        const low = this.nextBits() >>> 6;
+        return (high * 67108864 + low) / 9007199254740992;
+    }
+
     /** `Random.nextBoolean()`. */
     public nextBoolean(): boolean {
         return Math.random() < 0.5;
