@@ -45,6 +45,7 @@ import type { SystemCounters } from '../../src/driver/status/SystemCounters.js';
 import { UnicastFlowControl } from '../../src/driver/UnicastFlowControl.js';
 import { mockConductorProxy, type ConductorProxyFake } from './PublicationFakes.js';
 import { TestLogProducer } from './TestLogProducer.js';
+import { parseSendArgs } from './SendArgs.js';
 
 /**
  * A datagram socket that records what it is given. `block` is the number of send attempts that find the send queue
@@ -65,7 +66,8 @@ export class CaptureSocket {
         return 0;
     }
 
-    public send(slot: Uint8Array, offset: number, length: number): void {
+    public send(slot: Uint8Array, ...args: unknown[]): void {
+        const { offset, length } = parseSendArgs(slot, args);
         this.datagrams.push(slot.slice(offset, offset + length));
     }
 

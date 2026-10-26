@@ -47,14 +47,14 @@ describe('AgentRunnerExtra', () => {
         expect(runner.isClosed()).toBe(false);
     });
 
-    it('aBusyAgentRunsOneDutyCyclePerImmediateAndNeverUsesATimer', () => {
+    it('aBusyAgentRunsABatchOfDutyCyclesPerImmediateAndNeverUsesATimer', () => {
         agent.doWork.mockImplementation(() => 1);
         const runner = newRunner(new BackoffIdleStrategy());
 
         runner.run();
         for (let i = 1; i <= 50; i++) {
             scheduler.runSteps(1);
-            expect(agent.doWork).toHaveBeenCalledTimes(i);
+            expect(agent.doWork).toHaveBeenCalledTimes(i * AgentRunner.MAX_BATCHED_DUTY_CYCLES);
             expect(scheduler.pendingImmediates()).toBe(1);
             expect(scheduler.pendingTimers()).toBe(0);
         }

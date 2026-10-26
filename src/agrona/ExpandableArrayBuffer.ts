@@ -56,7 +56,7 @@ export class ExpandableArrayBuffer extends AbstractMutableDirectBuffer {
 
         this._byteArray = new Uint8Array(initialCapacity);
         this._dataView = new DataView(this._byteArray.buffer);
-        this._capacity = initialCapacity;
+        this._capacity = initialCapacity | 0;
         this._addressOffset = 0;
     }
 
@@ -108,7 +108,7 @@ export class ExpandableArrayBuffer extends AbstractMutableDirectBuffer {
             newArray.set(this._byteArray);
             this._byteArray = newArray;
             this._dataView = new DataView(newArray.buffer);
-            this._capacity = newCapacity;
+            this._capacity = newCapacity | 0;
         }
     }
 

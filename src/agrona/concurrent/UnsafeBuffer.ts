@@ -212,7 +212,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
 
         if (buffer instanceof Uint8Array) {
             if (undefined === offset) {
-                this._capacity = buffer.length;
+                this._capacity = buffer.length | 0;
                 this._addressOffset = 0;
                 this._wrapAdjustment = 0;
             } else {
@@ -220,9 +220,9 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
                     Objects.checkFromIndexSize(offset, length!, buffer.length);
                 }
 
-                this._capacity = length!;
-                this._addressOffset = offset;
-                this._wrapAdjustment = offset;
+                this._capacity = length! | 0;
+                this._addressOffset = offset | 0;
+                this._wrapAdjustment = offset | 0;
             }
 
             if (buffer !== this._byteArray) {
@@ -232,17 +232,17 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
             }
         } else {
             if (undefined === offset) {
-                this._capacity = buffer.capacity();
-                this._addressOffset = buffer.addressOffset();
-                this._wrapAdjustment = buffer.wrapAdjustment();
+                this._capacity = buffer.capacity() | 0;
+                this._addressOffset = buffer.addressOffset() | 0;
+                this._wrapAdjustment = buffer.wrapAdjustment() | 0;
             } else {
                 if (SHOULD_BOUNDS_CHECK) {
                     Objects.checkFromIndexSize(offset, length!, buffer.capacity());
                 }
 
-                this._capacity = length!;
-                this._addressOffset = buffer.addressOffset() + offset;
-                this._wrapAdjustment = buffer.wrapAdjustment() + offset;
+                this._capacity = length! | 0;
+                this._addressOffset = (buffer.addressOffset() + offset) | 0;
+                this._wrapAdjustment = (buffer.wrapAdjustment() + offset) | 0;
             }
 
             const array = buffer.byteArray();
@@ -257,7 +257,7 @@ export class UnsafeBuffer extends AbstractMutableDirectBuffer implements AtomicB
             }
         }
 
-        this._base = this._byteArray.byteOffset + this._addressOffset;
+        this._base = (this._byteArray.byteOffset + this._addressOffset) | 0;
     }
 
     /**

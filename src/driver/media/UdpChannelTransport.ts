@@ -171,6 +171,8 @@ export abstract class UdpChannelTransport implements AutoCloseable {
     private srcLast = 0;
     private srcNext = 0;
     private readonly sendSlot = new Uint8Array(SetupFlyweight.MAX_UDP_PAYLOAD_LENGTH);
+    // views of the first `length` bytes of the send slot, made when a datagram of that length is first sent (spec D113)
+    private readonly sendViews = new Map<number, Uint8Array>();
     private sendBlocked = false;
     private pendingReceiveError: Error | null = null;
     private pendingSendError: Error | null = null;
@@ -781,15 +783,16 @@ export abstract class UdpChannelTransport implements AutoCloseable {
         }
 
         try {
-            const slot = this.sendSlot;
-            buffer.getBytes(offset, slot, 0, length);
+            buffer.getBytes(offset, this.sendSlot, 0, length);
+            // The call shapes of node's `dgram` that neither slice the buffer (a view per send) nor resolve a host
+            // (spec D113): a view of exactly `length` bytes, then the callback on a connected socket, or the port, the
+            // address literal and the callback.
+            const view = this.sendView(length);
             if (null === address) {
-                socket.send(slot, 0, length, this.onSendCompleteCallback);
+                socket.send(view, this.onSendCompleteCallback);
             } else {
                 socket.send(
-                    slot,
-                    0,
-                    length,
+                    view,
                     address.getPort(),
                     (address.getAddress() as InetAddress).getHostAddress(),
                     this.onSendCompleteCallback,
@@ -805,6 +808,17 @@ export abstract class UdpChannelTransport implements AutoCloseable {
         }
 
         return length;
+    }
+
+    /** The view of the first `length` bytes of the send slot: made once for each length, then reused (spec D113). */
+    private sendView(length: number): Uint8Array {
+        let view = this.sendViews.get(length);
+        if (undefined === view) {
+            view = this.sendSlot.subarray(0, length);
+            this.sendViews.set(length, view);
+        }
+
+        return view;
     }
 
     private newSocket(reuseAddress: boolean): Socket {

@@ -6,6 +6,7 @@ import dgram from 'node:dgram';
 import { isIP } from 'node:net';
 import type { RemoteInfo, Socket } from 'node:dgram';
 import { afterEach } from 'vitest';
+import { parseSendArgs } from './SendArgs.js';
 
 /** The hard cap of every wait in these helpers. A wait that reaches it fails the test. */
 export const WAIT_CAP_MS = 5_000;
@@ -168,26 +169,19 @@ export class FakeSocket {
     public throwOnSend: Error | null = null;
     private readonly listeners = new Map<string, ((...args: never[]) => void)[]>();
 
-    public send(
-        slot: Uint8Array,
-        offset: number,
-        length: number,
-        portOrCallback?: number | ((err: Error | null, bytes: number) => void),
-        address?: string,
-        callback?: (err: Error | null, bytes: number) => void,
-    ): void {
+    public send(slot: Uint8Array, ...args: unknown[]): void {
         if (null !== this.throwOnSend) {
             throw this.throwOnSend;
         }
 
-        const hasPort = typeof portOrCallback === 'number';
+        const { offset, length, port, address, callback } = parseSendArgs(slot, args);
         this.sent.push({
             slot,
             offset,
             length,
-            port: hasPort ? portOrCallback : undefined,
-            address: hasPort ? address : undefined,
-            callback: hasPort ? callback : (portOrCallback as typeof callback),
+            port,
+            address,
+            callback,
             bytesAtSend: slot.slice(offset, offset + length),
         });
     }

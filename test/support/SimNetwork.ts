@@ -5,6 +5,7 @@
 // event loop, no wall time. One seed, one network: the same sends give the same deliveries.
 import type { RemoteInfo } from 'node:dgram';
 import { mulberry32 } from './Random.js';
+import { parseSendArgs } from './SendArgs.js';
 
 /** The faults of a network. Every rate is the probability for one datagram. */
 export interface FaultModel {
@@ -338,25 +339,16 @@ export class SimSocket {
         return { address: this.remote.host, family: 'IPv4', port: this.remote.port };
     }
 
-    public send(
-        slot: Uint8Array,
-        offset: number,
-        length: number,
-        portOrCallback?: number | SendCallback,
-        host?: string,
-        callback?: SendCallback,
-    ): void {
+    public send(slot: Uint8Array, ...args: unknown[]): void {
         if (this.closed) {
             throw sysError('ERR_SOCKET_DGRAM_NOT_RUNNING', 'Not running');
         }
 
-        const hasPort = 'number' === typeof portOrCallback;
-        const toPort = hasPort ? portOrCallback : this.remote?.port;
-        const done = hasPort ? callback : (portOrCallback as SendCallback | undefined);
+        const { offset, length, port, callback: done } = parseSendArgs(slot, args);
+        const toPort = port ?? this.remote?.port;
         if (undefined === toPort) {
             throw sysError('ERR_SOCKET_DGRAM_NOT_CONNECTED', 'Not connected');
         }
-        void host;
         if (0 === this.boundPort) {
             this.boundPort = this.network.bind(this, 0, false);
         }
