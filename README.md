@@ -14,6 +14,25 @@ that embeds one) without a separate media driver process, shared memory or nativ
 **Status:** design approved; implementation in progress. See the
 [design spec](docs/specs/2026-10-21-aeron-transport-ts-design.md).
 
+## Stopping an embedded driver
+
+`MediaDriver.launch()` in any threading mode except `INVOKER` starts an `AgentRunner` on the Node event loop (spec D100).
+Its timers, and the UDP sockets of the driver, keep the process alive until `driver.close()` is called: a script that
+launches a driver and never closes it does not exit by itself. Close the clients first, then the driver, in a
+`finally` block or on shutdown:
+
+```ts
+const driver = MediaDriver.launch();
+try {
+  // ... connect an Aeron client, publish and subscribe ...
+} finally {
+  driver.close();
+}
+```
+
+With `ThreadingMode.INVOKER` there is no runner: the application steps the driver itself through
+`driver.sharedAgentInvoker()`. Call `close()` in that mode too, as it releases the sockets of the driver.
+
 ## Golden wire vectors
 
 `test/golden/frames.json` holds datagrams captured from the real Aeron 1.53.3 C driver; `npm test` checks the
