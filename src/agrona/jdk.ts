@@ -218,6 +218,36 @@ export const Integer = {
         return result + 0;
     },
 
+    /**
+     * `Integer.parseUnsignedInt(String)`: decimal digits (a leading `+` is allowed) holding 0 to 2^32 - 1, returned as
+     * the `int` with those 32 bits, so 4294967295 is -1 as in Java. A leading `-` or a value over 2^32 - 1 is a
+     * {@link NumberFormatException}.
+     */
+    parseUnsignedInt(s: string | null): number {
+        if (null === s) {
+            throw new NumberFormatException('Cannot parse null string: null');
+        }
+
+        if (0 === s.length) {
+            throw new NumberFormatException('For input string: ""');
+        }
+
+        if ('-' === s.charAt(0)) {
+            throw new NumberFormatException('Illegal leading minus sign on unsigned string ' + s + '.');
+        }
+
+        if (!/^\+?[0-9]+$/.test(s)) {
+            throw new NumberFormatException('For input string: "' + s + '"');
+        }
+
+        const result = Number(s);
+        if (result > 0xffffffff) {
+            throw new NumberFormatException('String value ' + s + ' exceeds range of unsigned int.');
+        }
+
+        return result | 0;
+    },
+
     toHexString(i: number): string {
         return (i >>> 0).toString(16);
     },

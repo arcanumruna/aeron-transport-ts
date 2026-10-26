@@ -50,6 +50,8 @@ export const SYSTEM_COUNTERS: readonly (readonly [string, number, string])[] = [
     ['CONTROL_PROTOCOL_VERSION', 43, 'Control protocol version'],
     ['STATUS_MESSAGES_REJECTED', 44, 'Status Messages rejected'],
     ['NATIVE_RESOURCE_AGENT_PROXY_FAILS', 45, 'Failed offers to NativeResourceAgentProxy'],
+    // not in Aeron (spec D1): the datagrams a transport dropped because its receive ring was full
+    ['RECEIVE_RING_DROPS', 46, 'Receive ring drops'],
 ];
 
 /** `[name, value]` of every `public static final int` of `AeronCounters.java` (the commented out one is not here). */
@@ -100,6 +102,7 @@ export const AERON_COUNTERS: readonly (readonly [string, number])[] = [
     ['SYSTEM_COUNTER_ID_CONTROL_PROTOCOL_VERSION', 43],
     ['SYSTEM_COUNTER_ID_STATUS_MESSAGES_REJECTED', 44],
     ['SYSTEM_COUNTER_ID_NATIVE_RESOURCE_AGENT_PROXY_FAILS', 45],
+    ['SYSTEM_COUNTER_ID_RECEIVE_RING_DROPS', 46], // not in Aeron (spec D1)
     ['DRIVER_SYSTEM_COUNTER_TYPE_ID', 0],
     ['DRIVER_PUBLISHER_LIMIT_TYPE_ID', 1],
     ['DRIVER_SENDER_POSITION_TYPE_ID', 2],

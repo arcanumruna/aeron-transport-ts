@@ -288,6 +288,12 @@ export class AeronCounters {
      */
     public static readonly SYSTEM_COUNTER_ID_NATIVE_RESOURCE_AGENT_PROXY_FAILS = 45;
 
+    /**
+     * Not in Aeron: counter id for the datagrams a transport dropped because its receive ring was full (spec D1). The
+     * next id after Aeron 1.53.3's last one.
+     */
+    public static readonly SYSTEM_COUNTER_ID_RECEIVE_RING_DROPS = 46;
+
     // Client/driver counters
     /**
      * System-wide counters for monitoring. These are separate from counters used for position tracking on streams.

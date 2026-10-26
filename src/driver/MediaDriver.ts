@@ -16,6 +16,7 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of io/aeron/driver/MediaDriver.java @ 1.53.3 (the nested class `MediaDriver.Context`)
+import dgram from 'node:dgram';
 import { BitUtil } from '../agrona/BitUtil.js';
 import { CloseHelper } from '../agrona/CloseHelper.js';
 import type { ErrorHandler } from '../agrona/ErrorHandler.js';
@@ -44,9 +45,11 @@ import { SystemOut } from '../agrona/jdkThrowable.js';
 import { SemanticVersion } from '../agrona/SemanticVersion.js';
 import { Strings } from '../agrona/Strings.js';
 import { SystemUtil } from '../agrona/SystemUtil.js';
+import { Aeron } from '../client/Aeron.js';
 import { CncFileDescriptor } from '../client/CncFileDescriptor.js';
 import { CommonContext, type InferableBoolean } from '../client/CommonContext.js';
 import { ControlProtocolEvents } from '../client/command/ControlProtocolEvents.js';
+import { AeronException } from '../client/exceptions/AeronException.js';
 import { ConfigurationException } from '../client/exceptions/ConfigurationException.js';
 import { LogBufferDescriptor } from '../client/logbuffer/LogBufferDescriptor.js';
 import { Configuration } from './Configuration.js';
@@ -57,6 +60,8 @@ import type { NameResolverAgent } from './NameResolverAgent.js';
 import { DutyCycleStallTracker } from './status/DutyCycleStallTracker.js';
 import { SystemCounterDescriptor } from './status/SystemCounterDescriptor.js';
 import { SystemCounters } from './status/SystemCounters.js';
+import type { PortManager } from './media/PortManager.js';
+import { WildcardPortManager } from './media/WildcardPortManager.js';
 import { ThreadingMode } from './ThreadingMode.js';
 
 function isAutoCloseable(value: unknown): value is AutoCloseable {
@@ -145,6 +150,12 @@ export class MediaDriverContext extends CommonContext {
     private _resolverBootstrapNeighbor: string | null = Configuration.resolverBootstrapNeighbor();
     private _senderWildcardPortRange: string | null = Configuration.senderWildcardPortRange();
     private _receiverWildcardPortRange: string | null = Configuration.receiverWildcardPortRange();
+    private _osDefaultSocketRcvbufLength = Aeron.NULL_VALUE;
+    private _osMaxSocketRcvbufLength = Aeron.NULL_VALUE;
+    private _osDefaultSocketSndbufLength = Aeron.NULL_VALUE;
+    private _osMaxSocketSndbufLength = Aeron.NULL_VALUE;
+    private _senderPortManager: PortManager | null = null;
+    private _receiverPortManager: PortManager | null = null;
     private _epochClock: EpochClock | null = null;
     private _nanoClock: NanoClock | null = null;
     private _cachedEpochClock: CachedEpochClock | null = null;
@@ -212,6 +223,7 @@ export class MediaDriverContext extends CommonContext {
 
         // Java wraps the body in try / catch (Exception) and rethrows it unchecked: JS has no checked exceptions.
         this.concludeNullProperties();
+        this.resolveOsSocketBufLengths();
 
         Configuration.validateMtuLength(this._mtuLength);
         Configuration.validateMtuLength(this._ipcMtuLength);
@@ -2717,6 +2729,134 @@ export class MediaDriverContext extends CommonContext {
     }
 
     /**
+     * The {@link PortManager} used for the Sender.
+     *
+     * @return Sender {@link PortManager}.
+     */
+    public senderPortManager(): PortManager | null;
+    /**
+     * Set the {@link PortManager} used for the Sender.
+     *
+     * @param portManager to use.
+     * @return this for a fluent API.
+     */
+    public senderPortManager(portManager: PortManager | null): this;
+    public senderPortManager(portManager?: PortManager | null): PortManager | null | this {
+        if (undefined === portManager) {
+            return this._senderPortManager;
+        }
+
+        this._senderPortManager = portManager;
+        return this;
+    }
+
+    /**
+     * The {@link PortManager} used for the Receiver.
+     *
+     * @return Receiver {@link PortManager}.
+     */
+    public receiverPortManager(): PortManager | null;
+    /**
+     * Set the {@link PortManager} used for the Receiver.
+     *
+     * @param portManager to use.
+     * @return this for a fluent API.
+     */
+    public receiverPortManager(portManager: PortManager | null): this;
+    public receiverPortManager(portManager?: PortManager | null): PortManager | null | this {
+        if (undefined === portManager) {
+            return this._receiverPortManager;
+        }
+
+        this._receiverPortManager = portManager;
+        return this;
+    }
+
+    /**
+     * The default `SO_RCVBUF` of a datagram socket of this OS, probed once.
+     *
+     * @return the length in bytes.
+     * @internal package-private in Java
+     */
+    public osDefaultSocketRcvbufLength(): number {
+        this.resolveOsSocketBufLengths();
+        return this._osDefaultSocketRcvbufLength;
+    }
+
+    /**
+     * The largest `SO_RCVBUF` that this OS gives a datagram socket, probed once.
+     *
+     * @return the length in bytes.
+     * @internal package-private in Java
+     */
+    public osMaxSocketRcvbufLength(): number {
+        this.resolveOsSocketBufLengths();
+        return this._osMaxSocketRcvbufLength;
+    }
+
+    /**
+     * The default `SO_SNDBUF` of a datagram socket of this OS, probed once.
+     *
+     * @return the length in bytes.
+     * @internal package-private in Java
+     */
+    public osDefaultSocketSndbufLength(): number {
+        this.resolveOsSocketBufLengths();
+        return this._osDefaultSocketSndbufLength;
+    }
+
+    /**
+     * The largest `SO_SNDBUF` that this OS gives a datagram socket, probed once.
+     *
+     * @return the length in bytes.
+     * @internal package-private in Java
+     */
+    public osMaxSocketSndbufLength(): number {
+        this.resolveOsSocketBufLengths();
+        return this._osMaxSocketSndbufLength;
+    }
+
+    /**
+     * Read the default and the largest socket buffer lengths of the OS from a probe socket, once. Node can read a
+     * buffer size only from a bound socket, so the probe is bound to the loopback address on an ephemeral port.
+     *
+     * @internal package-private in Java
+     */
+    public resolveOsSocketBufLengths(): void {
+        if (Aeron.NULL_VALUE !== this._osMaxSocketRcvbufLength) {
+            return;
+        }
+
+        const probe = dgram.createSocket({
+            type: 'udp4',
+            lookup: (hostname, _options, callback) => {
+                (callback as (err: Error | null, address: string, family: number) => void)(null, hostname, 4);
+            },
+        });
+        probe.on('error', () => {});
+        try {
+            probe.bind(0, '127.0.0.1');
+            this._osDefaultSocketSndbufLength = probe.getSendBufferSize();
+
+            probe.setSendBufferSize(Integer.MAX_VALUE);
+            this._osMaxSocketSndbufLength = probe.getSendBufferSize();
+
+            this._osDefaultSocketRcvbufLength = probe.getRecvBufferSize();
+
+            probe.setRecvBufferSize(Integer.MAX_VALUE);
+            this._osMaxSocketRcvbufLength = probe.getRecvBufferSize();
+        } catch (ex) {
+            throw new AeronException('probe socket: ' + ex, ex as Error);
+        } finally {
+            try {
+                probe.close();
+            } catch {
+                // not open
+            }
+        }
+    }
+
+    /**
      * Get the limit on the number of sessions allow per stream for subscriptions.
      *
      * @return the limit of sessions per stream
@@ -2839,6 +2979,20 @@ export class MediaDriverContext extends CommonContext {
 
         if (null === this._nameResolver) {
             this._nameResolver = DefaultNameResolver.INSTANCE;
+        }
+
+        if (null === this._senderPortManager) {
+            this._senderPortManager = new WildcardPortManager(
+                WildcardPortManager.parsePortRange(this._senderWildcardPortRange),
+                true,
+            );
+        }
+
+        if (null === this._receiverPortManager) {
+            this._receiverPortManager = new WildcardPortManager(
+                WildcardPortManager.parsePortRange(this._receiverWildcardPortRange),
+                false,
+            );
         }
 
         if (null === this._channelReceiveTimestampClock) {
@@ -3241,6 +3395,10 @@ export class MediaDriverContext extends CommonContext {
             this._senderWildcardPortRange +
             '\n    receiverWildcardPortRange=' +
             this._receiverWildcardPortRange +
+            '\n    senderPortManager=' +
+            this._senderPortManager +
+            '\n    receiverPortManager=' +
+            this._receiverPortManager +
             '\n    resourceFreeLimit=' +
             this._resourceFreeLimit +
             '\n    maxResend=' +

@@ -359,6 +359,43 @@ export class PublicationParams {
         }
     }
 
+    /**
+     * Check that the MTU of a publication fits the send buffer of its channel: `SO_SNDBUF` of the channel when it sets
+     * one, else the OS default.
+     *
+     * @throws IllegalStateException if the MTU is greater than the send buffer.
+     */
+    public static validateMtuForSndbuf(
+        params: PublicationParams,
+        channelSocketSndbufLength: number,
+        ctx: MediaDriver.Context,
+        channel: string,
+        existingChannel: string | null,
+    ): void {
+        if (0 !== channelSocketSndbufLength && params.mtuLength > channelSocketSndbufLength) {
+            throw new IllegalStateException(
+                'MTU greater than SO_SNDBUF for channel: mtu=' +
+                    params.mtuLength +
+                    ' so-sndbuf=' +
+                    channelSocketSndbufLength +
+                    (null === existingChannel ? '' : ' existingChannel=' + existingChannel) +
+                    ' channel=' +
+                    channel,
+            );
+        } else if (0 === channelSocketSndbufLength && params.mtuLength > ctx.osDefaultSocketSndbufLength()) {
+            throw new IllegalStateException(
+                'MTU greater than SO_SNDBUF for channel: mtu=' +
+                    params.mtuLength +
+                    ' so-sndbuf=' +
+                    ctx.osDefaultSocketSndbufLength() +
+                    ' (OS default)' +
+                    (null === existingChannel ? '' : ' existingChannel=' + existingChannel) +
+                    ' channel=' +
+                    channel,
+            );
+        }
+    }
+
     private static formatMatchError(
         paramName: string,
         existingValue: string,
