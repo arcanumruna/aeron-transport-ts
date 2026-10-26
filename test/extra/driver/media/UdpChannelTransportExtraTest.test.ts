@@ -659,6 +659,38 @@ describe('open and close', () => {
         expect(errors).toEqual([]); // the late error event of the failed socket is not reported
     });
 
+    it('a failed open leaves the managed port to close(), which frees it once (D28) Regression', () => {
+        const port = freeUdpPort();
+        const blocker = newOpenTransport({ bindPort: port });
+        const manager = new WildcardPortManager([port, port], false);
+        let frees = 0;
+        const counting: PortManager = {
+            getManagedPort: (channel, address) => manager.getManagedPort(channel, address),
+            freeManagedPort: (address) => {
+                frees++;
+                manager.freeManagedPort(address);
+            },
+        };
+        const failing = newTransport({ portManager: counting });
+
+        assertThrows(AeronException, () => failing.openDatagramChannel(null));
+        expect(manager.portSet.contains(port)).toBe(true); // the failed open does not free it, as in Java
+
+        failing.close(); // what DriverConductor does through closeAll after a failed open
+        expect(manager.portSet.contains(port)).toBe(false);
+        expect(frees).toBe(1);
+
+        manager.portSet.add(port); // someone else took the port since: a second close must not free it again
+        failing.close();
+        expect(frees).toBe(1);
+        expect(manager.portSet.contains(port)).toBe(true);
+
+        blocker.close();
+        manager.portSet.remove(port);
+        const again = newOpenTransport({ portManager: manager });
+        expect(portOf(again)).toBe(port);
+    });
+
     it('binds an ephemeral port, reports it, and can be reopened after close elsewhere on the same port', () => {
         const transport = newOpenTransport();
         const port = portOf(transport);
@@ -904,10 +936,10 @@ describe('last sender address (T8 review)', () => {
             expect(otherHost.getAddress()!.getHostAddress()).toBe('10.0.0.2');
             expect(getByName.mock.calls.length).toBe(calls + 2);
 
-            // back to the first sender: a new object, equal to the first, so a peer is found by equals
+            // back to the first sender: the interned object, so a peer is found by identity too
             const back = next('10.0.0.1', 5000);
-            expect(back).not.toBe(first);
-            expect(back.equals(first)).toBe(true);
+            expect(back).toBe(first);
+            expect(getByName.mock.calls.length).toBe(calls + 2);
             // addresses already handed out are not changed by later datagrams
             expect(first.getPort()).toBe(5000);
             expect(otherPort.getPort()).toBe(5001);
@@ -930,6 +962,63 @@ describe('last sender address (T8 review)', () => {
                 }
             }
         });
+    });
+
+    it('allocates nothing per datagram from 2 alternating senders (interned source addresses) Regression', async () => {
+        const transport = newOpenTransport();
+        const buffer = new UnsafeBuffer(new Uint8Array(RECEIVE_CAPACITY));
+        const message = new Uint8Array(128);
+        const infos = [rinfoOf('10.0.0.1', 5000, 128), rinfoOf('10.0.0.2', 5001, 128)];
+
+        await expectNoAllocation((n) => {
+            for (let i = 0; i < n; i++) {
+                transport.onMessage(message, infos[i & 1] as RemoteInfo);
+                if (null === transport.receive(buffer)) {
+                    throw new Error('lost');
+                }
+            }
+        });
+    });
+
+    it('allocates nothing per datagram from as many senders as the intern table holds Regression', async () => {
+        const capacity = 16; // the documented capacity
+        expect(UdpChannelTransport.SOURCE_ADDRESS_CAPACITY).toBe(capacity);
+        const transport = newOpenTransport();
+        const buffer = new UnsafeBuffer(new Uint8Array(RECEIVE_CAPACITY));
+        const message = new Uint8Array(128);
+        const infos: RemoteInfo[] = [];
+        for (let i = 0; i < capacity; i++) {
+            infos.push(rinfoOf('10.0.1.' + i, 6000 + i, 128));
+        }
+
+        await expectNoAllocation((n) => {
+            for (let i = 0; i < n; i++) {
+                transport.onMessage(message, infos[i % capacity] as RemoteInfo);
+                if (null === transport.receive(buffer)) {
+                    throw new Error('lost');
+                }
+            }
+        });
+    });
+
+    it('a full intern table replaces round-robin: the evicted sender gets a new address, the others keep theirs', () => {
+        const transport = newOpenTransport();
+        const buffer = new UnsafeBuffer(new Uint8Array(RECEIVE_CAPACITY));
+        const message = new Uint8Array(8);
+        const capacity = UdpChannelTransport.SOURCE_ADDRESS_CAPACITY;
+        const next = (i: number): InetSocketAddress => {
+            transport.onMessage(message, rinfoOf('10.0.2.' + i, 7000 + i));
+            return transport.receive(buffer) as InetSocketAddress;
+        };
+
+        const first = Array.from({ length: capacity }, (_, i) => next(i));
+        const extra = next(capacity); // evicts sender 0
+        expect(extra.getPort()).toBe(7000 + capacity);
+        expect(next(1)).toBe(first[1]);
+        expect(next(capacity)).toBe(extra);
+        const again = next(0);
+        expect(again).not.toBe(first[0]);
+        expect(again.equals(first[0] as InetSocketAddress)).toBe(true);
     });
 
     it('allocates nothing per datagram on the send path (copy to the slot, hand to the socket)', async () => {

@@ -956,17 +956,26 @@ describe('allocation on the duty cycle', () => {
         });
     });
 
-    // Mutation: reportMeasurement allocates, e.g. a template string or an array per call.
+    // The clock values are above 2^31, so the counter writes box them in heap numbers when the call is not inlined
+    // (issue #19). Whether V8 inlines it depends on the type feedback the earlier tests of the file left: run alone,
+    // the loop boxes about a number per call (4 minor collections), after the other tests none, which made the test
+    // flaky under parallel load (issue #33). So the bound is the one heap number per iteration of the setRelease test
+    // below, whatever the feedback.
+    // Mutation: reportMeasurement allocates more than that, e.g. a template string or an array per call.
     it('DutyCycleStallTracker.measureAndUpdate near 2^40, with the max and the threshold counters moving', async () => {
         const f = newFixture(ARRAY_BACKING);
         const tracker = new DutyCycleStallTracker(f.manager.newCounter('max'), f.manager.newCounter('exceeded'), 1500);
-        await expectNoAllocation((n) => {
-            let now = BIG;
-            for (let i = 0; i < n; i++) {
-                now += 1000 + (i & 1023);
-                tracker.measureAndUpdate(now);
-            }
-        });
+        await expectNoAllocation(
+            (n) => {
+                let now = BIG;
+                for (let i = 0; i < n; i++) {
+                    now += 1000 + (i & 1023);
+                    tracker.measureAndUpdate(now);
+                }
+            },
+            undefined,
+            1,
+        );
         expect(tracker.cycleTimeThresholdExceededCount().get()).toBeGreaterThan(0);
     });
 
