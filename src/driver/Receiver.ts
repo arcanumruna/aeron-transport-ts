@@ -16,6 +16,7 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of io/aeron/driver/Receiver.java @ 1.53.3
+import { IllegalArgumentException } from '../agrona/jdk.js';
 import { ArrayListUtil } from '../agrona/collections/ArrayListUtil.js';
 import { ArrayUtil } from '../agrona/collections/ArrayUtil.js';
 import type { Agent } from '../agrona/concurrent/Agent.js';
@@ -60,7 +61,7 @@ function threadName(newName: string, classicName: string): string {
         case CommonContext.THREAD_NAMING_NEW:
             return newName;
         default:
-            throw new Error('Unknown thread naming mode: ' + mode);
+            throw new IllegalArgumentException('Unknown thread naming mode: ' + mode);
     }
 }
 
