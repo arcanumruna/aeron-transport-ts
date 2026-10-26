@@ -17,7 +17,6 @@
  */
 // Port of io/aeron/logbuffer/LogBufferUnblockerTest.java @ 1.53.3
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BitUtil } from '../../../src/agrona/BitUtil.js';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { LogBufferDescriptor } from '../../../src/client/logbuffer/LogBufferDescriptor.js';
 import { LogBufferUnblocker } from '../../../src/client/logbuffer/LogBufferUnblocker.js';
@@ -39,7 +38,6 @@ const {
     termId,
 } = LogBufferDescriptor;
 const { HEADER_LENGTH } = DataHeaderFlyweight;
-const { SIZE_OF_LONG } = BitUtil;
 
 const TERM_LENGTH = TERM_MIN_LENGTH;
 const TERM_ID_1 = 1;
@@ -52,7 +50,7 @@ describe('LogBufferUnblocker', () => {
     let termBuffers: UnsafeBuffer[];
     let positionBitsToShift: number;
     let compareAndSetInt: ReturnType<typeof vi.spyOn>;
-    let compareAndSetLongHalves: ReturnType<typeof vi.spyOn>;
+    let casRawTail: ReturnType<typeof vi.spyOn>;
 
     beforeEach(() => {
         positionBitsToShift = LogBufferDescriptor.positionBitsToShift(TERM_LENGTH);
@@ -72,11 +70,11 @@ describe('LogBufferUnblocker', () => {
         }
 
         compareAndSetInt = vi.spyOn(logMetaDataBuffer, 'compareAndSetInt');
-        compareAndSetLongHalves = vi.spyOn(logMetaDataBuffer, 'compareAndSetLongHalves');
+        casRawTail = vi.spyOn(LogBufferDescriptor, 'casRawTail');
     });
 
     afterEach(() => {
-        compareAndSetLongHalves.mockRestore();
+        casRawTail.mockRestore();
     });
 
     it('shouldNotUnblockWhenPositionHasCompleteMessage', () => {
@@ -139,14 +137,14 @@ describe('LogBufferUnblocker', () => {
         expect(activeTermId).toBe(TERM_ID_1 + 1);
         expect(computePosition(activeTermId, 0, positionBitsToShift, TERM_ID_1)).toBe(blockedPosition);
 
-        // compareAndSetLong(termTailCounterTwoOffset, pack(TERM_ID_1 - 2, 0), pack(TERM_ID_1 + 1, 0)): rotateLog
-        // compares and swaps the raw tail as its two int halves, low then high (spec D12, D16)
-        expect(compareAndSetLongHalves.mock.calls).toEqual([
-            [TERM_TAIL_COUNTER_OFFSET + SIZE_OF_LONG, 0, TERM_ID_1 - 2, 0, TERM_ID_1 + 1],
+        // compareAndSetLong(termTailCounterTwoOffset, pack(TERM_ID_1 - 2, 0), pack(TERM_ID_1 + 1, 0)): the raw tail of
+        // partition 1 is a `bigint` (spec D12), compared and stored by casRawTail
+        expect(casRawTail.mock.calls).toEqual([
+            [logMetaDataBuffer, 1, packTail(TERM_ID_1 - 2, 0), packTail(TERM_ID_1 + 1, 0)],
         ]);
         expect(rawTailVolatile(logMetaDataBuffer, 1)).toBe(packTail(TERM_ID_1 + 1, 0));
         expect(compareAndSetInt.mock.calls).toEqual([[LOG_ACTIVE_TERM_COUNT_OFFSET, 0, 1]]);
-        expectInOrder([compareAndSetLongHalves, 0], [compareAndSetInt, 0]);
+        expectInOrder([casRawTail, 0], [compareAndSetInt, 0]);
     });
 
     it('shouldUnblockWhenPositionHasNonCommittedMessageAndTailPastEndOfTerm', () => {
