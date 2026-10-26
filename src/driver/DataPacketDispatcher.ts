@@ -26,7 +26,7 @@ import type { SetupFlyweight } from '../client/protocol/SetupFlyweight.js';
 import { UnknownSubscriptionException } from './exceptions/UnknownSubscriptionException.js';
 import type { InetSocketAddress } from './jdkNet.js';
 import type { ReceiveChannelEndpoint } from './media/ReceiveChannelEndpoint.js';
-import type { DriverConductorProxy } from './media/SendChannelEndpoint.js';
+import type { DriverConductorProxy } from './DriverConductorProxy.js';
 
 /**
  * Stand-in for `PublicationImage`, which task T16 ports. It has the members that the dispatcher calls; T16 replaces it

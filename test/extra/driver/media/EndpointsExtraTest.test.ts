@@ -57,11 +57,13 @@ import { ImageConnection } from '../../../../src/driver/media/ImageConnection.js
 import { ReceiveChannelEndpoint } from '../../../../src/driver/media/ReceiveChannelEndpoint.js';
 import { ReceiveChannelEndpointThreadLocals } from '../../../../src/driver/media/ReceiveChannelEndpointThreadLocals.js';
 import { ReceiveDestinationTransport } from '../../../../src/driver/media/ReceiveDestinationTransport.js';
-import type { DriverConductorProxy, NetworkPublication } from '../../../../src/driver/media/SendChannelEndpoint.js';
+import type { NetworkPublication } from '../../../../src/driver/media/SendChannelEndpoint.js';
 import { SendChannelEndpoint } from '../../../../src/driver/media/SendChannelEndpoint.js';
 import { UdpChannel } from '../../../../src/driver/media/UdpChannel.js';
 import { SystemCounterDescriptor } from '../../../../src/driver/status/SystemCounterDescriptor.js';
 import type { SystemCounters } from '../../../../src/driver/status/SystemCounters.js';
+import type { DriverConductorProxy } from '../../../../src/driver/DriverConductorProxy.js';
+import { newFakeConductorProxy, type FakeConductorProxy } from '../../../support/ConductorProxyFake.js';
 import { assertThrows } from '../../../support/Assertions.js';
 import { type Fake, calledMembers } from '../../../support/Mockito.js';
 import { FakeSocket, freeUdpPort, hasIpv6Loopback, waitUntil } from '../../../support/Udp.js';
@@ -118,13 +120,8 @@ function newPublication(sessionId: number, streamId: number, termLength = 64 * 1
     };
 }
 
-function newProxy(): Fake<DriverConductorProxy> {
-    return {
-        reResolveEndpoint: vi.fn<DriverConductorProxy['reResolveEndpoint']>(),
-        reResolveControl: vi.fn<DriverConductorProxy['reResolveControl']>(),
-        responseSetup: vi.fn<DriverConductorProxy['responseSetup']>(),
-        createPublicationImage: vi.fn<DriverConductorProxy['createPublicationImage']>(),
-    };
+function newProxy(): FakeConductorProxy {
+    return newFakeConductorProxy();
 }
 
 function track<T extends { close(): void }>(closeable: T): T {
@@ -1851,7 +1848,7 @@ describe('suppliers, Configuration and the Context', () => {
         expect(context.receiveChannelEndpointSupplier()).toBeInstanceOf(DefaultReceiveChannelEndpointSupplier);
         expect(context.receiveChannelEndpointThreadLocals()).toBeInstanceOf(ReceiveChannelEndpointThreadLocals);
         expect(context.dataTransportPoller()).toBeInstanceOf(DataTransportPoller);
-        expect(context.controlTransportPoller()).toBeNull(); // created with the DriverConductorProxy, by T17
+        expect(context.controlTransportPoller()).toBeInstanceOf(ControlTransportPoller);
 
         const sendSupplier = new DefaultSendChannelEndpointSupplier();
         const receiveSupplier = new DefaultReceiveChannelEndpointSupplier();

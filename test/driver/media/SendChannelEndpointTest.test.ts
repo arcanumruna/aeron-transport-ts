@@ -32,12 +32,13 @@ import { StatusMessageFlyweight } from '../../../src/client/protocol/StatusMessa
 import { InetSocketAddress } from '../../../src/driver/jdkNet.js';
 import { MediaDriver } from '../../../src/driver/MediaDriver.js';
 import { ReceiveChannelEndpointThreadLocals } from '../../../src/driver/media/ReceiveChannelEndpointThreadLocals.js';
-import type { DriverConductorProxy, NetworkPublication } from '../../../src/driver/media/SendChannelEndpoint.js';
+import type { NetworkPublication } from '../../../src/driver/media/SendChannelEndpoint.js';
 import { DynamicSndMultiDestination, SendChannelEndpoint } from '../../../src/driver/media/SendChannelEndpoint.js';
 import { UdpChannel } from '../../../src/driver/media/UdpChannel.js';
 import { WildcardPortManager } from '../../../src/driver/media/WildcardPortManager.js';
 import { SystemCounterDescriptor } from '../../../src/driver/status/SystemCounterDescriptor.js';
 import { SystemCounters } from '../../../src/driver/status/SystemCounters.js';
+import { newFakeConductorProxy, type FakeConductorProxy } from '../../support/ConductorProxyFake.js';
 import { type Fake, calledMembers, lastCallOrder, mock } from '../../support/Mockito.js';
 
 const { LITTLE_ENDIAN } = ByteOrder;
@@ -45,13 +46,8 @@ const { DESTINATION_TIMEOUT } = SendChannelEndpoint;
 const SIZE_OF_LONG = 8;
 
 /** `mock(DriverConductorProxy.class)`: a fake whose members record their calls. */
-function mockConductorProxy(): Fake<DriverConductorProxy> {
-    return {
-        reResolveEndpoint: vi.fn<DriverConductorProxy['reResolveEndpoint']>(),
-        reResolveControl: vi.fn<DriverConductorProxy['reResolveControl']>(),
-        responseSetup: vi.fn<DriverConductorProxy['responseSetup']>(),
-        createPublicationImage: vi.fn<DriverConductorProxy['createPublicationImage']>(),
-    };
+function mockConductorProxy(): FakeConductorProxy {
+    return newFakeConductorProxy();
 }
 
 /** `mock(NetworkPublication.class)`: a fake whose members record their calls and answer what a mock answers. */

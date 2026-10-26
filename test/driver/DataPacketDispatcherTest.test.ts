@@ -26,7 +26,7 @@ import type { PublicationImage, Receiver } from '../../src/driver/DataPacketDisp
 import { DataPacketDispatcher, SessionState } from '../../src/driver/DataPacketDispatcher.js';
 import { InetSocketAddress } from '../../src/driver/jdkNet.js';
 import { ReceiveChannelEndpoint } from '../../src/driver/media/ReceiveChannelEndpoint.js';
-import type { DriverConductorProxy } from '../../src/driver/media/SendChannelEndpoint.js';
+import { newFakeConductorProxy, type FakeConductorProxy } from '../support/ConductorProxyFake.js';
 import { expectInOrder } from '../support/InOrder.js';
 import { type Fake, calledMembers, mock } from '../support/Mockito.js';
 
@@ -67,7 +67,7 @@ function stub(method: unknown, value: unknown): void {
 
 describe('DataPacketDispatcherTest', () => {
     // JUnit makes a new instance of the test class for each test: the mocks and the dispatcher are made in beforeEach.
-    let mockConductorProxy: Fake<DriverConductorProxy>;
+    let mockConductorProxy: FakeConductorProxy;
     let mockReceiver: Fake<Receiver>;
     let dispatcher: DataPacketDispatcher;
     let mockHeader: DataHeaderFlyweight;
@@ -79,12 +79,7 @@ describe('DataPacketDispatcherTest', () => {
 
     beforeEach(() => {
         // mock(DriverConductorProxy.class) and mock(Receiver.class): hand fakes of the placeholder types
-        mockConductorProxy = {
-            reResolveEndpoint: vi.fn<DriverConductorProxy['reResolveEndpoint']>(),
-            reResolveControl: vi.fn<DriverConductorProxy['reResolveControl']>(),
-            responseSetup: vi.fn<DriverConductorProxy['responseSetup']>(),
-            createPublicationImage: vi.fn<DriverConductorProxy['createPublicationImage']>(),
-        };
+        mockConductorProxy = newFakeConductorProxy();
         mockReceiver = {
             addPendingSetupMessage: vi.fn<Receiver['addPendingSetupMessage']>(),
         };

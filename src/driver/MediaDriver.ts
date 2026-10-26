@@ -33,6 +33,8 @@ import { SystemEpochNanoClock } from '../agrona/concurrent/SystemEpochNanoClock.
 import { SystemNanoClock } from '../agrona/concurrent/SystemNanoClock.js';
 import { UnsafeBuffer } from '../agrona/concurrent/UnsafeBuffer.js';
 import { DistinctErrorLog } from '../agrona/concurrent/errors/DistinctErrorLog.js';
+import { ManyToOneConcurrentLinkedQueue } from '../agrona/concurrent/ManyToOneConcurrentLinkedQueue.js';
+import { BroadcastTransmitter } from '../agrona/concurrent/broadcast/BroadcastTransmitter.js';
 import { ManyToOneRingBuffer } from '../agrona/concurrent/ringbuffer/ManyToOneRingBuffer.js';
 import type { RingBuffer } from '../agrona/concurrent/ringbuffer/RingBuffer.js';
 import { ConcurrentCountersManager } from '../agrona/concurrent/status/ConcurrentCountersManager.js';
@@ -52,7 +54,10 @@ import { ControlProtocolEvents } from '../client/command/ControlProtocolEvents.j
 import { AeronException } from '../client/exceptions/AeronException.js';
 import { ConfigurationException } from '../client/exceptions/ConfigurationException.js';
 import { LogBufferDescriptor } from '../client/logbuffer/LogBufferDescriptor.js';
+import { ClientProxy } from './ClientProxy.js';
+import type { Runnable } from './CommandProxy.js';
 import { Configuration } from './Configuration.js';
+import { DriverConductorProxy } from './DriverConductorProxy.js';
 import { DefaultNameResolver } from './DefaultNameResolver.js';
 import type { DutyCycleTracker } from './DutyCycleTracker.js';
 import { MediaDriverVersion } from './MediaDriverVersion.js';
@@ -60,7 +65,7 @@ import type { NameResolverAgent } from './NameResolverAgent.js';
 import { DutyCycleStallTracker } from './status/DutyCycleStallTracker.js';
 import { SystemCounterDescriptor } from './status/SystemCounterDescriptor.js';
 import { SystemCounters } from './status/SystemCounters.js';
-import type { ControlTransportPoller } from './media/ControlTransportPoller.js';
+import { ControlTransportPoller } from './media/ControlTransportPoller.js';
 import { DataTransportPoller } from './media/DataTransportPoller.js';
 import type { PortManager } from './media/PortManager.js';
 import { ReceiveChannelEndpointThreadLocals } from './media/ReceiveChannelEndpointThreadLocals.js';
@@ -188,6 +193,9 @@ export class MediaDriverContext extends CommonContext {
     private _useConcurrentCountersManager = false;
     private _countersManager: CountersManager | null = null;
     private _systemCounters: SystemCounters | null = null;
+    private _driverCommandQueue: ManyToOneConcurrentLinkedQueue<Runnable> | null = null;
+    private _driverConductorProxy: DriverConductorProxy | null = null;
+    private _clientProxy: ClientProxy | null = null;
     private _toDriverCommands: RingBuffer | null = null;
     private _cncByteBuffer: SharedArrayBuffer | null = null;
     private _cncMetaDataBuffer: UnsafeBuffer | null = null;
@@ -2874,8 +2882,8 @@ export class MediaDriverContext extends CommonContext {
     }
 
     /**
-     * The poller of the control transports of the send channel endpoints. `conclude` does not create it yet: it is
-     * created with the `DriverConductorProxy` that task T17 ports.
+     * The poller of the control transports of the send channel endpoints. `conclude` creates it with the counted error
+     * handler and the {@link DriverConductorProxy}.
      *
      * @return the control transport poller.
      * @internal package-private in Java
@@ -3020,6 +3028,61 @@ export class MediaDriverContext extends CommonContext {
         return this;
     }
 
+    /**
+     * The queue of the commands for the driver conductor.
+     *
+     * @return the queue.
+     * @internal package-private in Java
+     */
+    public driverCommandQueue(): ManyToOneConcurrentLinkedQueue<Runnable> | null;
+    public driverCommandQueue(queue: ManyToOneConcurrentLinkedQueue<Runnable> | null): this;
+    public driverCommandQueue(
+        queue?: ManyToOneConcurrentLinkedQueue<Runnable> | null,
+    ): ManyToOneConcurrentLinkedQueue<Runnable> | null | this {
+        if (undefined === queue) {
+            return this._driverCommandQueue;
+        }
+
+        this._driverCommandQueue = queue;
+        return this;
+    }
+
+    /**
+     * The proxy for the responses to the clients. `conclude` creates it over the to-clients buffer of the CnC.
+     *
+     * @return the proxy.
+     * @internal package-private in Java
+     */
+    public clientProxy(): ClientProxy | null;
+    public clientProxy(clientProxy: ClientProxy | null): this;
+    public clientProxy(clientProxy?: ClientProxy | null): ClientProxy | null | this {
+        if (undefined === clientProxy) {
+            return this._clientProxy;
+        }
+
+        this._clientProxy = clientProxy;
+        return this;
+    }
+
+    /**
+     * The proxy for the commands to the driver conductor. `conclude` creates it over the driver command queue.
+     *
+     * @return the proxy.
+     * @internal package-private in Java
+     */
+    public driverConductorProxy(): DriverConductorProxy | null;
+    public driverConductorProxy(driverConductorProxy: DriverConductorProxy | null): this;
+    public driverConductorProxy(
+        driverConductorProxy?: DriverConductorProxy | null,
+    ): DriverConductorProxy | null | this {
+        if (undefined === driverConductorProxy) {
+            return this._driverConductorProxy;
+        }
+
+        this._driverConductorProxy = driverConductorProxy;
+        return this;
+    }
+
     public toDriverCommands(): RingBuffer | null;
     public toDriverCommands(toDriverCommands: RingBuffer | null): this;
     public toDriverCommands(toDriverCommands?: RingBuffer | null): RingBuffer | null | this {
@@ -3108,6 +3171,10 @@ export class MediaDriverContext extends CommonContext {
 
         if (null === this._threadingMode) {
             this._threadingMode = Configuration.threadingMode();
+        }
+
+        if (null === this._driverCommandQueue) {
+            this._driverCommandQueue = new ManyToOneConcurrentLinkedQueue<Runnable>();
         }
 
         if (null === this._nameResolver) {
@@ -3234,7 +3301,10 @@ export class MediaDriverContext extends CommonContext {
         const cncByteBuffer = this._cncByteBuffer as SharedArrayBuffer;
         const cncMetaDataBuffer = this._cncMetaDataBuffer as UnsafeBuffer;
 
-        // The ClientProxy over a BroadcastTransmitter of the to-clients buffer is added by T17.
+        this._clientProxy = new ClientProxy(
+            new BroadcastTransmitter(CncFileDescriptor.createToClientsBuffer(cncByteBuffer, cncMetaDataBuffer)),
+        );
+
         this._toDriverCommands = new ManyToOneRingBuffer(
             CncFileDescriptor.createToDriverBuffer(cncByteBuffer, cncMetaDataBuffer),
         );
@@ -3256,9 +3326,18 @@ export class MediaDriverContext extends CommonContext {
             );
         }
 
-        // The sender, receiver, driver conductor and native resource agent proxies, the control transport poller (it
-        // takes the driver conductor proxy), the log factory and the port managers are added by the tasks that port
-        // their types; the loss report is not ported (spec section 3).
+        // The sender, receiver and native resource agent proxies, the log factory and the port managers are added by
+        // the tasks that port their types; the loss report is not ported (spec section 3).
+        this._driverConductorProxy = new DriverConductorProxy(
+            this._driverCommandQueue as ManyToOneConcurrentLinkedQueue<Runnable>,
+        );
+
+        if (null === this._controlTransportPoller) {
+            this._controlTransportPoller = new ControlTransportPoller(
+                this._countedErrorHandler,
+                this._driverConductorProxy,
+            );
+        }
 
         if (null === this._dataTransportPoller) {
             this._dataTransportPoller = new DataTransportPoller(this._countedErrorHandler);
@@ -3512,6 +3591,14 @@ export class MediaDriverContext extends CommonContext {
             this._countersManager +
             '\n    systemCounters=' +
             this._systemCounters +
+            '\n    controlTransportPoller=' +
+            this._controlTransportPoller +
+            '\n    driverCommandQueue=' +
+            this._driverCommandQueue +
+            '\n    driverConductorProxy=' +
+            this._driverConductorProxy +
+            '\n    clientProxy=' +
+            this._clientProxy +
             '\n    toDriverCommands=' +
             this._toDriverCommands +
             '\n    cncByteBuffer=' +

@@ -36,12 +36,13 @@ import { ControlTransportPoller } from '../../src/driver/media/ControlTransportP
 import { DataTransportPoller } from '../../src/driver/media/DataTransportPoller.js';
 import { ReceiveChannelEndpoint } from '../../src/driver/media/ReceiveChannelEndpoint.js';
 import { ReceiveChannelEndpointThreadLocals } from '../../src/driver/media/ReceiveChannelEndpointThreadLocals.js';
-import type { DriverConductorProxy, NetworkPublication } from '../../src/driver/media/SendChannelEndpoint.js';
+import type { NetworkPublication } from '../../src/driver/media/SendChannelEndpoint.js';
 import { SendChannelEndpoint } from '../../src/driver/media/SendChannelEndpoint.js';
 import { UdpChannel } from '../../src/driver/media/UdpChannel.js';
 import type { UdpTransportPoller } from '../../src/driver/media/UdpTransportPoller.js';
 import { WildcardPortManager } from '../../src/driver/media/WildcardPortManager.js';
 import { SystemCounters } from '../../src/driver/status/SystemCounters.js';
+import { newFakeConductorProxy, type FakeConductorProxy } from '../support/ConductorProxyFake.js';
 import { type Fake, mock } from '../support/Mockito.js';
 import { waitUntil } from '../support/Udp.js';
 
@@ -87,12 +88,7 @@ describe('SelectorAndTransportTest', () => {
         responseCorrelationId: vi.fn<NetworkPublication['responseCorrelationId']>(),
     };
     // mock(DriverConductorProxy.class): the placeholder type of SendChannelEndpoint.ts (T17 ports the class)
-    const mockDriverConductorProxy: Fake<DriverConductorProxy> = {
-        reResolveEndpoint: vi.fn<DriverConductorProxy['reResolveEndpoint']>(),
-        reResolveControl: vi.fn<DriverConductorProxy['reResolveControl']>(),
-        responseSetup: vi.fn<DriverConductorProxy['responseSetup']>(),
-        createPublicationImage: vi.fn<DriverConductorProxy['createPublicationImage']>(),
-    };
+    const mockDriverConductorProxy: FakeConductorProxy = newFakeConductorProxy();
     const errorHandler: ErrorHandler = { onError: vi.fn<ErrorHandler['onError']>() };
 
     const dataTransportPoller = new DataTransportPoller(errorHandler);

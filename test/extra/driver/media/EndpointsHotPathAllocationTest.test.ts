@@ -45,9 +45,10 @@ import { ControlTransportPoller } from '../../../../src/driver/media/ControlTran
 import { DataTransportPoller } from '../../../../src/driver/media/DataTransportPoller.js';
 import { ImageConnection } from '../../../../src/driver/media/ImageConnection.js';
 import { ReceiveChannelEndpoint } from '../../../../src/driver/media/ReceiveChannelEndpoint.js';
-import type { DriverConductorProxy, NetworkPublication } from '../../../../src/driver/media/SendChannelEndpoint.js';
+import type { NetworkPublication } from '../../../../src/driver/media/SendChannelEndpoint.js';
 import { SendChannelEndpoint } from '../../../../src/driver/media/SendChannelEndpoint.js';
 import { UdpChannel } from '../../../../src/driver/media/UdpChannel.js';
+import { newPlainConductorProxy } from '../../../support/ConductorProxyFake.js';
 import { expectNoAllocation } from '../../../support/Allocation.js';
 
 const { LITTLE_ENDIAN } = ByteOrder;
@@ -143,12 +144,7 @@ class SinkSocket {
     public close(): void {}
 }
 
-const proxy: DriverConductorProxy = {
-    reResolveEndpoint: () => {},
-    reResolveControl: () => {},
-    responseSetup: () => {},
-    createPublicationImage: () => {},
-};
+const proxy = newPlainConductorProxy();
 
 function bytesOf(length: number, build: (buffer: UnsafeBuffer) => void): Uint8Array {
     const bytes = new Uint8Array(length);

@@ -45,7 +45,7 @@ import type { ImageConnection } from './ImageConnection.js';
 import { MultiRcvDestination } from './MultiRcvDestination.js';
 import type { ReceiveChannelEndpointThreadLocals } from './ReceiveChannelEndpointThreadLocals.js';
 import type { ReceiveDestinationTransport } from './ReceiveDestinationTransport.js';
-import type { DriverConductorProxy } from './SendChannelEndpoint.js';
+import type { DriverConductorProxy } from '../DriverConductorProxy.js';
 import type { UdpChannel } from './UdpChannel.js';
 import { UdpChannelTransport } from './UdpChannelTransport.js';
 

@@ -44,11 +44,11 @@ import type { RttMeasurementFlyweight } from '../../client/protocol/RttMeasureme
 import { StatusMessageFlyweight } from '../../client/protocol/StatusMessageFlyweight.js';
 import { ChannelEndpointStatus } from '../../client/status/ChannelEndpointStatus.js';
 import { LocalSocketAddressStatus } from '../../client/status/LocalSocketAddressStatus.js';
+import type { DriverConductorProxy } from '../DriverConductorProxy.js';
 import type { InetAddress, InetSocketAddress } from '../jdkNet.js';
 import type { MediaDriverContext } from '../MediaDriver.js';
 import { MdcDestinations } from '../status/MdcDestinations.js';
 import { SystemCounterDescriptor } from '../status/SystemCounterDescriptor.js';
-import type { ReceiveChannelEndpoint } from './ReceiveChannelEndpoint.js';
 import type { UdpChannel } from './UdpChannel.js';
 import { UdpChannelTransport } from './UdpChannelTransport.js';
 
@@ -86,36 +86,6 @@ export interface NetworkPublication {
     onNak(msg: NakFlyweight): void;
     onRttMeasurement(msg: RttMeasurementFlyweight, srcAddress: InetSocketAddress): void;
     responseCorrelationId(): number;
-}
-
-/**
- * Stand-in for `DriverConductorProxy`, which task T17 ports. It has the members that the channel endpoints and the
- * data packet dispatcher call; T17 replaces it with `import type { DriverConductorProxy } from '../DriverConductorProxy.js'`
- * (spec D24, `docs/mapping.md`). Correlation ids are `number`s (spec 5.2).
- */
-export interface DriverConductorProxy {
-    reResolveEndpoint(endpoint: string, channelEndpoint: SendChannelEndpoint, address: InetSocketAddress | null): void;
-    reResolveControl(
-        endpoint: string,
-        udpChannel: UdpChannel,
-        channelEndpoint: ReceiveChannelEndpoint,
-        address: InetSocketAddress | null,
-    ): void;
-    responseSetup(responseCorrelationId: number, responseSessionId: number): void;
-    createPublicationImage(
-        sessionId: number,
-        streamId: number,
-        initialTermId: number,
-        activeTermId: number,
-        termOffset: number,
-        termLength: number,
-        mtuLength: number,
-        transportIndex: number,
-        flags: number,
-        controlAddress: InetSocketAddress,
-        srcAddress: InetSocketAddress,
-        channelEndpoint: ReceiveChannelEndpoint,
-    ): void;
 }
 
 /**
