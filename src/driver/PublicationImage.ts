@@ -40,6 +40,7 @@ import type { RttMeasurementFlyweight } from '../client/protocol/RttMeasurementF
 import { SetupFlyweight } from '../client/protocol/SetupFlyweight.js';
 import { StatusMessageFlyweight } from '../client/protocol/StatusMessageFlyweight.js';
 import { CongestionControl } from './CongestionControl.js';
+import type { DriverConductor } from './DriverConductor.js';
 import type { DriverManagedResource } from './DriverManagedResource.js';
 import type { FeedbackDelayGenerator } from './FeedbackDelayGenerator.js';
 import type { InetSocketAddress } from './jdkNet.js';
@@ -81,31 +82,6 @@ const { tryFillGap } = TermGapFiller;
 const { SEND_RESPONSE_SETUP_FLAG } = SetupFlyweight;
 const { IMAGE_REJECTED } = ErrorCode;
 const { LITTLE_ENDIAN } = ByteOrder;
-
-/**
- * The part of the `DriverConductor` that {@link PublicationImage.onTimeEvent} calls. T18 ports the conductor and
- * replaces this with `import type { DriverConductor } from './DriverConductor.js'` (spec D24, D43, D51). A resource id and
- * a position are `number`s (spec 5.2).
- */
-export interface PublicationImageConductor {
-    transitionToLinger(image: PublicationImage): void;
-
-    tryCloseReceiveChannelEndpoint(channelEndpoint: ReceiveChannelEndpoint): void;
-
-    cleanupImage(image: PublicationImage): void;
-
-    notifyUnavailableImageLink(resourceId: number, link: SubscriptionLink): void;
-
-    notifyAvailableImageLink(
-        resourceId: number,
-        sessionId: number,
-        link: SubscriptionLink,
-        positionCounterId: number,
-        joinPosition: number,
-        logFileName: string,
-        sourceIdentity: string,
-    ): void;
-}
 
 // Java's nested `PublicationImage.State` enum: the ordinals of the constants, as numbers so that a state is an `int`
 // (as `NetworkPublication.State`).
@@ -1033,7 +1009,7 @@ export class PublicationImage implements LossHandler, DriverManagedResource, Sub
     /**
      * {@inheritDoc}
      */
-    public onTimeEvent(timeNs: number, _timeMs: number, conductor: PublicationImageConductor): void {
+    public onTimeEvent(timeNs: number, _timeMs: number, conductor: DriverConductor): void {
         switch (this._state) {
             case State.ACTIVE: {
                 if (isPublicationRevoked(this._rawLog.metaData())) {
@@ -1239,7 +1215,7 @@ export class PublicationImage implements LossHandler, DriverManagedResource, Sub
         this.endSmChange = changeNumber;
     }
 
-    private checkUntetheredSubscriptions(nowNs: number, conductor: PublicationImageConductor): void {
+    private checkUntetheredSubscriptions(nowNs: number, conductor: DriverConductor): void {
         const untetheredSubscriptions = this.untetheredSubscriptions;
         const untetheredSubscriptionsSize = untetheredSubscriptions.length;
         if (untetheredSubscriptionsSize > 0) {

@@ -45,10 +45,11 @@ import { MediaDriver } from '../../../src/driver/MediaDriver.js';
 import { MediaDriverVersion } from '../../../src/driver/MediaDriverVersion.js';
 import {
     PublicationParams,
-    type DriverConductor,
     type PublicationLike,
     type RawLogMetaData as RawLog,
 } from '../../../src/driver/PublicationParams.js';
+import type { DriverConductor } from '../../../src/driver/DriverConductor.js';
+import { asConductor } from '../../support/ClientCommandConductor.js';
 import { SystemCounterDescriptor } from '../../../src/driver/status/SystemCounterDescriptor.js';
 import { SubscriptionParams } from '../../../src/driver/SubscriptionParams.js';
 import { ThreadingMode } from '../../../src/driver/ThreadingMode.js';
@@ -1104,11 +1105,12 @@ describe('MediaDriverContextExtraTest', () => {
 
 describe('PublicationParamsExtraTest', () => {
     let ctx: Context;
-    const noConductor = (): DriverConductor => ({
-        findNetworkPublicationByTag: () => null,
-        findIpcPublicationByTag: () => null,
-        nextAvailableSessionId: () => 7,
-    });
+    const noConductor = (): DriverConductor =>
+        ({
+            findNetworkPublicationByTag: () => null,
+            findIpcPublicationByTag: () => null,
+            nextAvailableSessionId: () => 7,
+        }) as unknown as DriverConductor;
 
     beforeEach(() => {
         ctx = new Context();
@@ -1223,14 +1225,14 @@ describe('PublicationParamsExtraTest', () => {
                 termBufferLength: () => 1,
                 channel: () => 'aeron:udp?endpoint=other:1',
             };
-            const net = { ...noConductor(), findNetworkPublicationByTag: () => used };
+            const net = asConductor({ ...noConductor(), findNetworkPublicationByTag: () => used });
             const e1 = assertThrowsExactly(InvalidChannelException, () =>
                 params('aeron:udp?endpoint=localhost:5555|tags=1,5', net),
             );
             expect(e1.message).toContain(
                 '5 entityTag already in use: existingChannel=aeron:udp?endpoint=other:1 channel=',
             );
-            const ipc = { ...noConductor(), findIpcPublicationByTag: () => used };
+            const ipc = asConductor({ ...noConductor(), findIpcPublicationByTag: () => used });
             const e2 = assertThrowsExactly(InvalidChannelException, () =>
                 params('aeron:udp?endpoint=localhost:5555|tags=1,5', ipc),
             );
@@ -1256,7 +1258,7 @@ describe('PublicationParamsExtraTest', () => {
                 termBufferLength: () => 65536,
                 channel: () => '',
             };
-            const conductor = { ...noConductor(), findNetworkPublicationByTag: () => pub };
+            const conductor = asConductor({ ...noConductor(), findNetworkPublicationByTag: () => pub });
             const ok = params('aeron:udp?endpoint=localhost:5555|session-id=tag:3|term-length=64k|mtu=1408', conductor);
             expect(ok.isSessionIdTagged).toBe(true);
             expect([ok.sessionId, ok.termLength, ok.mtuLength]).toEqual([9, 65536, 1408]);

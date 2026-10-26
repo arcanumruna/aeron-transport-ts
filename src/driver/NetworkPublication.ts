@@ -39,6 +39,7 @@ import { RttMeasurementFlyweight } from '../client/protocol/RttMeasurementFlywei
 import { SetupFlyweight } from '../client/protocol/SetupFlyweight.js';
 import { StatusMessageFlyweight } from '../client/protocol/StatusMessageFlyweight.js';
 import { Configuration } from './Configuration.js';
+import type { DriverConductor } from './DriverConductor.js';
 import type { DriverManagedResource } from './DriverManagedResource.js';
 import type { FlowControl } from './FlowControl.js';
 import type { InetSocketAddress } from './jdkNet.js';
@@ -80,29 +81,6 @@ const { available, padding, scanForAvailability } = TermScanner;
 const { BEGIN_AND_END_FLAGS, BEGIN_END_AND_EOS_FLAGS, BEGIN_END_EOS_AND_REVOKED_FLAGS } = DataHeaderFlyweight;
 const { END_OF_STREAM_FLAG } = StatusMessageFlyweight;
 const { SIZE_OF_LONG } = BitUtil;
-
-/**
- * The part of the `DriverConductor` that {@link NetworkPublication.onTimeEvent} calls. T18 ports the conductor and
- * replaces this with `import type { DriverConductor } from './DriverConductor.js'` (spec D24). A resource id and a
- * position are `number`s (spec 5.2).
- */
-export interface PublicationConductor {
-    cleanupSpies(publication: NetworkPublication): void;
-
-    cleanupPublication(publication: NetworkPublication): void;
-
-    notifyUnavailableImageLink(resourceId: number, link: SubscriptionLink): void;
-
-    notifyAvailableImageLink(
-        resourceId: number,
-        sessionId: number,
-        link: SubscriptionLink,
-        positionCounterId: number,
-        joinPosition: number,
-        logFileName: string,
-        sourceIdentity: string,
-    ): void;
-}
 
 // Java's nested `NetworkPublication.State` enum: the ordinals of the constants, as numbers so that a state is an `int`.
 const State = {
@@ -1031,7 +1009,7 @@ export class NetworkPublication implements RetransmitSender, DriverManagedResour
         return producerPosition > consumerPosition;
     }
 
-    private spiesFinishedConsuming(conductor: PublicationConductor, eosPosition: number): boolean {
+    private spiesFinishedConsuming(conductor: DriverConductor, eosPosition: number): boolean {
         if (this._hasSpies) {
             for (const spyPosition of this.spyPositions) {
                 if (spyPosition.getVolatile() < eosPosition) {
@@ -1060,7 +1038,7 @@ export class NetworkPublication implements RetransmitSender, DriverManagedResour
         );
     }
 
-    private checkUntetheredSubscriptions(nowNs: number, conductor: PublicationConductor): void {
+    private checkUntetheredSubscriptions(nowNs: number, conductor: DriverConductor): void {
         const untetheredSubscriptions = this.untetheredSubscriptions;
         const untetheredSubscriptionsSize = untetheredSubscriptions.length;
         if (untetheredSubscriptionsSize > 0) {
@@ -1114,7 +1092,7 @@ export class NetworkPublication implements RetransmitSender, DriverManagedResour
     /**
      * {@inheritDoc}
      */
-    public onTimeEvent(timeNs: number, _timeMs: number, conductor: PublicationConductor): void {
+    public onTimeEvent(timeNs: number, _timeMs: number, conductor: DriverConductor): void {
         switch (this._state) {
             case State.ACTIVE: {
                 if (LogBufferDescriptor.isPublicationRevoked(this.metaDataBuffer)) {

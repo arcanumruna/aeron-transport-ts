@@ -17,12 +17,7 @@
  */
 // Port of io/aeron/driver/DriverManagedResource.java @ 1.53.3
 
-/**
- * Stand-in for `DriverConductor`, which is ported by a later task (the conductor and its tests). It is an opaque type
- * here so that this file compiles; that task replaces it with `import type { DriverConductor } from './DriverConductor.js'`
- * (see `docs/mapping.md`, "Sources").
- */
-export type DriverConductor = object;
+import type { DriverConductor } from './DriverConductor.js';
 
 /**
  * Common behaviour supported for driver resources such as publications and images.

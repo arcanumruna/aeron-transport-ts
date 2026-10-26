@@ -17,7 +17,8 @@ import { RemovePublicationFlyweight } from '../../../src/client/command/RemovePu
 import { RemoveSubscriptionFlyweight } from '../../../src/client/command/RemoveSubscriptionFlyweight.js';
 import { TerminateDriverFlyweight } from '../../../src/client/command/TerminateDriverFlyweight.js';
 import { ErrorCode } from '../../../src/client/ErrorCode.js';
-import { ClientCommandAdapter, type ClientCommandConductor } from '../../../src/driver/ClientCommandAdapter.js';
+import { ClientCommandAdapter } from '../../../src/driver/ClientCommandAdapter.js';
+import { asConductor, type ClientCommandConductor } from '../../support/ClientCommandConductor.js';
 import { ClientProxy } from '../../../src/driver/ClientProxy.js';
 import { expectNoAllocation } from '../../support/Allocation.js';
 
@@ -93,7 +94,8 @@ function newRing(): ManyToOneRingBuffer {
 
 describe('ClientCommandAdapter hot path allocation', () => {
     const buffer = new UnsafeBuffer(new Uint8Array(1024));
-    const conductor = new CountingConductor();
+    const counting = new CountingConductor();
+    const conductor = asConductor(counting);
     const adapter = new ClientCommandAdapter(silentErrorHandler, newRing(), failingProxy, conductor);
 
     function encode(typeId: number): number {
@@ -140,7 +142,7 @@ describe('ClientCommandAdapter hot path allocation', () => {
         ['TERMINATE_DRIVER', ControlProtocolEvents.TERMINATE_DRIVER],
     ])('onMessage %s allocates nothing', async (_name, typeId) => {
         const length = encode(typeId);
-        const before = conductor.calls;
+        const before = counting.calls;
 
         await expectNoAllocation((n) => {
             for (let i = 0; i < n; i++) {
@@ -148,14 +150,14 @@ describe('ClientCommandAdapter hot path allocation', () => {
             }
         }, ITERATIONS);
 
-        expect(conductor.calls).toBeGreaterThan(before + ITERATIONS);
+        expect(counting.calls).toBeGreaterThan(before + ITERATIONS);
     });
 
     it('write to the ring and receive allocate nothing', async () => {
         const ring = newRing();
         const reading = new ClientCommandAdapter(silentErrorHandler, ring, failingProxy, conductor);
         const length = encode(ControlProtocolEvents.CLIENT_KEEPALIVE);
-        const before = conductor.calls;
+        const before = counting.calls;
 
         await expectNoAllocation((n) => {
             for (let i = 0; i < n; i++) {
@@ -164,7 +166,7 @@ describe('ClientCommandAdapter hot path allocation', () => {
             }
         }, ITERATIONS);
 
-        expect(conductor.calls).toBeGreaterThan(before + ITERATIONS);
+        expect(counting.calls).toBeGreaterThan(before + ITERATIONS);
     });
 });
 

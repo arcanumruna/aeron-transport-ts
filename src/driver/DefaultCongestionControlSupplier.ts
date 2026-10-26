@@ -25,7 +25,7 @@ import { type CongestionControlSupplier } from './CongestionControlSupplier.js';
 import { CubicCongestionControl } from './ext/CubicCongestionControl.js';
 import { type InetSocketAddress } from './jdkNet.js';
 import { type UdpChannel } from './media/UdpChannel.js';
-import { type MediaDriver } from './MediaDriver.js';
+import type { MediaDriver } from './MediaDriver.js';
 import { StaticWindowCongestionControl } from './StaticWindowCongestionControl.js';
 
 /**

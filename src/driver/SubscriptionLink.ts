@@ -19,19 +19,11 @@
 import type { ReadablePosition } from '../agrona/concurrent/status/ReadablePosition.js';
 import type { InferableBoolean } from '../client/CommonContext.js';
 import type { AeronClient } from './AeronClient.js';
+import type { DriverConductor } from './DriverConductor.js';
 import type { DriverManagedResource } from './DriverManagedResource.js';
 import type { ReceiveChannelEndpoint } from './media/ReceiveChannelEndpoint.js';
 import type { Subscribable } from './Subscribable.js';
 import type { SubscriptionParams } from './SubscriptionParams.js';
-
-/**
- * The members of the `DriverConductor` (task T18) that a {@link SubscriptionLink} calls: the narrowest type it needs,
- * a forward reference in the manner of spec D24 (`docs/mapping.md`, "Sources").
- */
-export interface SubscriptionLinkConductor {
-    notifyUnavailableImageLink(resourceId: number, link: SubscriptionLink): void;
-    cleanupSubscriptionLink(link: SubscriptionLink): void;
-}
 
 /**
  * The members of a `NetworkPublication` (T15) or an `IpcPublication` (not ported) that
@@ -214,7 +206,7 @@ export abstract class SubscriptionLink implements DriverManagedResource {
         return false;
     }
 
-    public notifyUnavailableImages(conductor: SubscriptionLinkConductor): void {
+    public notifyUnavailableImages(conductor: DriverConductor): void {
         for (const subscribable of this.positionBySubscribableMap.keys()) {
             conductor.notifyUnavailableImageLink(subscribable.subscribableRegistrationId(), this);
         }
@@ -227,7 +219,7 @@ export abstract class SubscriptionLink implements DriverManagedResource {
         }
     }
 
-    public onTimeEvent(_timeNs: number, _timeMs: number, conductor: SubscriptionLinkConductor): void {
+    public onTimeEvent(_timeNs: number, _timeMs: number, conductor: DriverConductor): void {
         if (this._aeronClient.hasTimedOut()) {
             this.reachedEndOfLife = true;
             conductor.cleanupSubscriptionLink(this);

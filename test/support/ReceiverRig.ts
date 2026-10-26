@@ -32,12 +32,14 @@ import { StatusMessageFlyweight } from '../../src/client/protocol/StatusMessageF
 import type { MemoryLogFactory } from '../../src/driver/buffer/MemoryLogFactory.js';
 import type { RawLog } from '../../src/driver/buffer/RawLog.js';
 import { DataPacketDispatcher } from '../../src/driver/DataPacketDispatcher.js';
-import type { DriverConductorProxy, DriverConductorProxyTarget } from '../../src/driver/DriverConductorProxy.js';
+import type { DriverConductor } from '../../src/driver/DriverConductor.js';
+import { asConductor } from './ClientCommandConductor.js';
+import type { DriverConductorProxy } from '../../src/driver/DriverConductorProxy.js';
 import { InetSocketAddress } from '../../src/driver/jdkNet.js';
 import { MediaDriver } from '../../src/driver/MediaDriver.js';
 import { NetworkSubscriptionLink } from '../../src/driver/NetworkSubscriptionLink.js';
 import { AeronClient } from '../../src/driver/AeronClient.js';
-import { PublicationImage, type PublicationImageConductor } from '../../src/driver/PublicationImage.js';
+import { PublicationImage } from '../../src/driver/PublicationImage.js';
 import { Receiver } from '../../src/driver/Receiver.js';
 import type { ReceiverProxy } from '../../src/driver/ReceiverProxy.js';
 import { StaticDelayGenerator } from '../../src/driver/StaticDelayGenerator.js';
@@ -204,7 +206,7 @@ export class ReceiverRig {
     public readonly poller: DataTransportPoller;
     public readonly sourceAddress: InetSocketAddress;
     public readonly udpChannel: UdpChannel;
-    public readonly conductor: PublicationImageConductor;
+    public readonly conductor: DriverConductor;
     public readonly subscriptionLink: NetworkSubscriptionLink;
     public readonly logFactory: MemoryLogFactory;
     public readonly lossDelayNs: number;
@@ -272,7 +274,7 @@ export class ReceiverRig {
 
         // the conductor: it records the request for an image and what the images say to it
         const conductorProxy = ctx.driverConductorProxy() as DriverConductorProxy;
-        const target: Partial<DriverConductorProxyTarget> = {
+        const target: Partial<DriverConductor> = {
             onCreatePublicationImage: (
                 sessionId,
                 streamId,
@@ -304,8 +306,8 @@ export class ReceiverRig {
                 this.closedEndpoints.push(channelEndpoint);
             },
         };
-        conductorProxy.driverConductor(target as DriverConductorProxyTarget);
-        this.conductor = {
+        conductorProxy.driverConductor(target as DriverConductor);
+        const conductorFake: Partial<DriverConductor> = {
             transitionToLinger: (image) => {
                 this.conductorCalls.transitionToLinger.push(image);
             },
@@ -338,6 +340,7 @@ export class ReceiverRig {
                 });
             },
         };
+        this.conductor = asConductor(conductorFake);
 
         this.udpChannel = UdpChannel.parse(options.uri ?? 'aeron:udp?endpoint=127.0.0.1:0');
         this.receiver = new Receiver(ctx);

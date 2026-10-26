@@ -21,7 +21,7 @@ import { type CountersManager } from '../agrona/concurrent/status/CountersManage
 import { type CongestionControl } from './CongestionControl.js';
 import { type InetSocketAddress } from './jdkNet.js';
 import { type UdpChannel } from './media/UdpChannel.js';
-import { type MediaDriver } from './MediaDriver.js';
+import type { MediaDriver } from './MediaDriver.js';
 
 /**
  * Supplier of {@link CongestionControl} implementations to be used by receivers for images.

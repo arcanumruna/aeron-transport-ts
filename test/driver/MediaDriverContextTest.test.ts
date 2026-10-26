@@ -27,11 +27,15 @@ import { ConfigurationException } from '../../src/client/exceptions/Configuratio
 import { LogBufferDescriptor } from '../../src/client/logbuffer/LogBufferDescriptor.js';
 import { Configuration } from '../../src/driver/Configuration.js';
 import { MediaDriver } from '../../src/driver/MediaDriver.js';
+import { NativeResourceAgentProxy } from '../../src/driver/NativeResourceAgentProxy.js';
+import { ThreadingMode } from '../../src/driver/ThreadingMode.js';
+import { OneToOneConcurrentArrayQueue } from '../../src/agrona/concurrent/OneToOneConcurrentArrayQueue.js';
 import { SystemCounterDescriptor } from '../../src/driver/status/SystemCounterDescriptor.js';
 import { mock } from '../support/Mockito.js';
 import { assertThrows, assertThrowsExactly } from '../support/Assertions.js';
 
 const {
+    CMD_QUEUE_CAPACITY,
     COUNTERS_VALUES_BUFFER_LENGTH_MAX,
     COUNTERS_VALUES_BUFFER_LENGTH_MIN,
     ERROR_BUFFER_LENGTH_DEFAULT,
@@ -135,10 +139,16 @@ describe('MediaDriverContextTest', () => {
         expect(exception.message).toContain('ipcPublicationTermWindowLength');
     });
 
-    // The native resource agent (NativeResourceAgentProxy, its idle strategy, command queue and thread factory) is not
-    // ported with the Context: the thread factories are out of scope (spec D3) and T18 ports the agent for
-    // re-resolution (plan T18).
-    it.skip('shouldAllowSettingNativeResourceAgentProxy', () => {});
+    // The native resource agent proxy and command queue are ported with T18. Its idle strategy and thread factory are
+    // not: the agents are stepped by the invoker, there are no threads (spec D3).
+    it('shouldAllowSettingNativeResourceAgentProxy', () => {
+        // Java: context.aeronDirectoryName(tempDir.toString()) (no directory here, spec D4)
+        const proxy = mock(NativeResourceAgentProxy).mock;
+        expect(context.nativeResourceAgentProxy()).toBeNull();
+
+        context.nativeResourceAgentProxy(proxy);
+        expect(context.nativeResourceAgentProxy()).toBe(proxy);
+    });
 
     it.skip('shouldAllowConfiguringNativeResourceAgentIdleStrategy', () => {});
 
@@ -148,11 +158,39 @@ describe('MediaDriverContextTest', () => {
 
     it.skip('shouldNotCreateAsyncExecutorIdleStrategyIfNativeResourceAgentNotEnabled', () => {});
 
-    it.skip('shouldInitializeNativeResourceAgentCommandQueue', () => {});
+    it('shouldInitializeNativeResourceAgentCommandQueue', () => {
+        context.threadingMode(ThreadingMode.DEDICATED);
+        expect(context.nativeResourceAgentCommandQueue()).toBeNull();
 
-    it.skip('shouldAssignNativeResourceAgentCommandQueue', () => {});
+        context.conclude();
 
-    it.skip('shouldConfigureNativeResourceAgentProxy', () => {});
+        const commandQueue = context.nativeResourceAgentCommandQueue();
+        expect(commandQueue).not.toBeNull();
+        expect(commandQueue!.capacity()).toBe(CMD_QUEUE_CAPACITY);
+    });
+
+    it('shouldAssignNativeResourceAgentCommandQueue', () => {
+        context.threadingMode(ThreadingMode.SHARED_NETWORK);
+        const cmdQueue = new OneToOneConcurrentArrayQueue<() => void>(5);
+        context.nativeResourceAgentCommandQueue(cmdQueue);
+
+        context.conclude();
+
+        expect(context.nativeResourceAgentCommandQueue()).toBe(cmdQueue);
+    });
+
+    it('shouldConfigureNativeResourceAgentProxy', () => {
+        context.threadingMode(ThreadingMode.SHARED_NETWORK);
+        const cmdQueue = new OneToOneConcurrentArrayQueue<() => void>(7);
+        context.nativeResourceAgentCommandQueue(cmdQueue);
+        expect(context.nativeResourceAgentProxy()).toBeNull();
+
+        context.conclude();
+
+        const proxy = context.nativeResourceAgentProxy();
+        expect(proxy).not.toBeNull();
+        expect((proxy as unknown as { commandQueue: unknown }).commandQueue).toBe(cmdQueue);
+    });
 
     it.skip('shouldCreateNativeResourceAgentThreadFactoryIfEnabled', () => {});
 

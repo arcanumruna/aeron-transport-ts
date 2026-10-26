@@ -34,6 +34,7 @@ import { LogBufferDescriptor } from '../client/logbuffer/LogBufferDescriptor.js'
 import { Configuration } from './Configuration.js';
 import { InvalidChannelException } from './exceptions/InvalidChannelException.js';
 import type { RawLog } from './buffer/RawLog.js';
+import type { DriverConductor } from './DriverConductor.js';
 import type { MediaDriver } from './MediaDriver.js';
 
 const {
@@ -71,16 +72,6 @@ export interface PublicationLike {
     mtuLength(): number;
     termBufferLength(): number;
     channel(): string;
-}
-
-/**
- * The part of the `DriverConductor` that `PublicationParams` calls. Placeholder for the class, which T18 ports; that
- * task replaces it with the class (a type-only import).
- */
-export interface DriverConductor {
-    findNetworkPublicationByTag(tag: number): PublicationLike | null;
-    findIpcPublicationByTag(tag: number): PublicationLike | null;
-    nextAvailableSessionId(streamId: number, channel: string): number;
 }
 
 /**

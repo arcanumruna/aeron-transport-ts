@@ -19,6 +19,7 @@
 import type { ManyToOneConcurrentLinkedQueue } from '../agrona/concurrent/ManyToOneConcurrentLinkedQueue.js';
 import { IllegalStateException } from '../agrona/jdk.js';
 import type { Runnable } from './CommandProxy.js';
+import type { DriverConductor } from './DriverConductor.js';
 import type { InetSocketAddress } from './jdkNet.js';
 import type { ReceiveChannelEndpoint } from './media/ReceiveChannelEndpoint.js';
 import type { ReceiveDestinationTransport } from './media/ReceiveDestinationTransport.js';
@@ -26,62 +27,12 @@ import type { SendChannelEndpoint } from './media/SendChannelEndpoint.js';
 import type { UdpChannel } from './media/UdpChannel.js';
 
 /**
- * The members of the `DriverConductor` (task T18) that the {@link DriverConductorProxy} calls: the narrowest type the
- * proxy needs, a forward reference in the manner of spec D24 (`docs/mapping.md`, "Sources"). T18 makes the conductor
- * satisfy it. `long` ids are `number`s (spec D5); the receiver id and the group tag of an error frame are the 64-bit
- * wire values as `bigint`s (spec D33).
- */
-export interface DriverConductorProxyTarget {
-    onReResolveEndpoint(
-        endpoint: string,
-        channelEndpoint: SendChannelEndpoint,
-        address: InetSocketAddress | null,
-    ): void;
-    onReResolveControl(
-        endpoint: string,
-        udpChannel: UdpChannel,
-        channelEndpoint: ReceiveChannelEndpoint,
-        address: InetSocketAddress | null,
-    ): void;
-    closeReceiveDestination(destinationTransport: ReceiveDestinationTransport): void;
-    responseSetup(responseCorrelationId: number, responseSessionId: number): void;
-    responseConnected(responseCorrelationId: number): void;
-    receiveChannelEndpointClosed(channelEndpoint: ReceiveChannelEndpoint): void;
-    sendChannelEndpointClosed(channelEndpoint: SendChannelEndpoint): void;
-    onCreatePublicationImage(
-        sessionId: number,
-        streamId: number,
-        initialTermId: number,
-        activeTermId: number,
-        termOffset: number,
-        termLength: number,
-        mtuLength: number,
-        transportIndex: number,
-        flags: number,
-        controlAddress: InetSocketAddress,
-        srcAddress: InetSocketAddress,
-        channelEndpoint: ReceiveChannelEndpoint,
-    ): void;
-    onPublicationError(
-        registrationId: number,
-        destinationRegistrationId: number,
-        sessionId: number,
-        streamId: number,
-        receiverId: bigint,
-        groupId: bigint | null,
-        srcAddress: InetSocketAddress,
-        errorCode: number,
-        errorMessage: string,
-    ): void;
-}
-
-/**
  * Proxy for sending commands to the {@link DriverConductor}.
  *
  * @internal `@InternalApi` in Java
  */
 export class DriverConductorProxy {
-    private _driverConductor: DriverConductorProxyTarget | null = null;
+    private _driverConductor: DriverConductor | null = null;
     private readonly commandQueue: ManyToOneConcurrentLinkedQueue<Runnable>;
 
     public constructor(commandQueue: ManyToOneConcurrentLinkedQueue<Runnable>) {
@@ -156,7 +107,7 @@ export class DriverConductorProxy {
         this.offer(() => this.conductor().sendChannelEndpointClosed(channelEndpoint));
     }
 
-    public driverConductor(driverConductor: DriverConductorProxyTarget): void {
+    public driverConductor(driverConductor: DriverConductor): void {
         this._driverConductor = driverConductor;
     }
 
@@ -223,7 +174,7 @@ export class DriverConductorProxy {
      * {@link DriverConductorProxy.driverConductor} was called is a `NullPointerException` there and an
      * `IllegalStateException` here.
      */
-    private conductor(): DriverConductorProxyTarget {
+    private conductor(): DriverConductor {
         if (null === this._driverConductor) {
             throw new IllegalStateException('driverConductor has not been set');
         }

@@ -31,7 +31,7 @@ import { ControlProtocolException } from '../../../src/client/exceptions/Control
 import { ClientCommandAdapter } from '../../../src/driver/ClientCommandAdapter.js';
 import { ClientProxy } from '../../../src/driver/ClientProxy.js';
 import { Configuration } from '../../../src/driver/Configuration.js';
-import { type FakeConductor, fakeConductor } from '../../support/ClientCommandConductor.js';
+import { type AdapterMember, type FakeConductor, fakeConductor } from '../../support/ClientCommandConductor.js';
 
 const INDEX = 40;
 const CLIENT_ID = 1_000_001;
@@ -67,11 +67,11 @@ interface Command {
     readonly encode: (buffer: UnsafeBuffer) => number;
     readonly minimumValidLength: number;
     /** The conductor member it dispatches to, and the arguments. */
-    readonly member: keyof FakeConductor;
+    readonly member: AdapterMember;
     readonly args: unknown[];
 }
 
-function publication(typeId: number, channel: string, isExclusive: boolean, member: keyof FakeConductor): Command {
+function publication(typeId: number, channel: string, isExclusive: boolean, member: AdapterMember): Command {
     return {
         name: `${typeId === ADD_PUBLICATION ? 'ADD_PUBLICATION' : 'ADD_EXCLUSIVE_PUBLICATION'} ${channel}`,
         typeId,
@@ -87,7 +87,7 @@ function publication(typeId: number, channel: string, isExclusive: boolean, memb
     };
 }
 
-function subscription(channel: string, member: keyof FakeConductor): Command {
+function subscription(channel: string, member: AdapterMember): Command {
     return {
         name: `ADD_SUBSCRIPTION ${channel}`,
         typeId: ADD_SUBSCRIPTION,
@@ -104,7 +104,7 @@ function subscription(channel: string, member: keyof FakeConductor): Command {
     };
 }
 
-function destination(name: string, typeId: number, member: keyof FakeConductor): Command {
+function destination(name: string, typeId: number, member: AdapterMember): Command {
     return {
         name,
         typeId,
@@ -212,10 +212,10 @@ const COMMANDS: readonly Command[] = [
     },
 ];
 
-const NON_COMMAND_MEMBERS = new Set<keyof FakeConductor>(['notAcceptingClientCommands']);
+const NON_COMMAND_MEMBERS = new Set<AdapterMember>(['notAcceptingClientCommands']);
 
 function dispatchedMembers(conductor: FakeConductor): string[] {
-    return (Object.keys(conductor) as (keyof FakeConductor)[])
+    return (Object.keys(conductor) as AdapterMember[])
         .filter((name) => !NON_COMMAND_MEMBERS.has(name) && conductor[name].mock.calls.length > 0)
         .sort();
 }
