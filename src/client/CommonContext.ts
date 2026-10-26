@@ -21,7 +21,7 @@ import type { ErrorHandler } from '../agrona/ErrorHandler.js';
 import type { UnsafeBuffer } from '../agrona/concurrent/UnsafeBuffer.js';
 import { LoggingErrorHandler } from '../agrona/concurrent/errors/LoggingErrorHandler.js';
 import type { DistinctErrorLog } from '../agrona/concurrent/errors/DistinctErrorLog.js';
-import { Boolean, Long, NumberFormatException, TimeUnit } from '../agrona/jdk.js';
+import { Boolean, doubleToLong, Long, NumberFormatException, TimeUnit } from '../agrona/jdk.js';
 import { System, type AutoCloseable } from '../agrona/jdkLang.js';
 import { SystemErr, SystemOut, type PrintStream } from '../agrona/jdkThrowable.js';
 import { SystemUtil } from '../agrona/SystemUtil.js';
@@ -697,7 +697,7 @@ export class CommonContext implements AutoCloseable {
         try {
             const debugTimeoutNs = Math.min(
                 Long.MAX_VALUE,
-                Math.trunc(
+                doubleToLong(
                     factor * SystemUtil.parseDuration(CommonContext.DEBUG_TIMEOUT_PROP_NAME, debugTimeoutString),
                 ),
             );

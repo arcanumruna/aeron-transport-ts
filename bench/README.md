@@ -109,3 +109,22 @@ only). Over a `SharedArrayBuffer` of 64 KiB, 64 byte messages, one thread, ns pe
 | ----------------------------------------------------------------- | ----- | ----- | ------- | ------- |
 | BroadcastTransmitter transmit + BroadcastReceiver receiveNext 64B | 400.9 | 377.7 | 753.1   | 1,184.9 |
 | BroadcastTransmitter transmit + CopyBroadcastReceiver receive 64B | 497.5 | 468.2 | 1,046.3 | 2,040.4 |
+
+`npm run bench:micro -- --file loss` and `--file congestion`, one run, 2026-10-26, same Node and host (load average 0.1 at the
+start, 4 cores), ns per operation. `scan` is `LossDetector.scan` over a full 64 KiB term (1024 frames of 64 bytes; the gap
+bench misses one frame in the middle). A cycle is `onNak` (delay 1 ns), `processTimeouts` (resend), `processTimeouts` (linger
+expired, the action is free again); "near 2^40" uses clock values from 2^40 and term id 2^24 (heap numbers, spec 5.3).
+`onTrackRebuild` of Cubic reports a loss on every 64th call. The benches import the whole client, so the scripts start
+node with `--experimental-transform-types` (the sources use parameter properties).
+
+| Bench                                                                | ns/op   | p50     | p99     | p99.9    |
+| -------------------------------------------------------------------- | ------- | ------- | ------- | -------- |
+| LossDetector scan 64KiB term, no gap                                 | 5,734.8 | 5,676.0 | 7,810.5 | 17,922.9 |
+| LossDetector scan 64KiB term, one gap                                | 2,286.5 | 2,012.4 | 4,248.3 | 4,705.8  |
+| RetransmitHandler onNak+processTimeouts+linger, unicast              | 25.7    | 23.4    | 46.2    | 67.7     |
+| RetransmitHandler onNak+processTimeouts+linger, group(16)            | 80.0    | 73.4    | 146.0   | 240.8    |
+| RetransmitHandler onNak+processTimeouts+linger, unicast, near 2^40   | 34.0    | 29.7    | 71.5    | 349.2    |
+| RetransmitHandler onNak+processTimeouts+linger, group(16), near 2^40 | 86.5    | 82.9    | 178.0   | 345.7    |
+| CubicCongestionControl onTrackRebuild                                | 29.7    | 24.4    | 78.7    | 273.8    |
+| StaticWindowCongestionControl onTrackRebuild                         | 9.6     | 9.2     | 26.6    | 51.6     |
+| UnicastFlowControl onStatusMessage                                   | 26.8    | 25.3    | 42.9    | 54.4     |

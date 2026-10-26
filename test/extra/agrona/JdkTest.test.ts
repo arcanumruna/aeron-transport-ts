@@ -5,6 +5,8 @@ import {
     Character,
     dataViewGetLong,
     dataViewSetLong,
+    doubleToInt,
+    doubleToLong,
     IndexOutOfBoundsException,
     Integer,
     Long,
@@ -333,5 +335,33 @@ describe('Objects.checkFromIndexSize', () => {
         expect(() => Objects.checkFromIndexSize(0, 0, -1)).toThrow(IndexOutOfBoundsException);
         expect(() => Objects.checkFromIndexSize(2 ** 40, 1, 8)).toThrow(IndexOutOfBoundsException);
         expect(() => Objects.checkFromIndexSize(2 ** 53 - 4, 10, 8)).toThrow(IndexOutOfBoundsException);
+    });
+});
+
+describe('doubleToLong / doubleToInt (Java casts of a double)', () => {
+    it.each([
+        [Number.NaN, 0],
+        [Number.POSITIVE_INFINITY, Long.MAX_VALUE],
+        [Number.NEGATIVE_INFINITY, Long.MIN_VALUE],
+        [2 ** 63, Long.MAX_VALUE],
+        [-(2 ** 63), Long.MIN_VALUE],
+        [2 ** 53, Long.MAX_VALUE],
+        [1.9, 1],
+        [-1.9, -1],
+        [-0.5, 0],
+    ])('doubleToLong(%d) is %d', (value, expected) => {
+        expect(Object.is(doubleToLong(value), expected)).toBe(true);
+    });
+
+    it.each([
+        [Number.NaN, 0],
+        [Number.POSITIVE_INFINITY, 2147483647],
+        [Number.NEGATIVE_INFINITY, -2147483648],
+        [2 ** 31, 2147483647],
+        [-(2 ** 31) - 1, -2147483648],
+        [1.9, 1],
+        [-1.9, -1],
+    ])('doubleToInt(%d) is %d', (value, expected) => {
+        expect(doubleToInt(value)).toBe(expected);
     });
 });

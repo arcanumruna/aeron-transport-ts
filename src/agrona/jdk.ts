@@ -382,6 +382,39 @@ export const Long = {
     },
 } as const;
 
+/**
+ * Java's `(long)` cast of a `double`: truncates toward zero, maps NaN to 0 and saturates at `Long.MAX_VALUE` /
+ * `Long.MIN_VALUE`, which are the +/-(2^53 - 1) of {@link Long} here (spec D5), never wrapping and never NaN.
+ */
+export function doubleToLong(value: number): number {
+    if (value !== value) {
+        return 0;
+    }
+    if (value >= Long.MAX_VALUE) {
+        return Long.MAX_VALUE;
+    }
+    if (value <= Long.MIN_VALUE) {
+        return Long.MIN_VALUE;
+    }
+
+    return Math.trunc(value) + 0;
+}
+
+/** Java's `(int)` cast of a `double`: truncates toward zero, maps NaN to 0 and saturates at the `int` range. */
+export function doubleToInt(value: number): number {
+    if (value !== value) {
+        return 0;
+    }
+    if (value >= 2147483647) {
+        return 2147483647;
+    }
+    if (value <= -2147483648) {
+        return -2147483648;
+    }
+
+    return value | 0;
+}
+
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 
 /**

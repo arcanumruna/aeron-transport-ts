@@ -21,7 +21,7 @@ import { type ErrorHandler } from '../../agrona/ErrorHandler.js';
 import { type NanoClock } from '../../agrona/concurrent/NanoClock.js';
 import { type AtomicCounter } from '../../agrona/concurrent/status/AtomicCounter.js';
 import { type CountersManager } from '../../agrona/concurrent/status/CountersManager.js';
-import { ArithmeticException, TimeUnit } from '../../agrona/jdk.js';
+import { ArithmeticException, doubleToInt, TimeUnit } from '../../agrona/jdk.js';
 import { Configuration } from '../Configuration.js';
 import { CongestionControl } from '../CongestionControl.js';
 import { type InetSocketAddress } from '../jdkNet.js';
@@ -38,21 +38,6 @@ const RTT_TIMEOUT_MULTIPLE = 4;
 
 const C = 0.4;
 const B = 0.2;
-
-/** Java's `(int)` cast of a `double`: truncates toward zero, saturates at the `int` range and maps NaN to 0. */
-function doubleToInt(value: number): number {
-    if (value !== value) {
-        return 0;
-    }
-    if (value >= 2147483647) {
-        return 2147483647;
-    }
-    if (value <= -2147483648) {
-        return -2147483648;
-    }
-
-    return value | 0;
-}
 
 /**
  * Implementation of the CUBIC congestion control algorithm: https://tools.ietf.org/html/rfc8312
@@ -109,8 +94,8 @@ export class CubicCongestionControl implements CongestionControl {
         sessionId: number,
         termLength: number,
         senderMtuLength: number,
-        _controlAddress: InetSocketAddress,
-        _sourceAddress: InetSocketAddress,
+        _controlAddress: InetSocketAddress | null,
+        _sourceAddress: InetSocketAddress | null,
         nanoClock: NanoClock,
         context: MediaDriver.Context,
         countersManager: CountersManager,
