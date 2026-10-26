@@ -100,3 +100,12 @@ host that was not idle: indicative only). All over a `SharedArrayBuffer` of 64 K
 
 The position and heartbeat operations of these rings are `long` operations on a shared buffer, which allocate a
 `bigint` per call until UnsafeBuffer gets an allocation-free 64-bit atomic; the baselines will move when it lands.
+
+`npm run bench:micro -- --file broadcast`, one run, 2026-10-26, same Node and host (load average 1.6 at the start, so indicative
+only). Over a `SharedArrayBuffer` of 64 KiB, 64 byte messages, one thread, ns per operation. `receiveNext` includes `typeId`,
+`offset`, `length` and `validate`.
+
+| Bench                                                             | ns/op | p50   | p99     | p99.9   |
+| ----------------------------------------------------------------- | ----- | ----- | ------- | ------- |
+| BroadcastTransmitter transmit + BroadcastReceiver receiveNext 64B | 400.9 | 377.7 | 753.1   | 1,184.9 |
+| BroadcastTransmitter transmit + CopyBroadcastReceiver receive 64B | 497.5 | 468.2 | 1,046.3 | 2,040.4 |
