@@ -1,7 +1,6 @@
 // Tests that Aeron does not have (spec 8.2): NetworkUtil prefix and subnet matching for IPv4 and IPv6 at the prefix
 // lengths 0, 1, 31/32 and 127/128, the interface filter order, and the helpers around them.
 import { describe, expect, it } from 'vitest';
-import { networkInterfaces } from 'node:os';
 import { IllegalArgumentException, IllegalStateException } from '../../../../src/agrona/jdk.js';
 import {
     InetAddress,
@@ -216,14 +215,10 @@ describe('NetworkUtilExtraTest', () => {
     describe('the default shim', () => {
         it('listsTheInterfacesOfTheHost', () => {
             const interfaces = Shim.DEFAULT.getNetworkInterfaces();
-            // Node lists the interfaces that are up with an address; the others are listed from the flags files (spec D131)
-            const listedByNode = new Set(Object.keys(networkInterfaces()));
 
             for (const ifc of interfaces) {
                 expect(ifc.getName().length).toBeGreaterThan(0);
-                if (listedByNode.has(ifc.getName())) {
-                    expect(Shim.DEFAULT.getInterfaceAddresses(ifc).length).toBeGreaterThan(0);
-                }
+                expect(Shim.DEFAULT.getInterfaceAddresses(ifc).length).toBeGreaterThan(0);
                 expect(Shim.DEFAULT.isLoopback(ifc)).toBe(ifc.isLoopback());
             }
         });

@@ -17,7 +17,6 @@
  */
 // JDK stand-ins for java.net (spec D20): InetAddress, Inet4Address, Inet6Address, InetSocketAddress, InterfaceAddress,
 // NetworkInterface, ProtocolFamily and the exceptions the driver's address code throws and catches.
-import { readdirSync, readFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { Exception, IllegalArgumentException, Integer } from '../agrona/jdk.js';
 import { stringHashCode } from '../agrona/jdkUtil.js';
@@ -823,27 +822,11 @@ export interface NetworkInterfaceFlags {
     readonly multicast: boolean;
 }
 
-/** `IFF_UP` of `<net/if.h>`. */
-const IFF_UP = 0x1;
-/** `IFF_LOOPBACK` of `<net/if.h>`. */
-const IFF_LOOPBACK = 0x8;
-/** `IFF_MULTICAST` of `<net/if.h>`. */
-const IFF_MULTICAST = 0x1000;
-
 /**
  * Stand-in for `java.net.NetworkInterface`, built from `os.networkInterfaces()` (which lists the interfaces that are up
- * and have an address, and gives no multicast flag).
- * <p>
- * On Linux the flags are those of `/sys/class/net/<name>/flags` (`IFF_UP`, `IFF_LOOPBACK`, `IFF_MULTICAST`), and an
- * interface that is down or has no address, which Node does not list, is listed with them and no addresses, as Java
- * does (spec D131). Elsewhere, or when the file cannot be read, `supportsMulticast` is true for every interface that is
- * not internal; on macOS also for the loopback interface, as Java reports for `lo0`. {@link flagsDirectory} is the
- * override: another directory of `<name>/flags` files, or null for the approximation only.
+ * and have an address; `supportsMulticast` is true for every interface that is not internal, as Node reports no flag).
  */
 export class NetworkInterface {
-    /** The directory of the per interface `flags` files of Linux; null to use the approximation of Node's data only. */
-    public static flagsDirectory: string | null = 'linux' === process.platform ? '/sys/class/net' : null;
-
     private readonly name: string;
     private readonly displayName: string;
     private readonly addresses: readonly InterfaceAddress[];
@@ -887,61 +870,12 @@ export class NetworkInterface {
             }
 
             const isInternal = entries[0]?.internal === true;
-            const approximation: NetworkInterfaceFlags = {
-                loopback: isInternal,
-                up: true,
-                multicast: !isInternal || 'darwin' === process.platform,
-            };
-            result.push(new NetworkInterface(name, name, list, NetworkInterface.readFlags(name) ?? approximation));
-        }
-
-        // an interface that is down or has no address is not listed by Node
-        const directory = NetworkInterface.flagsDirectory;
-        if (null !== directory) {
-            let names: string[] = [];
-            try {
-                names = readdirSync(directory);
-            } catch {
-                // no such directory: Node's list only
-            }
-
-            for (const name of names) {
-                if (!result.some((ifc) => ifc.name === name)) {
-                    const flags = NetworkInterface.readFlags(name);
-                    if (null !== flags) {
-                        result.push(new NetworkInterface(name, name, [], flags));
-                    }
-                }
-            }
+            result.push(
+                new NetworkInterface(name, name, list, { loopback: isInternal, up: true, multicast: !isInternal }),
+            );
         }
 
         return result;
-    }
-
-    /** The flags of the interface from the file of {@link flagsDirectory}; null when there is none or it is not hex. */
-    private static readFlags(name: string): NetworkInterfaceFlags | null {
-        const directory = NetworkInterface.flagsDirectory;
-        if (null === directory || name.includes('/') || '..' === name) {
-            return null;
-        }
-
-        let text: string;
-        try {
-            text = readFileSync(directory + '/' + name + '/flags', 'ascii').trim();
-        } catch {
-            return null;
-        }
-
-        if (!/^(0x)?[0-9a-fA-F]+$/.test(text)) {
-            return null;
-        }
-
-        const flags = parseInt(text, 16);
-        return {
-            loopback: 0 !== (flags & IFF_LOOPBACK),
-            up: 0 !== (flags & IFF_UP),
-            multicast: 0 !== (flags & IFF_MULTICAST),
-        };
     }
 
     /** `NetworkInterface.getByName(String)`: null when there is no such interface. */
