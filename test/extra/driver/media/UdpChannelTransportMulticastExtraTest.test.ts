@@ -159,6 +159,15 @@ afterEach(() => {
 const IPV6_SKIP = 'IPv6 multicast over lo does not work on this host';
 
 describe.skipIf(!IS_LINUX)('multicast transports on one port', () => {
+    // Issue #64: the IPv6 rows below skip on a host without IPv6 multicast; CI sets REQUIRE_IPV6_MULTICAST=1 so that the
+    // skip is a failure there (`scripts/multicast-probe.mjs` has the same rule).
+    it.runIf('1' === process.env['REQUIRE_IPV6_MULTICAST'])(
+        'ipv6MulticastIsAvailableWhenTheHostIsRequiredToHaveIt Regression',
+        () => {
+            expect(ipv6Works, 'REQUIRE_IPV6_MULTICAST=1 but ' + IPV6_SKIP).toBe(true);
+        },
+    );
+
     const cases: [Family, boolean][] = [
         [IPV4, true],
         [IPV6, ipv6Works],
