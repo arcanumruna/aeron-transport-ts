@@ -7,6 +7,7 @@ import type { Plan } from './SystemRig.js';
 import { Consumed, Producer } from './SystemRig.js';
 import { mulberry32 } from './Random.js';
 import type { FaultModel, NetworkStats } from './SimNetwork.js';
+import { MAX_STEPS } from './SimWorld.js';
 import type { SimNode, SimWorld } from './SimWorld.js';
 
 export const STREAM_ID = 1001;
@@ -130,7 +131,7 @@ export function carry(
     work: Plan,
     maxLength: number,
     consumed: Consumed = new Consumed(),
-    maxSteps?: number,
+    maxSteps = MAX_STEPS,
 ): { producer: Producer; consumed: Consumed } {
     const producer = new Producer(publication, work, maxLength);
     world.run(
@@ -141,6 +142,7 @@ export function carry(
         },
         'all ' + work.count + ' messages (sent ' + producer.sent() + ', read ' + consumed.sequences.length + ')',
         maxSteps,
+        () => producer.sent() + consumed.sequences.length,
     );
     return { producer, consumed };
 }
