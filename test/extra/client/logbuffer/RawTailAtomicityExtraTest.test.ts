@@ -10,6 +10,8 @@ import { runWorkers } from '../../../support/Workers.js';
 const SCRIPT = new URL('./RawTailAtomicity.worker.ts', import.meta.url);
 const PARTITION = 1;
 const OFFSET = LogBufferDescriptor.TERM_TAIL_COUNTERS_OFFSET + 8 * PARTITION;
+const ROTATIONS = 4000;
+const ADDS_PER_ROTATION = 8;
 const INT32_MIN = -2147483648;
 
 /** The raw tail with the unsigned 32 bit `low` (packTail sign-extends a negative int offset, as Java does). */
@@ -69,16 +71,17 @@ describe('RawTailAtomicityExtraTest', () => {
         const results = (await runWorkers(
             SCRIPT,
             [
-                { kind: 'add', buffer: sab, partition: PARTITION, count: 0 },
-                { kind: 'rotate', buffer: sab, partition: PARTITION, count: 4000 },
+                { kind: 'add', buffer: sab, partition: PARTITION, count: 0, perRotation: 0 },
+                { kind: 'rotate', buffer: sab, partition: PARTITION, count: ROTATIONS, perRotation: ADDS_PER_ROTATION },
             ],
             25_000,
         )) as [{ adds: number; torn: number; first: string }, number];
 
         // the adder ran during the rotations, and every pair it got was a pair that existed
-        expect(results[0].adds).toBeGreaterThan(4000);
+        // (the rotator waits for the adder, so the count is fixed by iterations and not by the speed of the host)
+        expect(results[0].adds).toBeGreaterThanOrEqual(ROTATIONS * ADDS_PER_ROTATION);
         expect(results[0].torn, results[0].first).toBe(0);
-        expect(LogBufferDescriptor.rawTailTermId(buffer, PARTITION)).toBe(4001);
+        expect(LogBufferDescriptor.rawTailTermId(buffer, PARTITION)).toBe(ROTATIONS + 1);
     }, 30_000);
 
     it('getAndAddRawTailOffsetAllocatesNothingOnSharedBacking', async () => {
