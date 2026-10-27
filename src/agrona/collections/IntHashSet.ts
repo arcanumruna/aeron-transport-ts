@@ -68,8 +68,8 @@ export class IntHashSet extends AbstractSet<number> {
     private readonly shouldAvoidAllocation: boolean;
     /** @internal */
     public containsMissingValue = false;
-    private readonly _loadFactor: number;
-    private _resizeThreshold: number;
+    private readonly _loadFactor: number = 0;
+    private _resizeThreshold: number = 0;
     // NB: excludes missing value
     /** @internal */
     public _sizeOfArrayValues = 0;

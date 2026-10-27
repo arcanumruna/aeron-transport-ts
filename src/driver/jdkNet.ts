@@ -664,7 +664,7 @@ function checkPort(port: number): number {
 export class InetSocketAddress {
     private readonly hostname: string | null;
     private readonly addr: InetAddress | null;
-    private readonly port: number;
+    private readonly port: number = 0;
 
     /**
      * `new InetSocketAddress(port)` is the wildcard address, `new InetSocketAddress(addr, port)` a resolved one (a null
@@ -779,7 +779,7 @@ export class InetSocketAddress {
 export class InterfaceAddress {
     private readonly address: InetAddress;
     private readonly broadcast: InetAddress | null;
-    private readonly maskLength: number;
+    private readonly maskLength: number = 0;
     public constructor(address: InetAddress, broadcast: InetAddress | null, maskLength: number) {
         this.address = address;
         this.broadcast = broadcast;

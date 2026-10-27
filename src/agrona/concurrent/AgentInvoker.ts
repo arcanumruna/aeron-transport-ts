@@ -41,6 +41,7 @@ export class AgentInvoker implements AutoCloseable {
     private readonly errorCounter: AtomicCounter | null;
     private readonly errorHandler: ErrorHandler;
     private readonly _agent: Agent;
+    private _heldThreadHandler: (() => void) | null = null;
 
     /**
      * Create an agent and initialise it.
@@ -184,6 +185,27 @@ export class AgentInvoker implements AutoCloseable {
             if (t instanceof JavaError) {
                 throw t;
             }
+        }
+    }
+
+    /**
+     * TS-only (spec D126): sets the action {@link AgentInvoker.heldThread} runs. A media driver in the invoker mode
+     * sets it to fail the host lookups its agents wait on, which cannot complete while a caller holds the one thread.
+     *
+     * @param handler to run when a caller holds the thread, or null for none.
+     */
+    public heldThreadHandler(handler: (() => void) | null): void {
+        this._heldThreadHandler = handler;
+    }
+
+    /**
+     * TS-only (spec D126): tells the agent that its caller holds the thread in a wait which only this invoker's duty
+     * cycle can end, so no callback of the event loop runs until the wait ends.
+     */
+    public heldThread(): void {
+        const handler = this._heldThreadHandler;
+        if (null !== handler) {
+            handler();
         }
     }
 

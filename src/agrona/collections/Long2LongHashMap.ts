@@ -52,8 +52,8 @@ import type { LongLongPredicate } from './LongLongPredicate.js';
 export class Long2LongHashMap {
     static readonly MIN_CAPACITY = 8;
 
-    private readonly _loadFactor: number;
-    private readonly _missingValue: number;
+    private readonly _loadFactor: number = 0;
+    private readonly _missingValue: number = 0;
     private _resizeThreshold = 0;
     /** @internal accessed by the nested classes, which are in this file */
     public _size = 0;
@@ -1184,8 +1184,8 @@ export class Long2LongHashMapEntryIterator
  */
 export class Long2LongHashMapMapEntry implements Entry<number, number> {
     private readonly map: Long2LongHashMap;
-    private readonly k: number;
-    private readonly v: number;
+    private readonly k: number = 0;
+    private readonly v: number = 0;
 
     public constructor(map: Long2LongHashMap, k: number, v: number) {
         this.map = map;

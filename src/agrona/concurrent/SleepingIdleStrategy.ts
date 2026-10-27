@@ -37,7 +37,7 @@ export class SleepingIdleStrategy implements IdleStrategy {
      */
     public static readonly DEFAULT_SLEEP_PERIOD_NS = 1000;
 
-    private readonly sleepPeriodNs: number;
+    private readonly sleepPeriodNs: number = 0;
 
     /**
      * Default constructor that uses {@link SleepingIdleStrategy.DEFAULT_SLEEP_PERIOD_NS}.

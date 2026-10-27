@@ -59,10 +59,10 @@ import type { LongObjPredicate } from './LongObjPredicate.js';
 export class Long2ObjectHashMap<V> {
     static readonly MIN_CAPACITY = 8;
 
-    private readonly _loadFactor: number;
-    private _resizeThreshold: number;
+    private readonly _loadFactor: number = 0;
+    private _resizeThreshold: number = 0;
     /** @internal accessed by the nested classes, which are in this file */
-    public _size: number;
+    public _size: number = 0;
     /** @internal */
     public readonly _shouldAvoidAllocation: boolean;
 
@@ -1415,7 +1415,7 @@ export class Long2ObjectHashMapEntryIterator<V>
  */
 export class Long2ObjectHashMapMapEntry<V> implements Entry<number, V | null> {
     private readonly map: Long2ObjectHashMap<V>;
-    private readonly k: number;
+    private readonly k: number = 0;
     private readonly v: V | null;
 
     public constructor(map: Long2ObjectHashMap<V>, k: number, v: V | null) {

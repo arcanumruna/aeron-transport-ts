@@ -27,9 +27,9 @@ import type { LossGenerator } from './LossGenerator.js';
  * that a retransmission of the range gets through.
  */
 export class FixedLossGenerator implements LossGenerator {
-    private readonly termId: number;
-    private readonly termOffset: number;
-    private readonly length: number;
+    private readonly termId: number = 0;
+    private readonly termOffset: number = 0;
+    private readonly length: number = 0;
     // Java's BiInt2ObjectMap<MutableInteger>, keyed by (streamId, sessionId) (spec D60)
     private readonly streamAndSessionIdToOffsetMap = new LongHalves2ObjectHashMap<MutableInteger>();
 

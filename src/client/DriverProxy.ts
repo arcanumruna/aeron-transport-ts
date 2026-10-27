@@ -56,7 +56,7 @@ const {
  * (spec D92); with none, the proxy allocates the next one, as Java does.
  */
 export class DriverProxy {
-    private readonly clientId: number;
+    private readonly clientId: number = 0;
     private readonly publicationMessageFlyweight = new PublicationMessageFlyweight();
     private readonly subscriptionMessageFlyweight = new SubscriptionMessageFlyweight();
     private readonly removePublicationFlyweight = new RemovePublicationFlyweight();

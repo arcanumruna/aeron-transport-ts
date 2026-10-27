@@ -188,8 +188,14 @@ describe('Host name resolution', () => {
         const registrationId = rig.aeron.asyncAddExclusivePublication(channel, STREAM_ID);
         (lookups[0] as { callback: LookupCallback }).callback(new Error('ENOTFOUND'));
 
+        // the name is not in the cache, so the driver looks it up itself (D126); it fails too
+        let driverLookUpAnswered = false;
         let error: unknown = null;
         await rig.until(() => {
+            if (2 === lookups.length && !driverLookUpAnswered) {
+                driverLookUpAnswered = true;
+                (lookups[1] as { callback: LookupCallback }).callback(new Error('ENOTFOUND'));
+            }
             try {
                 return null !== rig.aeron.getExclusivePublication(registrationId);
             } catch (ex) {
@@ -260,8 +266,10 @@ describe('Host name resolution', () => {
 
         expect(() =>
             rig.aeron.addExclusivePublication('aeron:udp?endpoint=unresolved.example:' + freeUdpPort(), STREAM_ID),
-        ).toThrow(RegistrationException);
-        expect(lookups).toEqual([]);
+        ).toThrow(/unresolved\.example/);
+        // the client does not look the name up; the driver starts one (D126) and the blocked call fails it, since the
+        // callback cannot run while the call holds the thread (D102): the unknown host error, with no 10 s timeout
+        expect(lookups.map((l) => l.host)).toEqual(['unresolved.example']);
     });
 
     it('closingTheClientWhileTheLookUpIsOutLeavesNothingToWriteAndNothingToFail', () => {

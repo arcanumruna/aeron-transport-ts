@@ -59,8 +59,8 @@ export class Subscription {
     // The padding fields of Java are not ported (no field layout in JS, spec D11, D19).
     private static readonly EMPTY_IMAGES: Image[] = [];
 
-    private readonly _registrationId: number;
-    private readonly _streamId: number;
+    private readonly _registrationId: number = 0;
+    private readonly _streamId: number = 0;
     private roundRobinIndex: number = 0;
     /** @internal package-private in Java: `volatile boolean isClosed`, read by {@link isClosed} */
     public _isClosed: boolean = false;

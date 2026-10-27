@@ -34,7 +34,7 @@ export class RegistrationException extends AeronException {
     /**
      * Value of the {@link errorCode} encoded as an int.
      */
-    private readonly _errorCodeValue: number;
+    private readonly _errorCodeValue: number = 0;
 
     /**
      * The {@link ErrorCode} for the specific exception.

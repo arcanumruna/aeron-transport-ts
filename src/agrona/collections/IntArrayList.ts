@@ -36,7 +36,7 @@ export class IntArrayList {
      */
     public static readonly INITIAL_CAPACITY = 10;
 
-    private readonly _nullValue: number;
+    private readonly _nullValue: number = 0;
     private _size = 0;
     private elements: Int32Array;
 

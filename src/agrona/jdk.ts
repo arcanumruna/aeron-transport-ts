@@ -708,6 +708,41 @@ export function dataViewGetLong(view: DataView, offset: number, littleEndian: bo
     return value;
 }
 
+/** The cold path of {@link dataViewGetLongLE}: the exact value that Java would have read. */
+function littleEndianOverflow(view: DataView, offset: number): never {
+    throw new LongOverflowError(view.getBigInt64(offset, true));
+}
+
+/**
+ * {@link dataViewGetLong} for a little endian `long`, the native order, which is every read of a buffer's native-order
+ * accessors. A function of its own, and not the `littleEndian` branch of the general one, so that it is small (about a
+ * third of the bytecode, with the throw out of line) and V8 inlines it into the caller together with its neighbours:
+ * a `long` above 2^31 stays unboxed only while it does not cross a call that is not inlined (issue #19).
+ */
+export function dataViewGetLongLE(view: DataView, offset: number): number {
+    const value = view.getInt32(offset + 4, true) * 4294967296 + view.getUint32(offset, true);
+    if (!Number.isSafeInteger(value)) {
+        littleEndianOverflow(view, offset);
+    }
+
+    return value;
+}
+
+/**
+ * {@link dataViewSetLong} for a little endian `long`, small for the reason of {@link dataViewGetLongLE}; the
+ * `RangeError` of a value that is not a safe integer is thrown by `Long.checkSafe` out of line, with nothing written.
+ */
+export function dataViewSetLongLE(view: DataView, offset: number, value: number): void {
+    if (!Number.isSafeInteger(value)) {
+        Long.checkSafe(value);
+    }
+
+    // a safe integer is its low word plus a whole number of 2^32, so the division is exact and `Math.floor` is not needed
+    const lo = value >>> 0;
+    view.setUint32(offset, lo, true);
+    view.setInt32(offset + 4, (value - lo) / 4294967296, true);
+}
+
 /**
  * Writes a `long` held in a `number` at `offset` of a view: a `RangeError`, with nothing written, if it is not a safe
  * integer.

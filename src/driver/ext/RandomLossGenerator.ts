@@ -25,7 +25,7 @@ import type { LossGenerator } from './LossGenerator.js';
  * Random loss generator for testing loss of data frames.
  */
 export class RandomLossGenerator implements LossGenerator {
-    private readonly lossRate: number;
+    private readonly lossRate: number = 0;
     private readonly random: Random;
 
     /**

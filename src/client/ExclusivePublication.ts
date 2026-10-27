@@ -81,10 +81,10 @@ const { ADMIN_ACTION, CLOSED, MAX_POSITION_EXCEEDED } = Publication;
 export class ExclusivePublication extends Publication {
     // The fields of Java that share a name with an accessor have a leading underscore (spec D80). The padding fields
     // of Java are not ported (no field layout in JS, spec D11, D19).
-    private _termOffset: number;
-    private _termId: number;
-    private activePartitionIndex: number;
-    private termBeginPosition: number;
+    private _termOffset: number = 0;
+    private _termId: number = 0;
+    private activePartitionIndex: number = 0;
+    private termBeginPosition: number = 0;
 
     /** @internal package-private in Java */
     public constructor(

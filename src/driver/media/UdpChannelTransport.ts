@@ -152,8 +152,8 @@ export abstract class UdpChannelTransport implements AutoCloseable {
     private readonly portManager: PortManager;
 
     private _multicastTtl = 0;
-    private readonly _socketSndbufLength: number;
-    private readonly _socketRcvbufLength: number;
+    private readonly _socketSndbufLength: number = 0;
+    private readonly _socketRcvbufLength: number = 0;
 
     // Not in Java (spec 4.2). Everything below is allocated here, once, or reused: the receive and send paths allocate
     // nothing per datagram.

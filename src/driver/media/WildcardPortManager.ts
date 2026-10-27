@@ -36,15 +36,15 @@ export class WildcardPortManager implements PortManager {
     /** @internal package-private in Java */
     public readonly portSet = new IntHashSet();
     /** @internal package-private in Java */
-    public readonly highPort: number;
+    public readonly highPort: number = 0;
     /** @internal package-private in Java */
-    public readonly lowPort: number;
+    public readonly lowPort: number = 0;
     /** @internal package-private in Java */
     public readonly isOsWildcard: boolean;
     /** @internal package-private in Java */
     public readonly isSender: boolean;
     /** @internal package-private in Java */
-    public nextPort: number;
+    public nextPort: number = 0;
 
     /**
      * Instantiate a wildcard port manager with the given port range.

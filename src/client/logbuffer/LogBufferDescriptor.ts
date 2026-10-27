@@ -990,19 +990,17 @@ export class LogBufferDescriptor {
         const nextIndex = LogBufferDescriptor.indexByTermCount(nextTermCount);
         const expectedTermId = (nextTermId - LogBufferDescriptor.PARTITION_COUNT) | 0;
 
-        let rawTail: bigint;
+        // Java's `rawTailVolatile`, `termId(rawTail)` and `casRawTail(..., rawTail, packTail(nextTermId, 0))` on the
+        // halves of the slot (spec D12): the `bigint` temporaries allocated on each rotation whenever V8 did not inline
+        // them.
+        const index = TERM_TAIL_COUNTERS_OFFSET + SIZE_OF_LONG * nextIndex;
         do {
-            rawTail = LogBufferDescriptor.rawTailVolatile(metadataBuffer, nextIndex);
-            if (expectedTermId !== LogBufferDescriptor.termId(rawTail)) {
+            metadataBuffer.getLongVolatileHalves(index, RAW_TAIL_HALVES);
+            if (expectedTermId !== RAW_TAIL_HALVES[1]) {
                 break;
             }
         } while (
-            !LogBufferDescriptor.casRawTail(
-                metadataBuffer,
-                nextIndex,
-                rawTail,
-                LogBufferDescriptor.packTail(nextTermId, 0),
-            )
+            !metadataBuffer.compareAndSetLongHalves(index, RAW_TAIL_HALVES[0]!, RAW_TAIL_HALVES[1]!, 0, nextTermId)
         );
 
         return LogBufferDescriptor.casActiveTermCount(metadataBuffer, termCount, nextTermCount);

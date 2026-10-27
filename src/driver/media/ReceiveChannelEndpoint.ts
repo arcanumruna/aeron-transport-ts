@@ -65,7 +65,7 @@ export class ReceiveChannelEndpoint extends UdpChannelTransport {
      * Counter for the number of errors frames send back by this channel endpoint.
      */
     protected readonly errorFramesSent: AtomicCounter;
-    public timeOfLastActivityNs: number;
+    public timeOfLastActivityNs: number = 0;
 
     private readonly _dispatcher: DataPacketDispatcher;
     private readonly smBuffer: UnsafeBuffer;
@@ -92,8 +92,8 @@ export class ReceiveChannelEndpoint extends UdpChannelTransport {
 
     // The receiver id is a `long`; the halves are what the frames write and compare, without a `bigint` (spec D14).
     private readonly receiverId: bigint;
-    private readonly receiverIdHigh: number;
-    private readonly receiverIdLow: number;
+    private readonly receiverIdHigh: number = 0;
+    private readonly receiverIdLow: number = 0;
     private _currentControlAddress: InetSocketAddress | null;
     private _localSocketAddressIndicator: AtomicCounter | null = null;
     private imageRefCount = 0;

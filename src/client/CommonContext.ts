@@ -59,7 +59,7 @@ export class InferableBoolean {
     public static readonly INFER: InferableBoolean = new InferableBoolean('INFER');
 
     private readonly _name: string;
-    private readonly _ordinal: number;
+    private readonly _ordinal: number = 0;
 
     private constructor(name: string) {
         this._name = name;

@@ -170,7 +170,7 @@ abstract class Command {
 }
 
 abstract class ClientCommand extends Command {
-    public readonly correlationId: number;
+    public readonly correlationId: number = 0;
 
     protected constructor(correlationId: number) {
         super();
@@ -191,10 +191,10 @@ abstract class ClientCommand extends Command {
  */
 export class DriverConductor implements Agent {
     private nextSessionId: number = BitUtil.generateRandomisedId();
-    private readonly timerIntervalNs: number;
-    private readonly clientLivenessTimeoutNs: number;
+    private readonly timerIntervalNs: number = 0;
+    private readonly clientLivenessTimeoutNs: number = 0;
     private timeOfLastToDriverPositionChangeNs = 0;
-    private lastCommandConsumerPosition: number;
+    private lastCommandConsumerPosition: number = 0;
     private timerCheckDeadlineNs = 0;
     private clockUpdateDeadlineNs = 0;
 
@@ -2256,8 +2256,8 @@ const AddNetworkPublicationState = {
 class AddNetworkPublicationCommand extends ClientCommand {
     private readonly c: DriverConductor;
     private readonly channel: string;
-    private readonly streamId: number;
-    private readonly clientId: number;
+    private readonly streamId: number = 0;
+    private readonly clientId: number = 0;
     private readonly isExclusive: boolean;
     private state: number = AddNetworkPublicationState.INIT;
     private params: PublicationParams | null = null;
@@ -2567,11 +2567,11 @@ const AddNetworkSubscriptionState = {
 class AddNetworkSubscriptionCommand extends ClientCommand {
     private readonly c: DriverConductor;
     private readonly channel: string;
-    private readonly streamId: number;
-    private readonly registrationId: number;
-    private readonly clientId: number;
+    private readonly streamId: number = 0;
+    private readonly registrationId: number = 0;
+    private readonly clientId: number = 0;
     private readonly parseChannelResult: CommandResult<UdpChannel>;
-    private state: number;
+    private state: number = 0;
     private params: SubscriptionParams | null = null;
     private channelEndpoint: ReceiveChannelEndpoint | null = null;
     private udpChannel: UdpChannel | null = null;
@@ -2685,7 +2685,7 @@ const AddRcvNetworkDestinationState = {
 
 class AddRcvNetworkDestinationCommand extends ClientCommand {
     private readonly c: DriverConductor;
-    private readonly registrationId: number;
+    private readonly registrationId: number = 0;
     private readonly destinationChannel: string;
     private state: number = AddRcvNetworkDestinationState.INIT;
     private receiveChannelEndpoint: ReceiveChannelEndpoint | null = null;
@@ -2783,7 +2783,7 @@ const RemoveRcvNetworkDestinationState = {
 
 class RemoveRcvNetworkDestinationCommand extends ClientCommand {
     private readonly c: DriverConductor;
-    private readonly registrationId: number;
+    private readonly registrationId: number = 0;
     private readonly destinationChannel: string;
     private state: number = RemoveRcvNetworkDestinationState.INIT;
     private udpChannel: UdpChannel | null = null;
@@ -2860,7 +2860,7 @@ const SendDestinationState = {
 
 class AddSendDestinationCommand extends ClientCommand {
     private readonly c: DriverConductor;
-    private readonly registrationId: number;
+    private readonly registrationId: number = 0;
     private readonly destinationChannel: string;
     private state: number = SendDestinationState.INIT;
     private channelUri: ChannelUri | null = null;
@@ -2916,7 +2916,7 @@ class AddSendDestinationCommand extends ClientCommand {
 
 class RemoveSendDestinationCommand extends ClientCommand {
     private readonly c: DriverConductor;
-    private readonly registrationId: number;
+    private readonly registrationId: number = 0;
     private readonly destinationChannel: string;
     private state: number = SendDestinationState.INIT;
     private channelUri: ChannelUri | null = null;
@@ -2969,15 +2969,15 @@ const CreatePublicationImageState = {
 
 class CreatePublicationImageCommand extends Command {
     private readonly c: DriverConductor;
-    private readonly sessionId: number;
-    private readonly streamId: number;
-    private readonly initialTermId: number;
-    private readonly activeTermId: number;
-    private readonly termOffset: number;
-    private readonly termBufferLength: number;
-    private readonly senderMtuLength: number;
-    private readonly transportIndex: number;
-    private readonly flags: number;
+    private readonly sessionId: number = 0;
+    private readonly streamId: number = 0;
+    private readonly initialTermId: number = 0;
+    private readonly activeTermId: number = 0;
+    private readonly termOffset: number = 0;
+    private readonly termBufferLength: number = 0;
+    private readonly senderMtuLength: number = 0;
+    private readonly transportIndex: number = 0;
+    private readonly flags: number = 0;
     private readonly controlAddress: InetSocketAddress;
     private readonly sourceAddress: InetSocketAddress;
     private readonly channelEndpoint: ReceiveChannelEndpoint;

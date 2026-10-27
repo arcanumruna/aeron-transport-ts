@@ -4173,6 +4173,8 @@ export class MediaDriver implements AutoCloseable {
                 errorCounter,
                 new CompositeAgent(sender, receiver, nativeResourceAgent, conductor),
             );
+            // TS-only (spec D126): a client that holds the thread in a wait on this invoker fails the pending lookups
+            this.sharedInvoker.heldThreadHandler(() => nativeResourceAgent.failPendingLookups());
 
             if (ThreadingMode.INVOKER === ctx.threadingMode()) {
                 this.embeddedAgent = null;

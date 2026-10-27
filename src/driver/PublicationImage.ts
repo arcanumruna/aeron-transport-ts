@@ -113,7 +113,7 @@ export class PublicationImage implements LossHandler, DriverManagedResource, Sub
     public static readonly State = State;
 
     // conductor fields
-    public cleanPosition: number;
+    public cleanPosition: number = 0;
     public readonly untetheredSubscriptions: UntetheredSubscription[] = [];
     public subscriberPositions: ReadablePosition[];
     public lossReportTermId = 0;
@@ -126,22 +126,22 @@ export class PublicationImage implements LossHandler, DriverManagedResource, Sub
     // receiver fields
     private _isEndOfStream = false;
     public isSendingEosSm = false;
-    public timeOfLastPacketNs: number;
+    public timeOfLastPacketNs: number = 0;
     public imageConnections: (ImageConnection | null)[] = [null];
     public rejectionReason: string | null = null;
 
     private beginSmChange = 0;
     private endSmChange = 0;
-    private nextSmPosition: number;
-    private nextSmReceiverWindowLength: number;
+    private nextSmPosition: number = 0;
+    private nextSmReceiverWindowLength: number = 0;
 
     private lastSmChangeNumber = 0;
-    private lastSmPosition: number;
-    private lastOverrunThreshold: number;
+    private lastSmPosition: number = 0;
+    private lastOverrunThreshold: number = 0;
     private nextSmDeadlineNs = 0;
     private isNextSmDeadlineResetRequested = false;
-    private readonly smTimeoutNs: number;
-    private readonly maxReceiverWindowLength: number;
+    private readonly smTimeoutNs: number = 0;
+    private readonly maxReceiverWindowLength: number = 0;
 
     public beginLossChange = 0;
     public endLossChange = 0;
@@ -150,22 +150,22 @@ export class PublicationImage implements LossHandler, DriverManagedResource, Sub
     public lossLength = 0;
     private lastLossChangeNumber = 0;
 
-    private timeOfLastStateChangeNs: number;
+    private timeOfLastStateChangeNs: number = 0;
 
-    private readonly _correlationId: number;
-    private readonly imageLivenessTimeoutNs: number;
-    private readonly untetheredWindowLimitTimeoutNs: number;
-    private readonly untetheredLingerTimeoutNs: number;
-    private readonly untetheredRestingTimeoutNs: number;
-    private readonly _sessionId: number;
-    private readonly _streamId: number;
-    private readonly positionBitsToShift: number;
-    private readonly termLengthMask: number;
-    private readonly initialTermId: number;
-    private readonly flags: number;
+    private readonly _correlationId: number = 0;
+    private readonly imageLivenessTimeoutNs: number = 0;
+    private readonly untetheredWindowLimitTimeoutNs: number = 0;
+    private readonly untetheredLingerTimeoutNs: number = 0;
+    private readonly untetheredRestingTimeoutNs: number = 0;
+    private readonly _sessionId: number = 0;
+    private readonly _streamId: number = 0;
+    private readonly positionBitsToShift: number = 0;
+    private readonly termLengthMask: number = 0;
+    private readonly initialTermId: number = 0;
+    private readonly flags: number = 0;
     private readonly isReliable: boolean;
     private readonly isReceiveTimestampEnabled: boolean;
-    private readonly receiveTimestampOffset: number;
+    private readonly receiveTimestampOffset: number = 0;
     private smEnabled = true;
 
     private isRebuilding = true;

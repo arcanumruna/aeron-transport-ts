@@ -1,11 +1,12 @@
-// `npm run bench:gate -- --base <ref> [--pairs n] [--filter s] [--file s] [--samples n] [--seed n] [--ignore-load] [--inject spec]`: the performance regression gate.
+// `npm run bench:gate -- --base <ref> [--pairs n] [--filter s] [--file s] [--samples n] [--seed n] [--ignore-load] [--no-calibrate] [--inject spec]`: the performance regression gate.
 //
 // 1. Resolves <ref> (default origin/main) to a sha and extracts it with `git archive` into a fresh directory under the
 //    temp directory, outside the repository, with a symlink to node_modules and the CANDIDATE's bench/ and worker
 //    loader copied in: base and candidate run the same bench code against their own src/.
 // 2. A bench file that fails to import in the base (the API does not exist yet) is "n/a in base", not a failure;
 //    any other failure of the base is NO_VERDICT.
-// 3. Runs base and candidate as separate processes, --pairs pairs (default 5), in an order drawn per pair from --seed.
+// 3. Runs base and candidate as separate processes, --pairs pairs (default 15), in an order drawn per pair from --seed.
+//    Before them, an A/A calibration runs the base against itself for the same number of pairs (--no-calibrate skips it).
 // 4. For each bench, the verdict (verdict.ts) is on the median of the per-pair ratios candidate / base.
 // 5. Prints a table. Exit 0: everything passes; 1: a failure; 3: no verdict (and no failure), also when the host is too
 //    busy; 2: a usage error. The scratch directory is deleted at the end, also on a failure.
@@ -36,9 +37,14 @@ interface Options {
     samples: number;
     seed: number;
     ignoreLoad: boolean;
+    /** Run the base against itself first, to tell a metric the host is too noisy for (`--no-calibrate` skips it). */
+    calibrate: boolean;
     /** A delay for the candidate runs only (bench/lib/inject.ts): the tests of the gate use it. */
     inject: string;
 }
+
+/** Pairs by default: 15, the count at which the README believes a verdict (the minimum for one is 5 and 3). */
+const DEFAULT_PAIRS = 15;
 
 class UsageError extends Error {}
 
@@ -48,12 +54,13 @@ const MAX_LOAD_PER_CORE = 0.5;
 function parseArgs(argv: string[]): Options {
     const options: Options = {
         base: 'origin/main',
-        pairs: 5,
+        pairs: DEFAULT_PAIRS,
         filter: '',
         file: '',
         samples: 2000,
         seed: (Date.now() ^ (process.pid << 8)) >>> 0,
         ignoreLoad: false,
+        calibrate: true,
         inject: '',
     };
     for (let i = 0; i < argv.length; i++) {
@@ -88,6 +95,9 @@ function parseArgs(argv: string[]): Options {
                 break;
             case '--ignore-load':
                 options.ignoreLoad = true;
+                break;
+            case '--no-calibrate':
+                options.calibrate = false;
                 break;
             case '--inject':
                 options.inject = argv[++i] ?? '';
@@ -260,8 +270,26 @@ async function main(): Promise<number> {
     const scratch = mkdtempSync(join(tmpdir(), 'aeron-bench-gate-'));
     const random = prng(options.seed);
     const runs: PairLines[] = [];
+    const calibration: PairLines[] = [];
     try {
         prepareBase(repo, sha, scratch);
+
+        if (options.calibrate) {
+            // A/A: the base against itself, the same number of pairs, before the A/B pairs. The injected delay is not
+            // applied: both sides are the base.
+            process.stderr.write('A/A calibration: the base against itself, ' + options.pairs + ' pairs\n');
+            for (let k = 0; k < options.pairs; k++) {
+                const first: Line[] = [];
+                const second: Line[] = [];
+                for (const file of files) {
+                    first.push(...runFile(scratch, file, options));
+                    second.push(...runFile(scratch, file, options));
+                }
+                calibration.push({ base: first, cand: second });
+            }
+        } else {
+            process.stderr.write('--no-calibrate: no A/A run; the host noise is not measured\n');
+        }
 
         for (let k = 0; k < options.pairs; k++) {
             const base: Line[] = [];
@@ -279,7 +307,7 @@ async function main(): Promise<number> {
             runs.push({ base, cand });
         }
 
-        const summary = summarize(runs, expected, REQUIRED_PAIRS);
+        const summary = summarize(runs, expected, REQUIRED_PAIRS, options.calibrate ? calibration : undefined);
 
         const width = Math.max(...summary.benches.map((b) => b.name.length), 5);
         process.stderr.write(

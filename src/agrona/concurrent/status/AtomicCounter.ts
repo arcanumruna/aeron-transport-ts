@@ -37,9 +37,9 @@ const { SIZE_OF_LONG } = BitUtil;
  */
 export class AtomicCounter implements AutoCloseable {
     private _isClosed = false;
-    private readonly _id: number;
+    private readonly _id: number = 0;
     private readonly buffer: AtomicBuffer;
-    private readonly counterOffset: number;
+    private readonly counterOffset: number = 0;
     private countersManager: CountersManager | null;
 
     /**

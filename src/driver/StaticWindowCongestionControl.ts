@@ -33,7 +33,7 @@ export class StaticWindowCongestionControl implements CongestionControl {
      */
     public static readonly CC_PARAM_VALUE: string = 'static';
 
-    private readonly ccOutcome: number;
+    private readonly ccOutcome: number = 0;
 
     /**
      * Construct a new {@link CongestionControl} instance for a received stream image using a static window algorithm.

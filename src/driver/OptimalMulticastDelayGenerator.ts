@@ -23,10 +23,10 @@ import { type FeedbackDelayGenerator } from './FeedbackDelayGenerator.js';
  * Generates a delay value as described by the paper "Optimal Multicast Feedback".
  */
 export class OptimalMulticastDelayGenerator implements FeedbackDelayGenerator {
-    private readonly randMax: number;
-    private readonly baseX: number;
-    private readonly constantT: number;
-    private readonly factorT: number;
+    private readonly randMax: number = 0;
+    private readonly baseX: number = 0;
+    private readonly constantT: number = 0;
+    private readonly factorT: number = 0;
 
     /**
      * Create new feedback delay generator based on estimates. Pre-calculating some parameters upfront.

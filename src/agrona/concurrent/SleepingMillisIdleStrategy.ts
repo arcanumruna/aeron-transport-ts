@@ -34,7 +34,7 @@ export class SleepingMillisIdleStrategy implements IdleStrategy {
      */
     public static readonly DEFAULT_SLEEP_PERIOD_MS = 1;
 
-    private readonly sleepPeriodMs: number;
+    private readonly sleepPeriodMs: number = 0;
 
     /**
      * Constructed a new strategy that will sleep for a given period when idle, or for

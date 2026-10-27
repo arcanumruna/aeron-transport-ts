@@ -27,8 +27,8 @@ export class StaticDelayGenerator implements FeedbackDelayGenerator {
      */
     public static readonly ZERO_DELAY_GENERATOR: StaticDelayGenerator = new StaticDelayGenerator(0);
 
-    private readonly delayInNs: number;
-    private readonly _retryDelayNs: number;
+    private readonly delayInNs: number = 0;
+    private readonly _retryDelayNs: number = 0;
 
     /**
      * Create a delayInNs generator that uses the specified delayNs. The three Java constructors are one:

@@ -66,10 +66,10 @@ export type LongHalvesObjPredicate<V> = (keyHigh: number, keyLow: number, value:
 export class LongHalves2ObjectHashMap<V> {
     static readonly MIN_CAPACITY = 8;
 
-    private readonly _loadFactor: number;
-    private _resizeThreshold: number;
+    private readonly _loadFactor: number = 0;
+    private _resizeThreshold: number = 0;
     /** @internal accessed by the nested classes, which are in this file */
-    public _size: number;
+    public _size: number = 0;
     /** @internal */
     public readonly _shouldAvoidAllocation: boolean;
 
@@ -1458,8 +1458,8 @@ export class LongHalves2ObjectHashMapEntryIterator<V>
  */
 export class LongHalves2ObjectHashMapMapEntry<V> implements LongHalves2ObjectHashMapEntry<V> {
     private readonly map: LongHalves2ObjectHashMap<V>;
-    private readonly hi: number;
-    private readonly lo: number;
+    private readonly hi: number = 0;
+    private readonly lo: number = 0;
     private readonly v: V | null;
 
     public constructor(map: LongHalves2ObjectHashMap<V>, hi: number, lo: number, v: V | null) {
