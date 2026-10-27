@@ -121,9 +121,7 @@ describe.each([
         loop('imageControlledPollAllocatesNothing', 64, (r) => r.image.controlledPoll(sum, 10));
         loop('imageControlledPollWithCommitAllocatesNothing', 64, (r) => r.image.controlledPoll(commitSum, 10));
         loop('imageBoundedPollAllocatesNothing', 64, (r) => r.image.boundedPoll(sum, NO_LIMIT, 10));
-        loop('imageBoundedControlledPollAllocatesNothing', 64, (r) =>
-            r.image.boundedControlledPoll(sum, NO_LIMIT, 10),
-        );
+        loop('imageBoundedControlledPollAllocatesNothing', 64, (r) => r.image.boundedControlledPoll(sum, NO_LIMIT, 10));
         loop('imageBlockPollAllocatesNothing', 64, (r) => (r.image.blockPoll(blockHandler, 1 << 20) > 0 ? 1 : 0));
         loop('imageRawPollAllocatesNothing', 64, (r) => (r.image.rawPoll(rawHandler, 1 << 20) > 0 ? 1 : 0));
         loop('subscriptionPollAllocatesNothing', 64, (r) => r.subscription.poll(sum, 10));
