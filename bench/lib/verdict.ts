@@ -46,7 +46,7 @@ export function ratios(pairs: readonly Pair[], metric: Rule['metric']): number[]
 
 /**
  * What an A/A run (the base against itself) says about the host for one metric: the median of the pair ratios and
- * their spread, `max - min`. The ratios of a quiet host are all near 1.
+ * their trimmed spread (see {@link trimmedSpread}). The ratios of a quiet host are all near 1.
  */
 export interface Calibration {
     median: number;
@@ -60,7 +60,23 @@ export function calibrate(pairs: readonly Pair[], metric: Rule['metric']): Calib
     if (0 === r.length) {
         return undefined;
     }
-    return { median: median(r), spread: Math.max(...r) - Math.min(...r), ratios: r };
+    return { median: median(r), spread: trimmedSpread(r), ratios: r };
+}
+
+/** The fewest ratios from which the trimmed spread drops the lowest and the highest. */
+export const MIN_TRIMMED_RATIOS = 5;
+
+/**
+ * The spread of the A/A ratios with the lowest and the highest dropped (`second highest - second lowest`), so that one
+ * slow or fast pair on a loaded host does not decide the verdict alone (issue #80); below MIN_TRIMMED_RATIOS ratios,
+ * where dropping two would leave too few to judge, it is `max - min`. Unlike an interquartile range it keeps the scale
+ * of `max - min`, which the band `1 +/- |limit - 1|` is sized for: a host whose ratios are noisy in more than one pair
+ * still spreads as wide as before.
+ */
+export function trimmedSpread(ratios: readonly number[]): number {
+    const sorted = [...ratios].sort((a, b) => a - b);
+    const trim = sorted.length >= MIN_TRIMMED_RATIOS ? 1 : 0;
+    return (sorted[sorted.length - 1 - trim] as number) - (sorted[trim] as number);
 }
 
 /**
@@ -72,8 +88,8 @@ export function bandWidth(rule: Rule): number {
 
 /**
  * Whether an A/A run is too noisy to judge this metric: its median ratio is beyond the metric's limit (the host alone
- * makes the gate fail), or the pair ratios spread wider than the band `1 +/- |limit - 1|` (`max - min` over twice the
- * band width), so that no pair ratio of an A/B run could be told from the host's own noise. Returns the reason, or
+ * makes the gate fail), or the pair ratios spread wider than the band `1 +/- |limit - 1|` (the trimmed spread over
+ * twice the band width), so that no pair ratio of an A/B run could be told from the host's own noise. Returns the reason, or
  * `undefined` when the host is steady enough.
  */
 export function unsteady(rule: Rule, aa: Calibration): string | undefined {

@@ -10,6 +10,7 @@ import {
     EXIT_USAGE,
     type Expected,
     RULES,
+    trimmedSpread,
     unsteady,
     MIN_TAIL_SAMPLES,
     type Line,
@@ -359,10 +360,11 @@ describe('GateCalibration (issue #29: the A/A run of the base against itself)', 
         ],
         ['median over 1.05 on p50', [1.06, 1.06, 1.06, 1.06, 1.06], 'p50', 0, 'NO_VERDICT', 'A/A median ratio 1.060'],
         ['median under 0.95 on ops/s', [0.9, 0.9, 0.9, 0.9, 0.9], 'ops/s', 1, 'NO_VERDICT', 'A/A median ratio 0.900'],
-        // a median inside the limit but pair ratios spread wider than the band 1 +/- 0.05, max - min over 0.10
+        // a median inside the limit but pair ratios spread wider than the band 1 +/- 0.05: the spread with the lowest and
+        // the highest ratio dropped (issue #80) over 0.10
         ['spread 0.40 around 1.0', [0.8, 1.2, 0.8, 1.2, 1.0], 'ns/op', 0, 'NO_VERDICT', 'spread 0.400'],
-        ['spread 0.11 just over', [0.94, 1.0, 1.0, 1.0, 1.05], 'ns/op', 0, 'NO_VERDICT', 'spread 0.110'],
-        ['spread 0.08 just inside', [0.96, 1.0, 1.0, 1.0, 1.04], 'ns/op', 0, 'PASS', ''],
+        ['spread 0.11 just over', [0.94, 0.94, 1.0, 1.05, 1.05], 'ns/op', 0, 'NO_VERDICT', 'spread 0.110'],
+        ['spread 0.08 just inside', [0.96, 0.96, 1.0, 1.04, 1.04], 'ns/op', 0, 'PASS', ''],
         ['a median of exactly the limit is steady', [1.05, 1.05, 1.05, 1.05, 1.05], 'ns/op', 0, 'PASS', ''],
         ['ops/s median exactly 0.95 is steady', [0.95, 0.95, 0.95, 0.95, 0.95], 'ops/s', 1, 'PASS', ''],
         ['all ones', STEADY, 'ns/op', 0, 'PASS', ''],
@@ -393,7 +395,7 @@ describe('GateCalibration (issue #29: the A/A run of the base against itself)', 
 
     it('theLimitOfEachMetricIsItsOwn', () => {
         // a spread of 0.15 is over the 0.10 band of ns/op (limit 1.05) but inside the 0.20 band of p99 (limit 1.10)
-        const aa = pairsOf([0.93, 1.0, 1.0, 1.0, 1.08], 20_000);
+        const aa = pairsOf([0.93, 0.93, 1.0, 1.08, 1.08], 20_000);
         const summary = summarize(pairsOf(STEADY, 20_000), [LATENCY], REQUIRED_PAIRS, aa);
         expect(metricOf(summary, 0, 'ns/op')?.status).toBe('NO_VERDICT');
         expect(metricOf(summary, 0, 'p99')?.status).toBe('PASS');
@@ -403,7 +405,7 @@ describe('GateCalibration (issue #29: the A/A run of the base against itself)', 
             pairsOf(STEADY, 20_000),
             [LATENCY],
             REQUIRED_PAIRS,
-            pairsOf([0.85, 1.0, 1.0, 1.0, 1.15], 20_000),
+            pairsOf([0.85, 0.85, 1.0, 1.15, 1.15], 20_000),
         );
         expect(metricOf(wide, 0, 'p99')?.status).toBe('NO_VERDICT');
         expect(metricOf(wide, 0, 'p99.9')?.status).toBe('NO_VERDICT');
@@ -440,5 +442,62 @@ describe('GateCalibration (issue #29: the A/A run of the base against itself)', 
         const reason = unsteady(rule, { median: 1, spread: 0.5, ratios: [0.75, 1.25] });
         expect(reason).toContain('spread 0.500');
         expect(reason).toContain('0.750, 1.250');
+    });
+});
+
+describe('GateCalibrationTrimmedSpreadRegression (issue #80: one outlier pair does not decide the A/A verdict)', () => {
+    const FILE = 'x.bench.ts';
+    const LATENCY: Expected = { name: 'lat', file: FILE };
+    const line = (scale: number): Line => ({
+        name: 'lat',
+        nsPerOp: 100 * scale,
+        p50: 100 * scale,
+        p99: 200 * scale,
+        p999: 400 * scale,
+        samples: 2000,
+    });
+    const pairsOf = (ratio: readonly number[]): PairLines[] => ratio.map((r) => ({ base: [line(1)], cand: [line(r)] }));
+    const ns = (aa: readonly number[]) =>
+        summarize(pairsOf(Array(15).fill(1)), [LATENCY], REQUIRED_PAIRS, pairsOf(aa)).benches[0]?.metrics.find(
+            (m) => 'ns/op' === m.label,
+        );
+    const QUIET = Array.from({ length: 15 }, (_, i) => 0.98 + (0.04 * i) / 14);
+
+    // [name, ratios, trimmed spread]
+    it.each([
+        ['empty', [], Number.NaN],
+        ['one', [1.2], 0],
+        ['four keep max - min', [0.9, 1.0, 1.0, 1.3], 0.4],
+        ['five drop one at each end', [0.5, 1.0, 1.02, 1.04, 2.0], 0.04],
+        ['order does not matter', [2.0, 1.04, 0.5, 1.02, 1.0], 0.04],
+        ['two outliers on one side still count', [1.0, 1.0, 1.0, 1.5, 1.5], 0.5],
+        ['all equal', [1, 1, 1, 1, 1, 1], 0],
+    ] as const)('%s', (_name, ratios, expected) => {
+        const spread = trimmedSpread(ratios);
+        if (Number.isNaN(expected)) {
+            expect(spread).toBeNaN();
+        } else {
+            expect(spread).toBeCloseTo(expected, 12);
+        }
+    });
+
+    it('oneSlowPairOfFifteenOnAQuietHostIsStillAVerdict', () => {
+        expect(ns(QUIET)?.status).toBe('PASS');
+        // the issue's repro: one slow pair, which max - min turned into NO_VERDICT
+        expect(ns([...QUIET.slice(0, 14), 1.5])?.status).toBe('PASS');
+        expect(ns([0.6, ...QUIET.slice(1)])?.status).toBe('PASS');
+        expect(ns([0.6, ...QUIET.slice(1, 14), 1.5])?.status).toBe('PASS');
+    });
+
+    it('twoSlowPairsAreANoisyHost', () => {
+        const metric = ns([...QUIET.slice(0, 13), 1.5, 1.5]);
+        expect(metric?.status).toBe('NO_VERDICT');
+        expect(metric?.message).toContain('spread 0.517');
+    });
+
+    it('theInputIsNotReordered', () => {
+        const ratios = [1.3, 1.0, 0.9, 1.0];
+        trimmedSpread(ratios);
+        expect(ratios).toEqual([1.3, 1.0, 0.9, 1.0]);
     });
 });

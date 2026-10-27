@@ -61,7 +61,8 @@ the host is too noisy for a verdict on this metric`), when
 
 - the median of its A/A ratios is beyond the metric's limit (over 1.05 for ns/op and p50, over 1.10 for p99 and p99.9,
   under 0.95 for ops/s): the host alone would fail the gate; or
-- its A/A pair ratios spread (`max - min`) wider than the band the limit allows around 1, which is twice the distance of
+- its A/A pair ratios spread (`max - min` with the lowest and the highest ratio dropped, from 5 valid ratios up, so that one
+  outlier pair does not decide alone) wider than the band the limit allows around 1, which is twice the distance of
   the limit from 1 (0.10 for ns/op, p50 and ops/s, 0.20 for p99 and p99.9), so that a pair ratio of the A/B run cannot be
   told from the host's own noise; or
 - the A/A run has no valid ratio for it.

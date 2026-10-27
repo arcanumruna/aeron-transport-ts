@@ -64,6 +64,7 @@ export class NativeResourceAgent implements Agent {
     private readonly countedErrorHandler: CountedErrorHandler;
     private readonly pendingLookups = new Set<PendingLookup>();
     private wakeUp: (() => void) | null = null;
+    private isClosed = false;
 
     public constructor(ctx: MediaDriverContext) {
         this.nameResolver = new TimeTrackingNameResolver(
@@ -99,6 +100,13 @@ export class NativeResourceAgent implements Agent {
     }
 
     public onClose(): void {
+        // Issue #77: drop the pending look-ups. A callback that comes later completes nothing and wakes no one.
+        this.isClosed = true;
+        for (const lookup of this.pendingLookups) {
+            lookup.done = true;
+        }
+        this.pendingLookups.clear();
+
         this.nameResolver.onClose();
 
         let rawLog: RawLog | undefined;
@@ -199,6 +207,9 @@ export class NativeResourceAgent implements Agent {
             lookUpHost(
                 host,
                 () => {
+                    if (this.isClosed) {
+                        return; // the name resolver is closed (issue #77)
+                    }
                     // A failed lookup leaves the cache as it is: the resolution then ends as Java's does when the name
                     // cannot be resolved, an unresolved address.
                     this.completeReResolution(result, endpoint, uriParamName);
