@@ -27,7 +27,9 @@ import {
     Byte,
     ByteOrder,
     dataViewGetLong,
+    dataViewGetLongLE,
     dataViewSetLong,
+    dataViewSetLongLE,
     IllegalArgumentException,
     IndexOutOfBoundsException,
     Integer,
@@ -59,6 +61,9 @@ const {
 } = AsciiEncoding;
 const { ARRAY_BASE_OFFSET, NATIVE_BYTE_ORDER, NULL_BYTES } = BufferUtil;
 
+/** The `ByteOrder.LITTLE_ENDIAN` instance, read once (the native order is little endian, see `ByteOrder.nativeOrder`). */
+const IS_LITTLE_ENDIAN: ByteOrder = ByteOrder.LITTLE_ENDIAN;
+
 const UTF_8_ENCODER = new TextEncoder();
 // ignoreBOM: a leading U+FEFF is kept, as `new String(bytes, UTF_8)` does
 const UTF_8_DECODER = new TextDecoder('utf-8', { ignoreBOM: true });
@@ -71,6 +76,12 @@ const BUFFER_COPY = Buffer.prototype.copy as (
     sourceStart: number,
     sourceEnd: number,
 ) => number;
+
+/** The cold path of {@link AbstractMutableDirectBuffer.boundsCheck0}: `Objects.checkFromIndexSize` throws, as it did. */
+function throwOutOfBounds(index: number, length: number, capacity: number): never {
+    Objects.checkFromIndexSize(index, length, capacity);
+    throw new IndexOutOfBoundsException(`Range [${index}, ${index} + ${length}) out of bounds for length ${capacity}`);
+}
 
 function copyMemory(src: Uint8Array, srcOffset: number, dst: Uint8Array, dstOffset: number, length: number): void {
     BUFFER_COPY.call(src, dst, dstOffset, srcOffset, srcOffset + length);
@@ -167,88 +178,134 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
         this._byteArray.fill(value, offset, offset + length);
     }
 
-    public getLong(index: number, byteOrder: ByteOrder = NATIVE_BYTE_ORDER): number {
+    public getLong(index: number, byteOrder?: ByteOrder): number {
         if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_LONG);
         }
 
-        return dataViewGetLong(this._dataView, this._addressOffset + index, ByteOrder.LITTLE_ENDIAN === byteOrder);
+        // the omitted `byteOrder` is Java's `getLong(index)`: the native order, through the small little endian reader
+        if (undefined === byteOrder) {
+            return dataViewGetLongLE(this._dataView, this._addressOffset + index);
+        }
+
+        return dataViewGetLong(this._dataView, this._addressOffset + index, IS_LITTLE_ENDIAN === byteOrder);
     }
 
-    public getLongBigInt(index: number, byteOrder: ByteOrder = NATIVE_BYTE_ORDER): bigint {
+    public getLongBigInt(index: number, byteOrder?: ByteOrder): bigint {
         if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_LONG);
         }
 
-        return this._dataView.getBigInt64(this._addressOffset + index, ByteOrder.LITTLE_ENDIAN === byteOrder);
+        return this._dataView.getBigInt64(
+            this._addressOffset + index,
+            undefined === byteOrder || IS_LITTLE_ENDIAN === byteOrder,
+        );
     }
 
-    public putLong(index: number, value: number, byteOrder: ByteOrder = NATIVE_BYTE_ORDER): void {
+    public putLong(index: number, value: number, byteOrder?: ByteOrder): void {
         this.ensureCapacity(index, SIZE_OF_LONG);
 
-        dataViewSetLong(this._dataView, this._addressOffset + index, value, ByteOrder.LITTLE_ENDIAN === byteOrder);
+        if (undefined === byteOrder) {
+            dataViewSetLongLE(this._dataView, this._addressOffset + index, value);
+        } else {
+            dataViewSetLong(this._dataView, this._addressOffset + index, value, IS_LITTLE_ENDIAN === byteOrder);
+        }
     }
 
-    public putLongBigInt(index: number, value: bigint, byteOrder: ByteOrder = NATIVE_BYTE_ORDER): void {
+    public putLongBigInt(index: number, value: bigint, byteOrder?: ByteOrder): void {
         this.ensureCapacity(index, SIZE_OF_LONG);
 
-        this._dataView.setBigInt64(this._addressOffset + index, value, ByteOrder.LITTLE_ENDIAN === byteOrder);
+        this._dataView.setBigInt64(
+            this._addressOffset + index,
+            value,
+            undefined === byteOrder || IS_LITTLE_ENDIAN === byteOrder,
+        );
     }
 
-    public getInt(index: number, byteOrder: ByteOrder = NATIVE_BYTE_ORDER): number {
+    public getInt(index: number, byteOrder?: ByteOrder): number {
         if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_INT);
         }
 
-        return this._dataView.getInt32(this._addressOffset + index, ByteOrder.LITTLE_ENDIAN === byteOrder);
+        // Java has two overloads, `getInt(index)` and `getInt(index, byteOrder)`; the omitted `byteOrder` is the native
+        // order, a constant `true`, taken without loading `ByteOrder.LITTLE_ENDIAN` (issue #8)
+        return this._dataView.getInt32(
+            this._addressOffset + index,
+            undefined === byteOrder || IS_LITTLE_ENDIAN === byteOrder,
+        );
     }
 
-    public putInt(index: number, value: number, byteOrder: ByteOrder = NATIVE_BYTE_ORDER): void {
+    public putInt(index: number, value: number, byteOrder?: ByteOrder): void {
         this.ensureCapacity(index, SIZE_OF_INT);
 
-        this._dataView.setInt32(this._addressOffset + index, value, ByteOrder.LITTLE_ENDIAN === byteOrder);
+        this._dataView.setInt32(
+            this._addressOffset + index,
+            value,
+            undefined === byteOrder || IS_LITTLE_ENDIAN === byteOrder,
+        );
     }
 
-    public getDouble(index: number, byteOrder: ByteOrder = NATIVE_BYTE_ORDER): number {
+    public getDouble(index: number, byteOrder?: ByteOrder): number {
         if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_DOUBLE);
         }
 
-        return this._dataView.getFloat64(this._addressOffset + index, ByteOrder.LITTLE_ENDIAN === byteOrder);
+        return this._dataView.getFloat64(
+            this._addressOffset + index,
+            undefined === byteOrder || IS_LITTLE_ENDIAN === byteOrder,
+        );
     }
 
-    public putDouble(index: number, value: number, byteOrder: ByteOrder = NATIVE_BYTE_ORDER): void {
+    public putDouble(index: number, value: number, byteOrder?: ByteOrder): void {
         this.ensureCapacity(index, SIZE_OF_DOUBLE);
 
-        this._dataView.setFloat64(this._addressOffset + index, value, ByteOrder.LITTLE_ENDIAN === byteOrder);
+        this._dataView.setFloat64(
+            this._addressOffset + index,
+            value,
+            undefined === byteOrder || IS_LITTLE_ENDIAN === byteOrder,
+        );
     }
 
-    public getFloat(index: number, byteOrder: ByteOrder = NATIVE_BYTE_ORDER): number {
+    public getFloat(index: number, byteOrder?: ByteOrder): number {
         if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_FLOAT);
         }
 
-        return this._dataView.getFloat32(this._addressOffset + index, ByteOrder.LITTLE_ENDIAN === byteOrder);
+        return this._dataView.getFloat32(
+            this._addressOffset + index,
+            undefined === byteOrder || IS_LITTLE_ENDIAN === byteOrder,
+        );
     }
 
-    public putFloat(index: number, value: number, byteOrder: ByteOrder = NATIVE_BYTE_ORDER): void {
+    public putFloat(index: number, value: number, byteOrder?: ByteOrder): void {
         this.ensureCapacity(index, SIZE_OF_FLOAT);
 
-        this._dataView.setFloat32(this._addressOffset + index, value, ByteOrder.LITTLE_ENDIAN === byteOrder);
+        this._dataView.setFloat32(
+            this._addressOffset + index,
+            value,
+            undefined === byteOrder || IS_LITTLE_ENDIAN === byteOrder,
+        );
     }
 
-    public getShort(index: number, byteOrder: ByteOrder = NATIVE_BYTE_ORDER): number {
+    public getShort(index: number, byteOrder?: ByteOrder): number {
         if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_SHORT);
         }
 
-        return this._dataView.getInt16(this._addressOffset + index, ByteOrder.LITTLE_ENDIAN === byteOrder);
+        return this._dataView.getInt16(
+            this._addressOffset + index,
+            undefined === byteOrder || IS_LITTLE_ENDIAN === byteOrder,
+        );
     }
 
-    public putShort(index: number, value: number, byteOrder: ByteOrder = NATIVE_BYTE_ORDER): void {
+    public putShort(index: number, value: number, byteOrder?: ByteOrder): void {
         this.ensureCapacity(index, SIZE_OF_SHORT);
 
-        this._dataView.setInt16(this._addressOffset + index, value, ByteOrder.LITTLE_ENDIAN === byteOrder);
+        this._dataView.setInt16(
+            this._addressOffset + index,
+            value,
+            undefined === byteOrder || IS_LITTLE_ENDIAN === byteOrder,
+        );
     }
 
     public getByte(index: number): number {
@@ -322,18 +379,25 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
         }
     }
 
-    public getChar(index: number, byteOrder: ByteOrder = NATIVE_BYTE_ORDER): number {
+    public getChar(index: number, byteOrder?: ByteOrder): number {
         if (SHOULD_BOUNDS_CHECK) {
             this.boundsCheck0(index, SIZE_OF_CHAR);
         }
 
-        return this._dataView.getUint16(this._addressOffset + index, ByteOrder.LITTLE_ENDIAN === byteOrder);
+        return this._dataView.getUint16(
+            this._addressOffset + index,
+            undefined === byteOrder || IS_LITTLE_ENDIAN === byteOrder,
+        );
     }
 
-    public putChar(index: number, value: number, byteOrder: ByteOrder = NATIVE_BYTE_ORDER): void {
+    public putChar(index: number, value: number, byteOrder?: ByteOrder): void {
         this.ensureCapacity(index, SIZE_OF_CHAR);
 
-        this._dataView.setUint16(this._addressOffset + index, value, ByteOrder.LITTLE_ENDIAN === byteOrder);
+        this._dataView.setUint16(
+            this._addressOffset + index,
+            value,
+            undefined === byteOrder || IS_LITTLE_ENDIAN === byteOrder,
+        );
     }
 
     public getStringAscii(index: number): string;
@@ -977,7 +1041,12 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
     }
 
     protected boundsCheck0(index: number, length: number): void {
-        Objects.checkFromIndexSize(index, length, this._capacity);
+        const capacity = this._capacity;
+        // `Objects.checkFromIndexSize(index, length, capacity)` with the test inline: V8 inlines a callee of at most 460
+        // bytecode bytes and 920 in all, and the template string of the throw would otherwise count against the caller
+        if (index < 0 || length < 0 || length > capacity - index) {
+            throwOutOfBounds(index, length, capacity);
+        }
     }
 
     protected abstract ensureCapacity(index: number, length: number): void;

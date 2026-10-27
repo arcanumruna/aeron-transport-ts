@@ -291,6 +291,48 @@ three passed (0.982, 1.017, 0.999) and the resend bench failed (1.080). Because 
 T1, T4 and the merge do not change the resend path. A second 15-pair run of d08decb against `origin/main` gave 0.972.
 No step regresses, so the single 1.080 was noise.
 
+### UnsafeBuffer int accessors (issue #8)
+
+`npm run bench:micro -- --file unsafebuffer`, 2026-10-26, Node v22.22.0, same host (4 cores, shared with other builds, so
+indicative only). One operation of the first two benches is 16 `putInt` and 16 `getInt` at distinct indices with the
+default `byteOrder`; the other two are `TermRebuilder.insert` of a 32 byte frame (9 `getInt`, 8 `putInt`, one release
+store). Median of 6 runs each, base and candidate interleaved (ABAB), ns per operation. The base is the tree before the
+fix: `boundsCheck0` called `Objects.checkFromIndexSize` (a template string in its throw, counted against the inlining
+budget of every caller), and `byteOrder` was a default parameter compared with `ByteOrder.LITTLE_ENDIAN`. The candidate
+tests the bounds inline, throws from a cold function, and takes an omitted `byteOrder` as the native order without
+loading it (Java has the two overloads).
+
+| Bench                                                  | base ns/op | candidate ns/op | ratio |
+| ------------------------------------------------------ | ---------- | --------------- | ----- |
+| UnsafeBuffer 16 putInt + 16 getInt (ArrayBuffer)       | 137.2      | 78.6            | 0.57  |
+| UnsafeBuffer 16 putInt + 16 getInt (SharedArrayBuffer) | 180.4      | 81.5            | 0.45  |
+| TermRebuilder.insert 32 B (ArrayBuffer)                | 118.7      | 94.3            | 0.79  |
+| TermRebuilder.insert 32 B (SharedArrayBuffer)          | 133.8      | 110.0           | 0.82  |
+
+### UnsafeBuffer long operations (issue #19)
+
+`npm run bench:micro -- --file unsafebuffer`, 2026-10-26, Node v22.22.0, same host, median of 6 runs each, base and candidate
+interleaved (ABAB), ns per operation. One operation is 8 `putLongRelease` + 8 `getLongVolatile`, 8 `getAndAddLong` or 8
+`compareAndSetLong` on words of about 2^40, in a process that has run both backings. The base is the tree before the fix: each
+`long` method was a dispatcher over a striped body and a plain body, each over helpers. The candidate is one function for
+`getLongVolatile` and `putLongVolatile` (their aliases are the same function objects) and a dispatcher over two flat bodies for
+the others.
+
+| Bench                                                            | base ns/op | candidate ns/op | ratio |
+| ---------------------------------------------------------------- | ---------- | --------------- | ----- |
+| 8 putLongRelease + 8 getLongVolatile at 2^40 (ArrayBuffer)       | 104.8      | 97.9            | 0.93  |
+| 8 putLongRelease + 8 getLongVolatile at 2^40 (SharedArrayBuffer) | 639.6      | 596.9           | 0.93  |
+| 8 getAndAddLong at 2^40 (ArrayBuffer)                            | 76.9       | 74.7            | 0.97  |
+| 8 getAndAddLong at 2^40 (SharedArrayBuffer)                      | 338.7      | 304.3           | 0.90  |
+| 8 compareAndSetLong at 2^40 (ArrayBuffer)                        | 89.6       | 79.6            | 0.89  |
+| 8 compareAndSetLong at 2^40 (SharedArrayBuffer)                  | 375.9      | 322.3           | 0.86  |
+
+The hot paths that call them do not get slower (candidate / base of the median ns/op, ABAB): OneToOneRingBuffer write+read
+0.96 and tryClaim+commit+read 1.00 (10 runs); ManyToOneRingBuffer write+read 0.97 (10) and tryClaim+commit+read 1.00 (15);
+BroadcastTransmitter + receiveNext 0.99 and + CopyBroadcastReceiver 0.99 (8); ConcurrentPublication offer 0.99 and tryClaim +
+commit 0.99 (15); Image poll 1.00 and controlledPoll 0.99 (8). A first run of 5 to 8 pairs of some of these gave up to 1.08 and
+1.05, and 10 to 15 pairs gave the figures above: on this shared host fewer than 10 pairs does not settle a 5% difference.
+
 ### Receiver (T16)
 
 `bench/micro/receiver.bench.ts`: `Receiver.doWork` on a real `PublicationImage` over an in-memory log (`SharedArrayBuffer`),

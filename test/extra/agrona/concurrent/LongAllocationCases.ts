@@ -1,10 +1,12 @@
 // The cases of the 2^40 allocation tests (spec D16), shared by the two files that run them, one per backing.
 //
 // Values around 2^40 are heap numbers whenever they cross a call that is not inlined (spec 5.3), so these cases test
-// that the compact, inlined bodies of D16 really are inlined. V8 inlines at most 920 bytecode bytes into a function,
-// and a dispatcher such as `getAndAddLong` that has run on BOTH backings inlines both bodies, which does not fit. So
-// each backing is measured in its own test file (its own module instances and type feedback), and each body below does
-// ONE kind of operation, with the buffer primed outside it, as the hot callers in the port are.
+// that the compact, inlined bodies of D16 really are inlined. V8 inlines at most 920 bytecode bytes into a function.
+// The `long` methods of UnsafeBuffer are written to fit with both backings in the process (issue #19): the two files
+// here measure each backing in its own module instances, and test/extra/agrona/LongLargePositionAllocationTest measures
+// every operation after both backings have run, which is the state of a process that has a counters buffer over a
+// SharedArrayBuffer next to plain ones. Each body below does ONE kind of operation, with the buffer primed outside it,
+// as the hot callers in the port are.
 import { UnsafeBuffer } from '../../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { LogBufferDescriptor } from '../../../../src/client/logbuffer/LogBufferDescriptor.js';
 

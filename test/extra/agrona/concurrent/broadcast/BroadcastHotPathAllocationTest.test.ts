@@ -24,10 +24,12 @@ const LARGE_POSITION = 2 ** 40;
 type Case = 'transmitAndReceiveNext' | 'transmitAndCopyReceive';
 
 /**
- * Interim allowances of the `LargePosition` cases: the heap numbers per iteration (transmit + receive) that a case may
- * allocate. Measured: about 5 and 6 times the control loop over an ArrayBuffer and 3 and 6 over a SharedArrayBuffer,
- * so the allowance is 6. They are caused by the `long` paths of `jdk.ts` and `UnsafeBuffer`, which box a position
- * above 2^31 across calls that are not inlined (issue #19, heap numbers at large positions).
+ * Upper bounds of the `LargePosition` cases (spec D127): the heap numbers per iteration (transmit + receive) that a case
+ * may allocate. Measured, in the order of this file: 4 and 5 times the control loop over an ArrayBuffer and 5 over a
+ * SharedArrayBuffer (alone, the same loops measure 2 and 4, and 1 and 2: V8's inlining depends on what ran before), so
+ * the allowance is 6. `transmit` and `receive` call several `long` operations of `UnsafeBuffer` of 370 to 600 bytecode
+ * bytes each, and V8 inlines 920 in all, so the ones that are not inlined box the position they take or return (issue
+ * #19).
  */
 const LARGE_POSITION_HEAP_NUMBERS: Readonly<Record<Case, number>> = {
     transmitAndReceiveNext: 6,
