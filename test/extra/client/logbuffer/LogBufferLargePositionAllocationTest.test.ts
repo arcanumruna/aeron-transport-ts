@@ -206,21 +206,32 @@ describe.each([
             expect(sum[0]).not.toBeNaN();
         });
 
-        it(title('headerPositionAndWriter'), async () => {
+        it(title('headerPosition'), async () => {
             exerciseEverything();
             const term = filledTerm(backing, termId);
             const header = new Header(0, SHIFT).buffer(term);
-            const meta = new UnsafeBuffer(backing.arrayBuffer(LogBufferDescriptor.LOG_META_DATA_LENGTH));
-            LogBufferDescriptor.storeDefaultFrameHeader(meta, DataHeaderFlyweight.createDefaultHeader(1, 2, 3));
-            const writer = new HeaderWriter(LogBufferDescriptor.defaultFrameHeader(meta));
             await expectNoAllocation((n) => {
                 let acc = 0;
                 for (let i = 0; i < n; i++) {
                     header.offset(0);
                     acc += header.position() + header.termId();
-                    writer.write(term, 4096 + (i & 15) * 64, 64, termId);
                 }
                 sum[0] = acc;
+            }, ITERATIONS);
+            expect(sum[0]).not.toBeNaN();
+        });
+
+        it(title('headerWriter'), async () => {
+            exerciseEverything();
+            const term = filledTerm(backing, termId);
+            const meta = new UnsafeBuffer(backing.arrayBuffer(LogBufferDescriptor.LOG_META_DATA_LENGTH));
+            LogBufferDescriptor.storeDefaultFrameHeader(meta, DataHeaderFlyweight.createDefaultHeader(1, 2, 3));
+            const writer = new HeaderWriter(LogBufferDescriptor.defaultFrameHeader(meta));
+            await expectNoAllocation((n) => {
+                for (let i = 0; i < n; i++) {
+                    writer.write(term, 4096 + (i & 15) * 64, 64, termId);
+                }
+                sum[0] = termId;
             }, ITERATIONS);
             expect(sum[0]).not.toBeNaN();
         });
