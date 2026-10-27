@@ -3036,6 +3036,7 @@ class CreatePublicationImageCommand extends Command {
             if (CreatePublicationImageState.VALIDATE === this.state) {
                 Configuration.validateMtuLength(this.senderMtuLength);
                 LogBufferDescriptor.checkTermLength(this.termBufferLength);
+                this.validateJoinPosition();
 
                 const subscriptionParams = SubscriptionParams.getSubscriptionParams(
                     this.channelEndpoint.subscriptionUdpChannel().channelUri(),
@@ -3085,6 +3086,29 @@ class CreatePublicationImageCommand extends Command {
         } catch (ex) {
             c.receiverProxy.removeInitInProgress(this.channelEndpoint, this.sessionId, this.streamId);
             throw ex;
+        }
+    }
+
+    /**
+     * Rejects a SETUP whose position is over the position cap before any log is allocated (spec D128): the position
+     * `computePosition` would throw for (D5) in `newPublicationImage` and in the `PublicationImage` constructor, after
+     * the log was allocated, so every periodic SETUP would allocate and free a log and record an error.
+     */
+    private validateJoinPosition(): void {
+        const termCount = (this.activeTermId - this.initialTermId) | 0;
+        const position = termCount * this.termBufferLength + this.termOffset;
+        const maxPosition = LogBufferDescriptor.maxPossiblePosition(this.termBufferLength);
+        if (position > maxPosition || position < -maxPosition) {
+            throw new IllegalArgumentException(
+                'SETUP position over the position cap: initialTermId=' +
+                    this.initialTermId +
+                    ' activeTermId=' +
+                    this.activeTermId +
+                    ' termOffset=' +
+                    this.termOffset +
+                    ' termLength=' +
+                    this.termBufferLength,
+            );
         }
     }
 

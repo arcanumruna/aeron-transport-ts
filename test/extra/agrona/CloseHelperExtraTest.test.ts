@@ -19,6 +19,19 @@ function closeable(error?: Error): AutoCloseable & { close: ReturnType<typeof vi
 }
 
 describe('CloseHelperExtra', () => {
+    it('closeAllClosesACloseableThatHasOnErrorAndTheOthersAfterIt Regression', () => {
+        // Issue #62: a context is closeable and has onError(Throwable); as the first argument it is a closeable, as Java's
+        // overload closeAll(AutoCloseable...) is chosen by the static type
+        const ctx = { onError: vi.fn(), close: vi.fn() };
+        const other = closeable();
+
+        CloseHelper.closeAll(ctx as unknown as AutoCloseable, other);
+
+        expect(ctx.close).toHaveBeenCalledTimes(1);
+        expect(other.close).toHaveBeenCalledTimes(1);
+        expect(ctx.onError).not.toHaveBeenCalled();
+    });
+
     it('quietCloseIgnoresNullsAndExceptions', () => {
         const ok = closeable();
         const failing = closeable(new RuntimeException('x'));
@@ -107,16 +120,16 @@ describe('CloseHelperExtra', () => {
         CloseHelper.close(null, null);
     });
 
-    it('closeAllWithAnErrorHandlerReportsEveryExceptionAndClosesEveryone', () => {
+    it('closeAllWithReportsEveryExceptionAndClosesEveryone', () => {
         const handler = mockErrorHandler();
         const one = new RuntimeException('one');
         const two = new RuntimeException('two');
         const closeables = [closeable(one), closeable(), closeable(two)];
 
-        CloseHelper.closeAll(handler, closeables);
-        CloseHelper.closeAll(handler, closeables[1]!, null);
-        CloseHelper.closeAll(handler, null);
-        CloseHelper.closeAll(handler);
+        CloseHelper.closeAllWith(handler, closeables);
+        CloseHelper.closeAllWith(handler, closeables[1]!, null);
+        CloseHelper.closeAllWith(handler, null);
+        CloseHelper.closeAllWith(handler);
 
         expect(handler.onError.mock.calls).toEqual([[one], [two]]);
         expect(closeables[1]!.close).toHaveBeenCalledTimes(2);
@@ -143,8 +156,8 @@ describe('CloseHelperExtra', () => {
         const handler = new CountedErrorHandler(delegate, counter);
         const closeables = [closeable(reported), closeable()];
 
-        CloseHelper.closeAll(handler, closeables);
-        CloseHelper.closeAll(handler, closeables[1]!);
+        CloseHelper.closeAllWith(handler, closeables);
+        CloseHelper.closeAllWith(handler, closeables[1]!);
 
         expect(handler.isClosed()).toBe(false);
         expect(closeables[0]!.close).toHaveBeenCalledTimes(1);
@@ -161,6 +174,19 @@ describe('CloseHelperExtra', () => {
         CloseHelper.closeAll(handler);
 
         expect(handler.isClosed()).toBe(true);
+    });
+
+    it('closeAllWithANullHandlerClosesEveryoneThenThrowsANullPointerExceptionWithTheExceptionsSuppressed', () => {
+        const one = new RuntimeException('one');
+        const two = new RuntimeException('two');
+        const closeables = [closeable(one), closeable(), closeable(two)];
+
+        const thrown = assertThrows(NullPointerException, () => CloseHelper.closeAllWith(null, closeables));
+
+        expect(thrown.message).toBe('errorHandler is null');
+        expect(getSuppressed(thrown)).toEqual([one, two]);
+        expect(closeables[2]!.close).toHaveBeenCalledTimes(1);
+        CloseHelper.closeAllWith(undefined, closeable());
     });
 
     it('closeAllClosesACloseableWhoseOnErrorTakesMoreThanTheThrowable Regression', () => {

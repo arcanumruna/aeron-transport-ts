@@ -593,3 +593,11 @@ export class CountersReader {
         return this._labelCharset.decode(stringInBytes);
     }
 }
+
+type MetaDataType = MetaData;
+
+// Declaration merging: `CountersReader.MetaData` is a type, as the nested Java interface is.
+// eslint-disable-next-line @typescript-eslint/no-namespace
+export namespace CountersReader {
+    export type MetaData = MetaDataType;
+}

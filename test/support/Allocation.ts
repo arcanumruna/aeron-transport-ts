@@ -8,6 +8,7 @@ import { PerformanceObserver, constants } from 'node:perf_hooks';
 import v8 from 'node:v8';
 import { expect, vi } from 'vitest';
 import vm from 'node:vm';
+import { Session } from 'node:inspector/promises';
 
 // A calibrated test runs the control until it has resolution and then the loop up to MAX_ATTEMPTS times; on a loaded
 // host that can pass the 10 s default, which would turn a retry that rescued the test into a timeout. Under full-suite
@@ -19,6 +20,7 @@ const gc = vm.runInNewContext('gc') as () => void;
 v8.setFlagsFromString('--allow-natives-syntax');
 const prepareForOptimization = new Function('f', '%PrepareFunctionForOptimization(f);') as (f: unknown) => void;
 const optimizeOnNextCall = new Function('f', '%OptimizeFunctionOnNextCall(f);') as (f: unknown) => void;
+const optimizationStatus = new Function('f', 'return %GetOptimizationStatus(f);') as (f: unknown) => number;
 
 export const ITERATIONS = 2_000_000;
 const WARM_UP = 100_000;
@@ -38,7 +40,7 @@ const MAX_SETTLE_ROUNDS = 40;
  * iterations that causes no minor collection means the optimized code is the code that runs. The wait is bounded by
  * rounds, not by time, and a loop that really allocates is never quiet: it goes on to the measurement, which fails it.
  */
-async function settleUntilQuiet(run: (iterations: number) => void, warmUp: number): Promise<void> {
+async function settleUntilQuiet(run: (iterations: number) => void, warmUp: number): Promise<number> {
     for (let round = 0; round < MAX_SETTLE_ROUNDS; round++) {
         await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
         const observer = new PerformanceObserver(() => {});
@@ -52,9 +54,10 @@ async function settleUntilQuiet(run: (iterations: number) => void, warmUp: numbe
             .filter((e) => (e as unknown as Collection).detail?.kind === constants.NODE_PERFORMANCE_GC_MINOR).length;
         observer.disconnect();
         if (0 === collections) {
-            return;
+            return round;
         }
     }
+    return MAX_SETTLE_ROUNDS;
 }
 
 /**
@@ -68,7 +71,7 @@ export async function measure(
     run: (iterations: number) => void,
     iterations: number,
     settle = false,
-): Promise<{ collections: number; heapGrowth: number }> {
+): Promise<{ collections: number; heapGrowth: number; detail: string }> {
     const warmUp = Math.min(WARM_UP, Math.max(1_000, iterations >> 3));
     // Force a synchronous TurboFan compile of `run` before it is measured. Left to the JIT, the loop tiers up through
     // Maglev and on-stack replacement on a background thread: on a loaded host (vitest runs the test files in parallel)
@@ -80,9 +83,8 @@ export async function measure(
     run(warmUp);
     optimizeOnNextCall(run);
     run(warmUp);
-    if (settle) {
-        await settleUntilQuiet(run, warmUp);
-    }
+    const statusAfterCompile = optimizationStatus(run);
+    const settleRounds = settle ? await settleUntilQuiet(run, warmUp) : 0;
 
     const observer = new PerformanceObserver(() => {});
     observer.observe({ entryTypes: ['gc'] });
@@ -102,7 +104,10 @@ export async function measure(
         .takeRecords()
         .filter((e) => (e as unknown as Collection).detail?.kind === constants.NODE_PERFORMANCE_GC_MINOR).length;
     observer.disconnect();
-    return { collections, heapGrowth };
+    // the optimization status (a %GetOptimizationStatus bit field) after the forced compile and after the measured run,
+    // so that a failure under load says which tier the loop ran in (issue #46)
+    const detail = `status 0x${statusAfterCompile.toString(16)}/0x${optimizationStatus(run).toString(16)}, settle ${settleRounds}`;
+    return { collections, heapGrowth, detail };
 }
 
 let boxed = 0;
@@ -113,6 +118,57 @@ export function control(n: number): number {
         boxed = i + 0.5;
     }
     return boxed;
+}
+
+type ProfileNode = {
+    callFrame: { functionName: string; url: string; lineNumber: number };
+    selfSize: number;
+    children: ProfileNode[];
+};
+
+/** How many allocation sites a failure names. */
+const MAX_SITES = 8;
+
+/**
+ * The call sites that allocated most while `run(iterations)` ran, from V8's sampling heap profiler, garbage included,
+ * so that an allocation failure names where the loop allocates (a failure seen only on CI cannot be profiled locally).
+ * Each site is its innermost three frames and the sampled bytes.
+ */
+async function allocationSites(run: (iterations: number) => void, iterations: number): Promise<string> {
+    const session = new Session();
+    session.connect();
+    try {
+        await session.post('HeapProfiler.enable');
+        await session.post('HeapProfiler.startSampling', {
+            samplingInterval: 512,
+            includeObjectsCollectedByMajorGC: true,
+            includeObjectsCollectedByMinorGC: true,
+        });
+        run(iterations);
+        const { profile } = (await session.post('HeapProfiler.stopSampling')) as { profile: { head: ProfileNode } };
+        const sites = new Map<string, number>();
+        const walk = (node: ProfileNode, stack: string[]): void => {
+            const f = node.callFrame;
+            const frame = `${f.functionName || '(anonymous)'} ${f.url.split('/').pop() ?? ''}:${f.lineNumber + 1}`;
+            const frames = [...stack, frame];
+            if (node.selfSize > 0) {
+                const site = frames.slice(-3).reverse().join(' < ');
+                sites.set(site, (sites.get(site) ?? 0) + node.selfSize);
+            }
+            for (const child of node.children) {
+                walk(child, frames);
+            }
+        };
+        walk(profile.head, []);
+        return [...sites]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, MAX_SITES)
+            .map(([site, bytes]) => `${bytes} B at ${site}`)
+            .join('; ');
+    } finally {
+        await session.post('HeapProfiler.disable');
+        session.disconnect();
+    }
 }
 
 const MAX_CALIBRATED_ITERATIONS = 32_000_000;
@@ -145,13 +201,17 @@ async function minimumCollections(
 ): Promise<number> {
     let minimum = Infinity;
     for (let attempt = 0; attempt < MAX_ATTEMPTS && minimum > bound; attempt++) {
-        const { collections, heapGrowth } = await measure(run, n, bound <= 1);
+        const { collections, heapGrowth, detail } = await measure(run, n, bound <= 1);
         // the detail of every attempt goes into the failure message (issue #42): a flake under load names its numbers
-        attempts.push(`#${attempt + 1}: ${collections} collections, heap growth ${heapGrowth} B`);
+        attempts.push(`#${attempt + 1}: ${collections} collections, heap growth ${heapGrowth} B, ${detail}`);
         if (collections > bound && heapGrowth > retainedGrowth) {
+            attempts.push(`allocation sites: ${await allocationSites(run, n)}`);
             return collections;
         }
         minimum = Math.min(minimum, collections);
+    }
+    if (minimum > bound) {
+        attempts.push(`allocation sites: ${await allocationSites(run, n)}`);
     }
     return minimum;
 }

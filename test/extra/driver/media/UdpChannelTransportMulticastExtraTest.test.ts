@@ -5,7 +5,7 @@
 // socket to the group address, where the kernel does the filtering (IPv4, and IPv6 with the scope of the interface for a
 // link-local group). Linux only: elsewhere node's sockets already filter (macOS) or cannot bind a group (Windows).
 import dgram from 'node:dgram';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { UnsafeBuffer } from '../../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { InetSocketAddress } from '../../../../src/driver/jdkNet.js';
 import { MediaDriver } from '../../../../src/driver/MediaDriver.js';
@@ -56,7 +56,7 @@ function listening(socket: dgram.Socket): Promise<void> {
 }
 
 /** Whether this host passes IPv6 multicast over `lo`: a datagram to a group is received by a socket that joined it. */
-async function ipv6MulticastWorks(): Promise<boolean> {
+async function ipv6MulticastWorks(interfaceName = 'lo'): Promise<boolean> {
     if (!IS_LINUX) {
         return false;
     }
@@ -69,10 +69,10 @@ async function ipv6MulticastWorks(): Promise<boolean> {
         receiver.on('message', () => (got = true));
         receiver.bind(0);
         await listening(receiver);
-        receiver.addMembership('ff05::11:77', '::%lo');
+        receiver.addMembership('ff05::11:77', '::%' + interfaceName);
         sender.bind(0);
         await listening(sender);
-        sender.setMulticastInterface('::%lo');
+        sender.setMulticastInterface('::%' + interfaceName);
         sender.setMulticastLoopback(true);
         sender.send('x', receiver.address().port, 'ff05::11:77');
         await waitUntilTurns(() => got, 'the probe datagram', 50_000);
@@ -86,6 +86,15 @@ async function ipv6MulticastWorks(): Promise<boolean> {
 }
 
 const ipv6Works = await ipv6MulticastWorks();
+// the interface that a channel without `interface=` gets (issue #61): IPv6 multicast must work over it for those rows
+const defaultInterfaceName = IS_LINUX
+    ? (UdpChannel.parse('aeron:udp?endpoint=[ff02::11:87]:' + PORT)
+          .localInterface()
+          ?.getName() ?? null)
+    : null;
+const ipv6WorksOverDefaultInterface =
+    null !== defaultInterfaceName &&
+    ('lo' === defaultInterfaceName ? ipv6Works : await ipv6MulticastWorks(defaultInterfaceName));
 
 const noPortManager: PortManager = {
     getManagedPort: (_channel, address) => address,
@@ -101,10 +110,14 @@ class TestTransport extends UdpChannelTransport {
 let context: MediaDriver.Context;
 let transports: TestTransport[];
 
-function open(family: Family, group: string): TestTransport {
+function open(family: Family, group: string, withInterface = true): TestTransport {
     const transport = new TestTransport(
         UdpChannel.parse(
-            'aeron:udp?endpoint=' + family.endpoint(group) + ':' + PORT + '|interface=' + family.interface,
+            'aeron:udp?endpoint=' +
+                family.endpoint(group) +
+                ':' +
+                PORT +
+                (withInterface ? '|interface=' + family.interface : ''),
         ),
         context,
     );
@@ -146,6 +159,15 @@ afterEach(() => {
 const IPV6_SKIP = 'IPv6 multicast over lo does not work on this host';
 
 describe.skipIf(!IS_LINUX)('multicast transports on one port', () => {
+    // Issue #64: the IPv6 rows below skip on a host without IPv6 multicast; CI sets REQUIRE_IPV6_MULTICAST=1 so that the
+    // skip is a failure there (`scripts/multicast-probe.mjs` has the same rule).
+    it.runIf('1' === process.env['REQUIRE_IPV6_MULTICAST'])(
+        'ipv6MulticastIsAvailableWhenTheHostIsRequiredToHaveIt Regression',
+        () => {
+            expect(ipv6Works, 'REQUIRE_IPV6_MULTICAST=1 but ' + IPV6_SKIP).toBe(true);
+        },
+    );
+
     const cases: [Family, boolean][] = [
         [IPV4, true],
         [IPV6, ipv6Works],
@@ -213,6 +235,46 @@ describe.skipIf(!IS_LINUX)('multicast transports on one port', () => {
 
         it.skipIf(!IS_LINUX)('isTheWildcardForALinkLocalGroupWithoutAnInterface Regression', () => {
             expect(bindHostOf('[ff02::11:87]', undefined)).toBeNull();
+        });
+    });
+    // Issue #61: a multicast channel always has an interface (`UdpChannel.parse` resolves one, D134 withdrawn), and the
+    // transport resolves it once, so that the receive bind, the join and the send use the same one.
+    describe('a link-local group of a channel without an interface', () => {
+        afterEach(() => {
+            vi.restoreAllMocks();
+        });
+
+        it.skipIf(!IS_LINUX)('resolvesTheMulticastInterfaceOncePerTransport Regression', () => {
+            // IPv4 group: the bind, the join and the send of an open all ask for the interface of the channel
+            const channel = UdpChannel.parse('aeron:udp?endpoint=' + IPV4.groupA + ':' + PORT);
+            const lookup = vi.spyOn(channel, 'localInterface');
+            const transport = new TestTransport(channel, context);
+            transports.push(transport);
+
+            transport.openDatagramChannel(null);
+            const privateOf = transport as unknown as { multicastInterface(): string | undefined };
+            privateOf.multicastInterface();
+
+            expect(lookup).toHaveBeenCalledTimes(1);
+        });
+
+        it.skipIf(!IS_LINUX)('doesNotSeeTheDatagramsOfAnotherGroupOnThePort Regression', async () => {
+            if (!ipv6WorksOverDefaultInterface) {
+                if ('1' === process.env['REQUIRE_IPV6_MULTICAST']) {
+                    throw new Error(
+                        'REQUIRE_IPV6_MULTICAST=1 but IPv6 multicast does not work over the default interface ' +
+                            String(defaultInterfaceName),
+                    );
+                }
+                return;
+            }
+            const a = open(IPV6_LINK_LOCAL, IPV6_LINK_LOCAL.groupA, false);
+            const b = open(IPV6_LINK_LOCAL, IPV6_LINK_LOCAL.groupB, false);
+
+            a.sendTo(bufferOf('to b'), 0, 4, new InetSocketAddress(IPV6_LINK_LOCAL.groupB, PORT));
+            expect(await receiveText(b)).toBe('to b');
+            a.sendTo(bufferOf('to a'), 0, 4, new InetSocketAddress(IPV6_LINK_LOCAL.groupA, PORT));
+            expect(await receiveText(a)).toBe('to a');
         });
     });
 });

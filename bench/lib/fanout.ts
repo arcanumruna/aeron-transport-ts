@@ -9,6 +9,9 @@
 //   mdc-manual N   1 publication `control-mode=manual` with N destinations added with `addDestination`, N subscriber nodes
 //   mds 2          1 subscription `control-mode=manual` with 2 destinations, 2 publications on node A (one for each
 //                  destination, same stream), the offers alternating between them
+//   mds-merge 2    1 subscription `control-mode=manual` with 2 destinations and ONE publication `control-mode=manual`
+//                  with the same 2 destinations added: every message arrives over both transports and the image merges the
+//                  two paths, dropping the duplicates (the cost the `mds` scenario does not have)
 //
 // Every multicast and MDC publication has `fc=min,g:/N` (the interop rows of D116 use the same), so that the stream starts
 // when all N receivers are counted and the slowest receiver paces it. A latency sample is the time from `offer` to the
@@ -25,7 +28,7 @@ const STREAM_ID = 1003;
 const TERM_LENGTH = 1 << 20;
 export const MULTICAST_GROUP = '224.20.30.39';
 
-export type FanoutKind = 'unicast' | 'multicast' | 'mdc-dynamic' | 'mdc-manual' | 'mds';
+export type FanoutKind = 'unicast' | 'multicast' | 'mdc-dynamic' | 'mdc-manual' | 'mds' | 'mds-merge';
 
 export interface FanoutScenario {
     kind: FanoutKind;
@@ -44,6 +47,7 @@ export const FANOUT_SCENARIOS: readonly FanoutScenario[] = [
     { kind: 'mdc-manual', count: 2, name: 'MDC manual, 2 destinations' },
     { kind: 'mdc-manual', count: 4, name: 'MDC manual, 4 destinations' },
     { kind: 'mds', count: 2, name: 'MDS, 2 destinations' },
+    { kind: 'mds-merge', count: 2, name: 'MDS, 1 session merged over 2 destinations' },
 ];
 
 export class Fanout {
@@ -88,7 +92,8 @@ export class Fanout {
 
     private async connect(): Promise<void> {
         const { kind, count } = this.scenario;
-        const fc = '|fc=min,g:/' + count + '|term-length=' + TERM_LENGTH;
+        // the receivers of `mds-merge` are one: the two transports of the subscription share an endpoint and its receiver id
+        const fc = '|fc=min,g:/' + ('mds-merge' === kind ? 1 : count) + '|term-length=' + TERM_LENGTH;
         switch (kind) {
             case 'unicast': {
                 const port = await freePort();
@@ -154,6 +159,21 @@ export class Fanout {
                     this.publications.push(
                         this.a.aeron.addPublication(endpoint + '|term-length=' + TERM_LENGTH, STREAM_ID) as Publication,
                     );
+                }
+                break;
+            }
+            case 'mds-merge': {
+                this.subscribers.push(new Node());
+                const subscription = this.newSubscription(this.subscribers[0] as Node, 'aeron:udp?control-mode=manual');
+                const publication = this.a.aeron.addPublication(
+                    'aeron:udp?control-mode=manual' + fc,
+                    STREAM_ID,
+                ) as Publication;
+                this.publications.push(publication);
+                for (let i = 0; i < count; i++) {
+                    const endpoint = 'aeron:udp?endpoint=127.0.0.1:' + (await freePort());
+                    subscription.addDestination(endpoint);
+                    publication.addDestination(endpoint);
                 }
                 break;
             }

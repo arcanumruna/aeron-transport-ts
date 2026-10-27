@@ -53,6 +53,8 @@ const { NamedInterface } = await import('../../../src/driver/media/NamedInterfac
 
 describe('T8OsKillExtraTest', () => {
     it('M30 mapsTheFlagsAndPrefixes', () => {
+        // the flags files of the host belong to its own interfaces, not to the interfaces that `os` is mocked to list
+        NetworkInterface.flagsDirectory = null;
         const all = NetworkInterface.getNetworkInterfaces();
         expect(all.map((i) => i.getName())).toEqual(['lo', 'eth9']);
         const [lo, eth9] = all;

@@ -324,6 +324,9 @@ describe.skipIf(!interopAvailable)(
                 expectNoErrors(node);
             });
 
+            // Issue #51: failed once in 30 runs, straight after a full vitest run, and was not reproduced in 14 runs under
+            // CPU load (a parallel system run, six busy loops on four cores). The cause is unknown. If it fails again,
+            // `env.dispose` prints what every child said (the C driver's error log, the subscriber's events): attach it to #51.
             it('aPublicationThatClosesEndsTheImageWithTheEndOfStreamAndANewOneStartsAnother', async () => {
                 const first = 800;
                 const second = 800;

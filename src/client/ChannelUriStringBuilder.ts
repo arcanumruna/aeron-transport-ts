@@ -1248,7 +1248,7 @@ export class ChannelUriStringBuilder {
 
         this._initialTermId = initialTermId;
         this._termId = LogBufferDescriptor.computeTermIdFromPosition(position, bitsToShift, initialTermId);
-        this._termOffset = Long.and(position, termLength - 1) | 0;
+        this._termOffset = LogBufferDescriptor.termOffsetByPosition(position, termLength);
         this._termLength = termLength;
 
         return this;

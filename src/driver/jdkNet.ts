@@ -17,6 +17,7 @@
  */
 // JDK stand-ins for java.net (spec D20): InetAddress, Inet4Address, Inet6Address, InetSocketAddress, InterfaceAddress,
 // NetworkInterface, ProtocolFamily and the exceptions the driver's address code throws and catches.
+import { readFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { Exception, IllegalArgumentException, Integer } from '../agrona/jdk.js';
 import { stringHashCode } from '../agrona/jdkUtil.js';
@@ -822,11 +823,30 @@ export interface NetworkInterfaceFlags {
     readonly multicast: boolean;
 }
 
+/** `IFF_UP` of `<net/if.h>`. */
+const IFF_UP = 0x1;
+/** `IFF_LOOPBACK` of `<net/if.h>`. */
+const IFF_LOOPBACK = 0x8;
+/** `IFF_MULTICAST` of `<net/if.h>`. */
+const IFF_MULTICAST = 0x1000;
+
 /**
  * Stand-in for `java.net.NetworkInterface`, built from `os.networkInterfaces()` (which lists the interfaces that are up
- * and have an address; `supportsMulticast` is true for every interface that is not internal, as Node reports no flag).
+ * and have an address, and gives no multicast flag).
+ * <p>
+ * On Linux the flags are those of `/sys/class/net/<name>/flags` (`IFF_UP`, `IFF_LOOPBACK`, `IFF_MULTICAST`), and
+ * `isUp` is `IFF_UP` and running. The sysfs flags never include `IFF_RUNNING`, so it is emulated from
+ * `/sys/class/net/<name>/carrier` (`1` is running) and, when the carrier cannot be read (it is not readable for an
+ * interface without a link, and `lo` has none), from `operstate` (`up` and `unknown` are running); when neither can be
+ * read the interface counts as running (spec D133). Only interfaces that have at least one address are listed, as the
+ * JDK lists them. Elsewhere, or when the flags file cannot be read, `supportsMulticast` is true for every interface
+ * that is not internal; on macOS also for the loopback interface, as Java reports for `lo0`. {@link flagsDirectory} is
+ * the override: another directory of `<name>/flags` files, or null for the approximation only.
  */
 export class NetworkInterface {
+    /** The directory of the per interface `flags` files of Linux; null to use the approximation of Node's data only. */
+    public static flagsDirectory: string | null = 'linux' === process.platform ? '/sys/class/net' : null;
+
     private readonly name: string;
     private readonly displayName: string;
     private readonly addresses: readonly InterfaceAddress[];
@@ -870,12 +890,63 @@ export class NetworkInterface {
             }
 
             const isInternal = entries[0]?.internal === true;
-            result.push(
-                new NetworkInterface(name, name, list, { loopback: isInternal, up: true, multicast: !isInternal }),
-            );
+            const approximation: NetworkInterfaceFlags = {
+                loopback: isInternal,
+                up: true,
+                multicast: !isInternal || 'darwin' === process.platform,
+            };
+            result.push(new NetworkInterface(name, name, list, NetworkInterface.readFlags(name) ?? approximation));
         }
 
         return result;
+    }
+
+    /** The flags of the interface from the file of {@link flagsDirectory}; null when there is none or it is not hex. */
+    private static readFlags(name: string): NetworkInterfaceFlags | null {
+        const directory = NetworkInterface.flagsDirectory;
+        if (null === directory || name.includes('/') || '..' === name) {
+            return null;
+        }
+
+        let text: string;
+        try {
+            text = readFileSync(directory + '/' + name + '/flags', 'ascii').trim();
+        } catch {
+            return null;
+        }
+
+        if (!/^(0x)?[0-9a-fA-F]+$/.test(text)) {
+            return null;
+        }
+
+        const flags = parseInt(text, 16);
+        return {
+            loopback: 0 !== (flags & IFF_LOOPBACK),
+            up: 0 !== (flags & IFF_UP) && NetworkInterface.isRunning(directory, name),
+            multicast: 0 !== (flags & IFF_MULTICAST),
+        };
+    }
+
+    /**
+     * `IFF_RUNNING`, which the sysfs `flags` file does not carry: `carrier` is `1`; when it cannot be read, `operstate` is
+     * `up` or `unknown`; when neither can be read, true (nothing says that the interface is not running).
+     */
+    private static isRunning(directory: string, name: string): boolean {
+        const carrier = NetworkInterface.readSysfsText(directory + '/' + name + '/carrier');
+        if (null !== carrier) {
+            return '1' === carrier;
+        }
+
+        const operstate = NetworkInterface.readSysfsText(directory + '/' + name + '/operstate');
+        return null === operstate || 'up' === operstate || 'unknown' === operstate;
+    }
+
+    private static readSysfsText(path: string): string | null {
+        try {
+            return readFileSync(path, 'ascii').trim();
+        } catch {
+            return null;
+        }
     }
 
     /** `NetworkInterface.getByName(String)`: null when there is no such interface. */
