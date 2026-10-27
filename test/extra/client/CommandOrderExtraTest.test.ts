@@ -37,6 +37,14 @@ describe('Command order (D92)', () => {
         for (const rig of rigs.splice(0)) {
             rig.close();
         }
+        // a look-up that nothing completed would otherwise stay in flight (issue #78) and swallow the next test's
+        for (const lookup of lookups.splice(0)) {
+            try {
+                lookup.callback(new Error('test over'));
+            } catch (ex) {
+                void ex;
+            }
+        }
         vi.restoreAllMocks();
         DefaultNameResolver.clearCache();
     });
@@ -92,7 +100,7 @@ describe('Command order (D92)', () => {
         return rig.aeron.getExclusivePublication(id) as ExclusivePublication;
     }
 
-    it('anAddThenARemoveOfTheSameDestinationReachTheDriverInOrderWhenTheRemoveLookUpFinishesFirstRegression', async () => {
+    it('anAddThenARemoveOfTheSameDestinationReachTheDriverInOrderWhenBothShareOneLookUpRegression', async () => {
         const rig = newRig();
         const publication = await manualPublication(rig);
         record(rig);
@@ -100,9 +108,8 @@ describe('Command order (D92)', () => {
 
         const addId = publication.asyncAddDestination(hostA);
         const removeId = publication.asyncRemoveDestination(hostA);
-        expect(lookups.map((l) => l.host)).toEqual(['host-a.example', 'host-a.example']);
-
-        complete(1); // the remove's look-up finishes first
+        // the remove joins the look-up of the add (issue #78): one look-up answers both
+        expect(lookups.map((l) => l.host)).toEqual(['host-a.example']);
         cycles(rig, 20);
         expect(seen).toEqual([]);
 
