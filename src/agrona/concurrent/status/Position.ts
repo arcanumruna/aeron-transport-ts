@@ -107,4 +107,18 @@ export abstract class Position extends ReadablePosition {
     public addRelease(delta: number): void {
         this.setRelease(this.get() + delta);
     }
+
+    /**
+     * Port-only (spec D137): read the position, with plain memory semantics, as its two `int` halves: `out[0]` the low
+     * 32 bits and `out[1]` the high 32 bits. The default splits {@link get}; {@link UnsafeBufferPosition} reads the two
+     * halves of the counter, so that no position above 2^31 is formed as a double (which V8 boxes across a call).
+     *
+     * @param out receives the low half at 0 and the high half at 1.
+     */
+    public getHalves(out: Int32Array): void {
+        const value = this.get();
+        const high = Math.floor(value / 4294967296);
+        out[0] = (value - high * 4294967296) | 0;
+        out[1] = high | 0;
+    }
 }
