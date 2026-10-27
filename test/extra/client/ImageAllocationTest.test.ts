@@ -5,7 +5,9 @@
 // `ConcurrentPublication` (which `PublicationAllocationTest` shows allocates nothing) and polls it. A minor collection
 // happens only after something is allocated, so the test counts the collections over a long loop (see
 // test/support/Allocation.ts). Each case runs twice: from position 0 and from a position of 2^40 (the `LargePosition`
-// cases), where a position is outside V8's 31-bit small integers.
+// cases), where a position is outside V8's 31-bit small integers. There the position `offer` returns is a heap number
+// (V8 boxes a number above 2^31 returned from a call that is not inlined, and `offer` is too large to inline), so the
+// `LargePosition` cases are allowed one heap number per message (issue #82), the others none.
 import { afterAll, describe, expect, it } from 'vitest';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { Long } from '../../../src/agrona/jdk.js';
@@ -55,6 +57,8 @@ describe.each([
     ] as const)('%s', (where, termCount) => {
         const title = (name: string): string => name + where + suffix;
         const rig = (): ClientRig => new ClientRig({ backing, termCount });
+        /** The position `offer` returns, boxed above 2^31 (issue #82): one heap number per message, none from 0. */
+        const heapNumbers = 0 === termCount ? 0 : 1;
 
         /** Offers one message of `length` bytes; the rotation of the log is an administrative action and nothing is lost. */
         const produce = (r: ClientRig, src: UnsafeBuffer, length: number): void => {
@@ -75,12 +79,16 @@ describe.each([
                 const start = r.image.position();
                 let read = 0;
 
-                await expectNoAllocation((n) => {
-                    for (let i = 0; i < n; i++) {
-                        produce(r, src, length);
-                        read += poll(r);
-                    }
-                }, ITERATIONS);
+                await expectNoAllocation(
+                    (n) => {
+                        for (let i = 0; i < n; i++) {
+                            produce(r, src, length);
+                            read += poll(r);
+                        }
+                    },
+                    ITERATIONS,
+                    heapNumbers,
+                );
 
                 expect(read).toBeGreaterThan(0);
                 expect(r.image.position()).toBeGreaterThan(start);
