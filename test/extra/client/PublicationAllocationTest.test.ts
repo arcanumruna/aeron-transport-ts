@@ -4,7 +4,9 @@
 // stream, spec D16), unfragmented and fragmented, across the rotation of the terms. A minor collection happens only
 // after something is allocated, so the test counts the collections over a long loop (test/support/Allocation.ts).
 // Each case runs twice: from position 0, and from a position of 2^40 (the `LargePosition` cases), where a position is
-// outside V8's 31-bit small integers: it allocates nothing there either (measured with an allowance of 0).
+// outside V8's 31-bit small integers. There the position each call returns is a heap number: V8 boxes a number above
+// 2^31 returned from a call that is not inlined, and `offer` is too large to inline into the loop (issue #82). So the
+// `LargePosition` cases are allowed one heap number per message (see `expectNoAllocation`), the others none.
 import { afterAll, describe, expect, it } from 'vitest';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { BufferClaim } from '../../../src/client/logbuffer/BufferClaim.js';
@@ -40,6 +42,8 @@ describe.each([
         ] as const)('%s', (where, termCount) => {
             const title = (name: string): string => name + where + suffix;
             const rig = (): ClientRig => new ClientRig({ backing, exclusive, termCount });
+            /** The returned position, boxed above 2^31 (issue #82): one heap number per message, none from position 0. */
+            const heapNumbers = 0 === termCount ? 0 : 1;
 
             /** An offer that is back pressured never happens (the limit is the maximum); a rotation is `ADMIN_ACTION`. */
             const check = (position: number): void => {
@@ -53,22 +57,30 @@ describe.each([
                 const { publication } = rig();
                 const src = new UnsafeBuffer(new Uint8Array(64));
 
-                await expectNoAllocation((n) => {
-                    for (let i = 0; i < n; i++) {
-                        check(publication.offer(src, 0, 64));
-                    }
-                }, ITERATIONS);
+                await expectNoAllocation(
+                    (n) => {
+                        for (let i = 0; i < n; i++) {
+                            check(publication.offer(src, 0, 64));
+                        }
+                    },
+                    ITERATIONS,
+                    heapNumbers,
+                );
             });
 
             it(title('offerOfAFragmentedMessageAllocatesNothing'), async () => {
                 const { publication } = rig();
                 const src = new UnsafeBuffer(new Uint8Array(6_000));
 
-                await expectNoAllocation((n) => {
-                    for (let i = 0; i < n; i++) {
-                        check(publication.offer(src, 0, 6_000));
-                    }
-                }, ITERATIONS / 10);
+                await expectNoAllocation(
+                    (n) => {
+                        for (let i = 0; i < n; i++) {
+                            check(publication.offer(src, 0, 6_000));
+                        }
+                    },
+                    ITERATIONS / 10,
+                    heapNumbers,
+                );
             });
 
             it(title('offerWithAReservedValueSupplierAllocatesNothing'), async () => {
@@ -78,11 +90,15 @@ describe.each([
                 // the supplier returns a `number`: a timestamp or a checksum, no `bigint` (spec D81)
                 const supplier: ReservedValueSupplier = { get: () => ++counter };
 
-                await expectNoAllocation((n) => {
-                    for (let i = 0; i < n; i++) {
-                        check(publication.offer(src, 0, 64, supplier));
-                    }
-                }, ITERATIONS);
+                await expectNoAllocation(
+                    (n) => {
+                        for (let i = 0; i < n; i++) {
+                            check(publication.offer(src, 0, 64, supplier));
+                        }
+                    },
+                    ITERATIONS,
+                    heapNumbers,
+                );
             });
 
             it(title('offerTwoBuffersAllocatesNothing'), async () => {
@@ -90,11 +106,15 @@ describe.each([
                 const one = new UnsafeBuffer(new Uint8Array(32));
                 const two = new UnsafeBuffer(new Uint8Array(40));
 
-                await expectNoAllocation((n) => {
-                    for (let i = 0; i < n; i++) {
-                        check(publication.offerTwoBuffers(one, 0, 32, two, 0, 40));
-                    }
-                }, ITERATIONS);
+                await expectNoAllocation(
+                    (n) => {
+                        for (let i = 0; i < n; i++) {
+                            check(publication.offerTwoBuffers(one, 0, 32, two, 0, 40));
+                        }
+                    },
+                    ITERATIONS,
+                    heapNumbers,
+                );
             });
 
             it(title('offerVectoredAllocatesNothing'), async () => {
@@ -102,53 +122,69 @@ describe.each([
                 const buffer = new UnsafeBuffer(new Uint8Array(100));
                 const vectors = [new DirectBufferVector(buffer, 0, 30), new DirectBufferVector(buffer, 30, 70)];
 
-                await expectNoAllocation((n) => {
-                    for (let i = 0; i < n; i++) {
-                        check(publication.offerVectored(vectors));
-                    }
-                }, ITERATIONS);
+                await expectNoAllocation(
+                    (n) => {
+                        for (let i = 0; i < n; i++) {
+                            check(publication.offerVectored(vectors));
+                        }
+                    },
+                    ITERATIONS,
+                    heapNumbers,
+                );
             });
 
             it(title('tryClaimAndCommitAllocateNothing'), async () => {
                 const { publication } = rig();
                 const claim = new BufferClaim();
 
-                await expectNoAllocation((n) => {
-                    for (let i = 0; i < n; i++) {
-                        const position = publication.tryClaim(64, claim);
-                        check(position);
-                        if (position > 0) {
-                            claim.buffer().putInt(claim.offset(), i);
-                            claim.commit();
+                await expectNoAllocation(
+                    (n) => {
+                        for (let i = 0; i < n; i++) {
+                            const position = publication.tryClaim(64, claim);
+                            check(position);
+                            if (position > 0) {
+                                claim.buffer().putInt(claim.offset(), i);
+                                claim.commit();
+                            }
                         }
-                    }
-                }, ITERATIONS);
+                    },
+                    ITERATIONS,
+                    heapNumbers,
+                );
             });
 
             it(title('tryClaimAndAbortAllocateNothing'), async () => {
                 const { publication } = rig();
                 const claim = new BufferClaim();
 
-                await expectNoAllocation((n) => {
-                    for (let i = 0; i < n; i++) {
-                        const position = publication.tryClaim(64, claim);
-                        check(position);
-                        if (position > 0) {
-                            claim.abort();
+                await expectNoAllocation(
+                    (n) => {
+                        for (let i = 0; i < n; i++) {
+                            const position = publication.tryClaim(64, claim);
+                            check(position);
+                            if (position > 0) {
+                                claim.abort();
+                            }
                         }
-                    }
-                }, ITERATIONS);
+                    },
+                    ITERATIONS,
+                    heapNumbers,
+                );
             });
 
             if (exclusive) {
                 it(title('appendPaddingAllocatesNothing'), async () => {
                     const publication = rig().publication as ExclusivePublication;
 
-                    await expectNoAllocation((n) => {
-                        for (let i = 0; i < n; i++) {
-                            check(publication.appendPadding(64));
-                        }
-                    }, ITERATIONS);
+                    await expectNoAllocation(
+                        (n) => {
+                            for (let i = 0; i < n; i++) {
+                                check(publication.appendPadding(64));
+                            }
+                        },
+                        ITERATIONS,
+                        heapNumbers,
+                    );
                 });
             }
 

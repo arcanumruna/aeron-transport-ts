@@ -35,6 +35,7 @@ export class UnsafeBufferPosition extends Position {
     private readonly buffer: UnsafeBuffer;
     private readonly counterOffset: number = 0;
     private readonly countersManager: CountersManager | null;
+    private readonly halves = new Int32Array(2);
 
     /**
      * Map a position over a buffer.
@@ -89,6 +90,17 @@ export class UnsafeBufferPosition extends Position {
 
     public setRelease(value: number): void {
         this.buffer.putLongRelease(this.counterOffset, value);
+    }
+
+    public override getHalves(out: Int32Array): void {
+        const buffer = this.buffer;
+        const offset = this.counterOffset;
+        out[0] = buffer.getInt(offset);
+        out[1] = buffer.getInt(offset + 4);
+    }
+
+    public override addRelease(delta: number): void {
+        this.buffer.getAndAddLongHalves(this.counterOffset, delta, this.halves);
     }
 
     public setOpaque(value: number): void {

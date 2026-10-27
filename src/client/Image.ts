@@ -38,6 +38,7 @@ const { ABORT, BREAK, COMMIT } = ControlledFragmentHandler.Action;
 const { FRAME_ALIGNMENT, frameLengthVolatile, isPaddingFrame } = FrameDescriptor;
 const { HEADER_LENGTH, TERM_ID_FIELD_OFFSET } = DataHeaderFlyweight;
 const { LITTLE_ENDIAN } = ByteOrder;
+const { PARTITION_COUNT } = LogBufferDescriptor;
 
 /**
  * Represents a replicated publication {@link Image} from a publisher to a {@link Subscription}.
@@ -69,6 +70,8 @@ export class Image {
     private readonly subscriberPosition: Position;
     private readonly termBuffers: UnsafeBuffer[];
     private readonly header: Header;
+    /** Port-only (spec D137): the two `int` halves of the subscriber position, reused by every poll. */
+    private readonly positionHalves = new Int32Array(2);
     private readonly errorHandler: ErrorHandler;
     private readonly _logBuffers: LogBuffers;
     private readonly _sourceIdentity: string;
@@ -311,10 +314,14 @@ export class Image {
         }
 
         let fragmentsRead = 0;
-        const initialPosition = this.subscriberPosition.get();
-        const initialOffset = initialPosition & this.termLengthMask;
+        // spec D137: the position is read as its int halves, the term index worked out from them
+        const halves = this.positionHalves;
+        this.subscriberPosition.getHalves(halves);
+        const initialOffset = halves[0]! & this.termLengthMask;
         let offset = initialOffset;
-        const termBuffer = this.activeTermBuffer(initialPosition);
+        const termBuffer = this.termBuffers[
+            Image.termIndex(halves[0]!, halves[1]!, this._positionBitsToShift)
+        ] as UnsafeBuffer;
         const capacity = termBuffer.capacity();
         const header = this.header;
         header.buffer(termBuffer);
@@ -343,9 +350,11 @@ export class Image {
         } catch (ex) {
             this.errorHandler.onError(ex as Error);
         } finally {
-            const newPosition = initialPosition + (offset - initialOffset);
-            if (newPosition > initialPosition && !this._isClosed) {
-                this.subscriberPosition.setRelease(newPosition);
+            // spec D137: the image is the only writer of its position, so it adds the int delta to the counter
+            const delta = offset - initialOffset;
+            if (delta > 0 && !this._isClosed) {
+                const subscriberPosition = this.subscriberPosition;
+                subscriberPosition.addRelease(delta);
             }
         }
 
@@ -372,10 +381,14 @@ export class Image {
         }
 
         let fragmentsRead = 0;
-        let initialPosition = this.subscriberPosition.get();
-        let initialOffset = initialPosition & this.termLengthMask;
+        const subscriberPosition = this.subscriberPosition;
+        const halves = this.positionHalves;
+        subscriberPosition.getHalves(halves);
+        let initialOffset = halves[0]! & this.termLengthMask;
         let offset = initialOffset;
-        const termBuffer = this.activeTermBuffer(initialPosition);
+        const termBuffer = this.termBuffers[
+            Image.termIndex(halves[0]!, halves[1]!, this._positionBitsToShift)
+        ] as UnsafeBuffer;
         const capacity = termBuffer.capacity();
         const header = this.header;
         header.buffer(termBuffer);
@@ -416,19 +429,19 @@ export class Image {
                 }
 
                 if (COMMIT === action) {
-                    initialPosition += offset - initialOffset;
+                    const delta = offset - initialOffset;
                     initialOffset = offset;
                     if (!this._isClosed) {
-                        this.subscriberPosition.setRelease(initialPosition);
+                        subscriberPosition.addRelease(delta);
                     }
                 }
             }
         } catch (ex) {
             this.errorHandler.onError(ex as Error);
         } finally {
-            const resultingPosition = initialPosition + (offset - initialOffset);
-            if (resultingPosition > initialPosition && !this._isClosed) {
-                this.subscriberPosition.setRelease(resultingPosition);
+            const delta = offset - initialOffset;
+            if (delta > 0 && !this._isClosed) {
+                subscriberPosition.addRelease(delta);
             }
         }
 
@@ -454,18 +467,25 @@ export class Image {
             return 0;
         }
 
-        const initialPosition = this.subscriberPosition.get();
-        if (initialPosition >= limitPosition) {
+        const subscriberPosition = this.subscriberPosition;
+        const halves = this.positionHalves;
+        subscriberPosition.getHalves(halves);
+        const low = halves[0]!;
+        const high = halves[1]!;
+        const initialOffset = low & this.termLengthMask;
+        const termBuffer = this.termBuffers[Image.termIndex(low, high, this._positionBitsToShift)] as UnsafeBuffer;
+        const capacity = termBuffer.capacity();
+        // Java: if (initialPosition >= limitPosition) return 0; then
+        // (int)Math.min(termBuffer.capacity(), (limitPosition - initialPosition) + offset). The distance to the limit
+        // is formed after every call and used at once, so no position double is kept live and boxed (spec D137)
+        const available = limitPosition - (high * 4294967296 + (low >>> 0));
+        if (available <= 0) {
             return 0;
         }
+        const limitOffset = available >= capacity - initialOffset ? capacity : available + initialOffset;
 
         let fragmentsRead = 0;
-        const initialOffset = initialPosition & this.termLengthMask;
         let offset = initialOffset;
-        const termBuffer = this.activeTermBuffer(initialPosition);
-        // Java: (int)Math.min(termBuffer.capacity(), (limitPosition - initialPosition) + offset); the minimum is at
-        // most the capacity, an int, so the cast is exact
-        const limitOffset = Math.min(termBuffer.capacity(), limitPosition - initialPosition + offset);
         const header = this.header;
         header.buffer(termBuffer);
 
@@ -491,9 +511,9 @@ export class Image {
         } catch (ex) {
             this.errorHandler.onError(ex as Error);
         } finally {
-            const resultingPosition = initialPosition + (offset - initialOffset);
-            if (resultingPosition > initialPosition && !this._isClosed) {
-                this.subscriberPosition.setRelease(resultingPosition);
+            const delta = offset - initialOffset;
+            if (delta > 0 && !this._isClosed) {
+                subscriberPosition.addRelease(delta);
             }
         }
 
@@ -524,16 +544,22 @@ export class Image {
         }
 
         const subscriberPosition = this.subscriberPosition;
-        let initialPosition = subscriberPosition.get();
-        if (initialPosition >= limitPosition) {
+        const halves = this.positionHalves;
+        subscriberPosition.getHalves(halves);
+        const low = halves[0]!;
+        const high = halves[1]!;
+        let initialOffset = low & this.termLengthMask;
+        const termBuffer = this.termBuffers[Image.termIndex(low, high, this._positionBitsToShift)] as UnsafeBuffer;
+        const capacity = termBuffer.capacity();
+        // as boundedPoll: the distance to the limit is formed after every call and used at once (spec D137)
+        const available = limitPosition - (high * 4294967296 + (low >>> 0));
+        if (available <= 0) {
             return 0;
         }
+        const limitOffset = available >= capacity - initialOffset ? capacity : available + initialOffset;
 
         let fragmentsRead = 0;
-        let initialOffset = initialPosition & this.termLengthMask;
         let offset = initialOffset;
-        const termBuffer = this.activeTermBuffer(initialPosition);
-        const limitOffset = Math.min(termBuffer.capacity(), limitPosition - initialPosition + offset);
         const header = this.header;
         header.buffer(termBuffer);
 
@@ -573,19 +599,19 @@ export class Image {
                 }
 
                 if (COMMIT === action) {
-                    initialPosition += offset - initialOffset;
+                    const delta = offset - initialOffset;
                     initialOffset = offset;
                     if (!this._isClosed) {
-                        subscriberPosition.setRelease(initialPosition);
+                        subscriberPosition.addRelease(delta);
                     }
                 }
             }
         } catch (ex) {
             this.errorHandler.onError(ex as Error);
         } finally {
-            const resultingPosition = initialPosition + (offset - initialOffset);
-            if (resultingPosition > initialPosition && !this._isClosed) {
-                subscriberPosition.setRelease(resultingPosition);
+            const delta = offset - initialOffset;
+            if (delta > 0 && !this._isClosed) {
+                subscriberPosition.addRelease(delta);
             }
         }
 
@@ -608,10 +634,13 @@ export class Image {
             return 0;
         }
 
-        const position = this.subscriberPosition.get();
-        const offset = position & this.termLengthMask;
+        const halves = this.positionHalves;
+        this.subscriberPosition.getHalves(halves);
+        const offset = halves[0]! & this.termLengthMask;
         const limitOffset = Math.min(offset + blockLengthLimit, this.termLengthMask + 1);
-        const termBuffer = this.activeTermBuffer(position);
+        const termBuffer = this.termBuffers[
+            Image.termIndex(halves[0]!, halves[1]!, this._positionBitsToShift)
+        ] as UnsafeBuffer;
         const resultingOffset = TermBlockScanner.scan(termBuffer, offset, limitOffset);
         const length = resultingOffset - offset;
 
@@ -624,7 +653,8 @@ export class Image {
                 this.errorHandler.onError(ex as Error);
             } finally {
                 if (!this._isClosed) {
-                    this.subscriberPosition.setRelease(position + length);
+                    const subscriberPosition = this.subscriberPosition;
+                    subscriberPosition.addRelease(length);
                 }
             }
         }
@@ -649,9 +679,10 @@ export class Image {
             return 0;
         }
 
-        const position = this.subscriberPosition.get();
-        const offset = position & this.termLengthMask;
-        const activeIndex = LogBufferDescriptor.indexByPosition(position, this._positionBitsToShift);
+        const halves = this.positionHalves;
+        this.subscriberPosition.getHalves(halves);
+        const offset = halves[0]! & this.termLengthMask;
+        const activeIndex = Image.termIndex(halves[0]!, halves[1]!, this._positionBitsToShift);
         const termBuffer = this.termBuffers[activeIndex] as UnsafeBuffer;
         const capacity = termBuffer.capacity();
         const limitOffset = Math.min(offset + blockLengthLimit, capacity);
@@ -676,7 +707,8 @@ export class Image {
                 this.errorHandler.onError(ex as Error);
             } finally {
                 if (!this._isClosed) {
-                    this.subscriberPosition.setRelease(position + length);
+                    const subscriberPosition = this.subscriberPosition;
+                    subscriberPosition.addRelease(length);
                 }
             }
         }
@@ -693,10 +725,23 @@ export class Image {
         this._subscription.rejectImage(this._correlationId, this.position(), reason);
     }
 
-    private activeTermBuffer(position: number): UnsafeBuffer {
-        return this.termBuffers[
-            LogBufferDescriptor.indexByPosition(position, this._positionBitsToShift)
-        ] as UnsafeBuffer;
+    /**
+     * Port-only (spec D137): {@link LogBufferDescriptor.indexByPosition} of the position `high * 2^32 + (low >>> 0)`,
+     * in `int` arithmetic. `(position >>> shift) % 3` is `(high * 2^(32 - shift) + (low >>> shift)) % 3`, and
+     * `2^k % 3` is 1 for an even `k` and 2 for an odd one.
+     *
+     * @param low  the low 32 bits of the position.
+     * @param high the high 32 bits of the position, non-negative.
+     * @param positionBitsToShift of the term length, in [16, 30].
+     * @return the index of the term the position is in.
+     * @internal
+     */
+    public static termIndex(low: number, high: number, positionBitsToShift: number): number {
+        const highFactor = 0 === ((32 - positionBitsToShift) & 1) ? 1 : 2;
+        return (
+            ((high % PARTITION_COUNT) * highFactor + ((low >>> positionBitsToShift) % PARTITION_COUNT)) %
+            PARTITION_COUNT
+        );
     }
 
     // Never called, in Java either (a leftover of the position setter that was removed).

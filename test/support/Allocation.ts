@@ -173,7 +173,7 @@ async function allocationSites(run: (iterations: number) => void, iterations: nu
 
 const MAX_CALIBRATED_ITERATIONS = 32_000_000;
 const MIN_CONTROL_COLLECTIONS = 16;
-const MAX_ATTEMPTS = 6;
+export const MAX_ATTEMPTS = 6;
 
 /** A failed attempt that grew the heap by more than this (or twice the control's growth) retained what it allocated. */
 const MIN_RETAINED_HEAP_GROWTH = 4 * 1024 * 1024;
