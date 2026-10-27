@@ -7,7 +7,9 @@
 // test/support/Allocation.ts). Each case runs twice: from position 0 and from a position of 2^40 (the `LargePosition`
 // cases), where a position is outside V8's 31-bit small integers. There the position `offer` returns is a heap number
 // (V8 boxes a number above 2^31 returned from a call that is not inlined, and `offer` is too large to inline), so the
-// `LargePosition` cases are allowed one heap number per message (issue #82), the others none.
+// `LargePosition` cases are allowed one heap number per message (issue #82). From position 0 a loop is allowed none,
+// unless its messages carry the position past 2^31 within the attempts of the measurement: the 6000-byte fragmented
+// message does so (1.8 GB per attempt), so it is allowed one heap number per message too.
 import { afterAll, describe, expect, it } from 'vitest';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { Long } from '../../../src/agrona/jdk.js';
@@ -15,7 +17,7 @@ import { Action, ControlledFragmentHandler } from '../../../src/client/logbuffer
 import type { FragmentHandler } from '../../../src/client/logbuffer/FragmentHandler.js';
 import { Publication } from '../../../src/client/Publication.js';
 import { ImageFragmentAssembler } from '../../../src/client/ImageFragmentAssembler.js';
-import { expectNoAllocation } from '../../support/Allocation.js';
+import { MAX_ATTEMPTS, expectNoAllocation } from '../../support/Allocation.js';
 import { ARRAY_BACKING, SHARED_BACKING } from '../../support/Backing.js';
 import { ClientRig } from '../../support/ClientRig.js';
 
@@ -59,8 +61,12 @@ describe.each([
     ] as const)('%s', (where, termCount) => {
         const title = (name: string): string => name + where + suffix;
         const rig = (): ClientRig => new ClientRig({ backing, termCount });
-        /** The position `offer` returns, boxed above 2^31 (issue #82): one heap number per message, none from 0. */
-        const heapNumbers = 0 === termCount ? 0 : 1;
+        /**
+         * The position `offer` returns is boxed above 2^31 (issue #82): one heap number per message once the position
+         * can pass 2^31, from the large start or after `length * ITERATIONS * MAX_ATTEMPTS` bytes from 0.
+         */
+        const heapNumbers = (length: number): number =>
+            0 !== termCount || length * ITERATIONS * MAX_ATTEMPTS >= 2 ** 31 ? 1 : 0;
 
         /** Offers one message of `length` bytes; the rotation of the log is an administrative action and nothing is lost. */
         const produce = (r: ClientRig, src: UnsafeBuffer, length: number): void => {
@@ -89,7 +95,7 @@ describe.each([
                         }
                     },
                     ITERATIONS,
-                    heapNumbers,
+                    heapNumbers(length),
                 );
 
                 expect(read).toBeGreaterThan(0);
