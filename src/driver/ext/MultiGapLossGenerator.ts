@@ -28,11 +28,11 @@ import type { LossGenerator } from './LossGenerator.js';
  * Generates multiple gaps of loss in a term, at multiples of a power of two, once for each stream and session.
  */
 export class MultiGapLossGenerator implements LossGenerator {
-    private readonly termId: number;
-    private readonly gapRadixBits: number;
-    private readonly gapRadixMask: number;
-    private readonly gapLength: number;
-    private readonly lastGapLimit: number;
+    private readonly termId: number = 0;
+    private readonly gapRadixBits: number = 0;
+    private readonly gapRadixMask: number = 0;
+    private readonly gapLength: number = 0;
+    private readonly lastGapLimit: number = 0;
     // Java's BiInt2ObjectMap<MutableInteger>, keyed by (streamId, sessionId) (spec D60)
     private readonly streamAndSessionIdToOffsetMap = new LongHalves2ObjectHashMap<MutableInteger>();
 

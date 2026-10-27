@@ -25,8 +25,8 @@ import { IllegalArgumentException, IllegalStateException } from '../agrona/jdk.j
  */
 export class DirectBufferVector {
     private _buffer: DirectBuffer | null;
-    private _offset: number;
-    private _length: number;
+    private _offset: number = 0;
+    private _length: number = 0;
 
     /**
      * Construct a new vector as a placeholder for later reset, or over a region of a buffer. The two constructors of

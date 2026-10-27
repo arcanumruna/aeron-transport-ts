@@ -130,15 +130,15 @@ export class ClientConductor implements Agent {
     );
 
     /** @internal package-private in Java */
-    public readonly controlProtocolVersion: number;
+    public readonly controlProtocolVersion: number = 0;
 
-    private readonly idleSleepDurationNs: number;
-    private readonly keepAliveIntervalNs: number;
-    private readonly driverTimeoutMs: number;
-    private readonly driverTimeoutNs: number;
-    private readonly interServiceTimeoutNs: number;
-    private timeOfLastKeepAliveNs: number;
-    private timeOfLastServiceNs: number;
+    private readonly idleSleepDurationNs: number = 0;
+    private readonly keepAliveIntervalNs: number = 0;
+    private readonly driverTimeoutMs: number = 0;
+    private readonly driverTimeoutNs: number = 0;
+    private readonly interServiceTimeoutNs: number = 0;
+    private timeOfLastKeepAliveNs: number = 0;
+    private timeOfLastServiceNs: number = 0;
     private _isClosed = false;
     private isInCallback = false;
     private _isTerminating = false;

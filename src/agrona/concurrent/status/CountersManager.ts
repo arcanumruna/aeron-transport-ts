@@ -64,7 +64,7 @@ const {
  * the counters themselves ({@link AtomicCounter}) allocate nothing per operation.
  */
 export class CountersManager extends CountersReader {
-    private readonly freeToReuseTimeoutMs: number;
+    private readonly freeToReuseTimeoutMs: number = 0;
     private highWaterMarkId = -1;
     private readonly freeList = new IntArrayList();
     private readonly epochClock: EpochClock;

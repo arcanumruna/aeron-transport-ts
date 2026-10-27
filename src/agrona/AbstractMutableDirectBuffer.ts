@@ -87,6 +87,43 @@ function copyMemory(src: Uint8Array, srcOffset: number, dst: Uint8Array, dstOffs
     BUFFER_COPY.call(src, dst, dstOffset, srcOffset, srcOffset + length);
 }
 
+// Zero bytes of 4096 bytes, and a view of each power of two up to that, made once: `setMemory(index, length, 0)` copies
+// them (spec D123).
+const ZERO_BLOCK_BITS = 12;
+const ZERO_VIEWS: Uint8Array[] = [];
+{
+    const zeros = new Uint8Array(1 << ZERO_BLOCK_BITS);
+    for (let bit = 0; bit <= ZERO_BLOCK_BITS; bit++) {
+        ZERO_VIEWS.push(zeros.subarray(0, 1 << bit));
+    }
+}
+
+/**
+ * Zeroes `length` bytes of `array` at `offset` by copying zero blocks of 4096 bytes and then one of each power of two that
+ * the rest needs, which allocates nothing. `Uint8Array.fill` on a `SharedArrayBuffer` is 10 to 15 times slower than the same
+ * `fill` on an `ArrayBuffer` (V8 fills shared memory byte by byte, 480 ns for 1408 bytes and 10 us for 32 KiB), where `set`
+ * is a memmove either way (100 ns and 1.3 us).
+ */
+function zeroFill(array: Uint8Array, offset: number, length: number): void {
+    let position = offset;
+    let remaining = length;
+    const block = ZERO_VIEWS[ZERO_BLOCK_BITS] as Uint8Array;
+    while (remaining >= block.length) {
+        array.set(block, position);
+        position += block.length;
+        remaining -= block.length;
+    }
+
+    for (let bit = ZERO_BLOCK_BITS - 1; bit >= 0 && remaining > 0; bit--) {
+        const size = 1 << bit;
+        if (remaining >= size) {
+            array.set(ZERO_VIEWS[bit] as Uint8Array, position);
+            position += size;
+            remaining -= size;
+        }
+    }
+}
+
 /**
  * `String.getBytes(UTF_8)`: a lone surrogate is encoded as '?', where `TextEncoder` writes U+FFFD.
  */
@@ -174,8 +211,12 @@ export abstract class AbstractMutableDirectBuffer implements MutableDirectBuffer
         this.ensureCapacity(index, length);
 
         const offset = this._addressOffset + index;
-        // Uint8Array.fill replaces the long-at-a-time loop for a short region and Unsafe.setMemory for a long one
-        this._byteArray.fill(value, offset, offset + length);
+        if (0 === value) {
+            zeroFill(this._byteArray, offset, length);
+        } else {
+            // Uint8Array.fill replaces the long-at-a-time loop for a short region and Unsafe.setMemory for a long one
+            this._byteArray.fill(value, offset, offset + length);
+        }
     }
 
     public getLong(index: number, byteOrder?: ByteOrder): number {

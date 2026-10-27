@@ -30,7 +30,7 @@ const { SIZE_OF_INT, SIZE_OF_LONG, align } = BitUtil;
  */
 export class DistinctObservation {
     private readonly _throwable: Error | null;
-    private readonly _offset: number;
+    private readonly _offset: number = 0;
 
     public constructor(throwable: Error | null, offset: number) {
         this._throwable = throwable;

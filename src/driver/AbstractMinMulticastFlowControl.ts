@@ -469,13 +469,13 @@ export abstract class AbstractMinMulticastFlowControl implements FlowControl {
  * A receiver tracked by the strategy. The id is the `(high, low)` halves of the 64 bit receiver id (spec D14).
  */
 export class Receiver {
-    public readonly sessionId: number;
-    public readonly streamId: number;
-    public readonly receiverIdHigh: number;
-    public readonly receiverIdLow: number;
-    public lastPosition: number;
-    public lastPositionPlusWindow: number;
-    public timeOfLastStatusMessageNs: number;
+    public readonly sessionId: number = 0;
+    public readonly streamId: number = 0;
+    public readonly receiverIdHigh: number = 0;
+    public readonly receiverIdLow: number = 0;
+    public lastPosition: number = 0;
+    public lastPositionPlusWindow: number = 0;
+    public timeOfLastStatusMessageNs: number = 0;
     public eosFlagged: boolean;
 
     public constructor(

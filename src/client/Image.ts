@@ -52,13 +52,13 @@ const { LITTLE_ENDIAN } = ByteOrder;
  * <b>Note:</b>Images are not threadsafe and should not be shared between subscribers.
  */
 export class Image {
-    private readonly _correlationId: number;
-    private readonly _joinPosition: number;
-    private readonly _sessionId: number;
-    private readonly _initialTermId: number;
-    private readonly termLengthMask: number;
-    private readonly _positionBitsToShift: number;
-    private readonly mtu: number;
+    private readonly _correlationId: number = 0;
+    private readonly _joinPosition: number = 0;
+    private readonly _sessionId: number = 0;
+    private readonly _initialTermId: number = 0;
+    private readonly termLengthMask: number = 0;
+    private readonly _positionBitsToShift: number = 0;
+    private readonly mtu: number = 0;
 
     private finalPosition: number = 0;
     private eosPosition: number = Long.MAX_VALUE;

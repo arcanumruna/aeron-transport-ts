@@ -45,7 +45,7 @@ const { CACHE_LINE_LENGTH } = BitUtil;
 export class ChannelAndTransport {
     public readonly channelEndpoint: ReceiveChannelEndpoint;
     public readonly transport: UdpChannelTransport;
-    public readonly transportIndex: number;
+    public readonly transportIndex: number = 0;
 
     public constructor(
         channelEndpoint: ReceiveChannelEndpoint,

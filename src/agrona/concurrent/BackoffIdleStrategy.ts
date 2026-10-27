@@ -69,10 +69,10 @@ export class BackoffIdleStrategy implements IdleStrategy {
      */
     public static readonly DEFAULT_MAX_PARK_PERIOD_NS = 1_000_000;
 
-    private readonly maxSpins: number;
-    private readonly maxYields: number;
-    private readonly minParkPeriodNs: number;
-    private readonly maxParkPeriodNs: number;
+    private readonly maxSpins: number = 0;
+    private readonly maxYields: number = 0;
+    private readonly minParkPeriodNs: number = 0;
+    private readonly maxParkPeriodNs: number = 0;
 
     private state = NOT_IDLE;
     private spins = 0;

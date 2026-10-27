@@ -40,7 +40,7 @@ const { BEGIN_FRAG_FLAG, END_FRAG_FLAG, UNFRAGMENTED } = FrameDescriptor;
  */
 export class FragmentAssembler implements FragmentHandler {
     private readonly _isDirectByteBuffer: boolean;
-    private readonly initialBufferLength: number;
+    private readonly initialBufferLength: number = 0;
     private readonly _delegate: FragmentHandler;
     private readonly builderBySessionIdMap = new Int2ObjectHashMap<BufferBuilder>();
 

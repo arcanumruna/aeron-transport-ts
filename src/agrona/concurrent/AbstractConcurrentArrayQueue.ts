@@ -38,7 +38,7 @@ export abstract class AbstractConcurrentArrayQueue<E> implements QueuedPipe<E> {
     protected headCache = 0;
     protected head = 0;
 
-    protected readonly _capacity: number;
+    protected readonly _capacity: number = 0;
     protected readonly buffer: (E | null)[];
 
     /**

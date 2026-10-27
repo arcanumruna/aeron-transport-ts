@@ -1125,7 +1125,7 @@ export class Aeron implements AutoCloseable {
     public static readonly Context = AeronContext;
 
     private _isClosed = false;
-    private readonly _clientId: number;
+    private readonly _clientId: number = 0;
     private readonly conductor: ClientConductor;
     private readonly commandBuffer: RingBuffer;
     private readonly conductorInvoker: AgentInvoker | null;

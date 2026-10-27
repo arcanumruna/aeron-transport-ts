@@ -47,7 +47,7 @@ import { Hashing } from './Hashing.js';
 export class Object2ObjectHashMap<K, V> {
     static readonly MIN_CAPACITY = 8;
 
-    private readonly loadFactorValue: number;
+    private readonly loadFactorValue: number = 0;
     private resizeThresholdValue = 0;
     /** @internal accessed by the nested classes, which are in this file */
     public _size = 0;

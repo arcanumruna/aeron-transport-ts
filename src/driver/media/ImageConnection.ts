@@ -29,7 +29,7 @@ export class ImageConnection {
     /**
      * Time of the last observed activity on this connection for tracking liveness.
      */
-    public timeOfLastActivityNs: number;
+    public timeOfLastActivityNs: number = 0;
 
     /**
      * Time of the last observed from the source.

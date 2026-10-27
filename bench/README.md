@@ -350,6 +350,17 @@ harness (2,000 samples, median of the repeats).
 | Receiver doWork: one heartbeat (frame length 0)                                                        | 421.4   | 408.6   | 809.4   | 1,335.6 |
 | Receiver doWork: an idle cycle (no command, no datagram, the image has nothing to send)                | 96.8    | 94.1    | 188.6   | 231.3   |
 
+The MTU bench (issue #43) is one datagram of 1408 B (a data frame of 1376 B of payload, and the padding frame that ends each
+64 KiB term), with the conductor's `trackRebuild` and the subscriber every 4th operation. Frames of the MTU pass the 2^30 that
+a small integer holds within one run of the harness (6.2 million operations are 8.7 GB), so the bench makes 10 rigs in
+`setup` and moves to the next one after 700,000 frames (985 MB, below 2^30): a rig takes 2 to 3 ms to make, which a timed
+sample must not contain. One run of the harness, 2026-10-26, same Node and host (load average 3.4 at the start, 4 cores,
+so indicative only), 2,000 samples:
+
+| Bench                                                                                                           | ns/op   | p50     | p99     | p99.9   |
+| --------------------------------------------------------------------------------------------------------------- | ------- | ------- | ------- | ------- |
+| Receiver doWork: one data frame of 1408 B (the MTU), padding at the end of each term, positions of 1 GB per rig | 1,626.8 | 1,507.6 | 3,123.9 | 6,400.8 |
+
 ### Publications and images (T20)
 
 `bench/micro/publication.bench.ts`: `offer` and `tryClaim` + `commit` of a `ConcurrentPublication` (one atomic add of the raw
@@ -485,6 +496,24 @@ Aeron puts the small messages of one cycle in one datagram, so at 64 B it moves 
 datagrams. At 1376 B every message is a datagram and the port reaches 44% of the floor in messages per second, 21 us per
 message: the sender sends one frame per cycle and a cycle is a turn of the event loop (D11), the first place to look.
 
+Issue #53 looked at that: the sender sends one frame per publication per cycle as Java's does, a runner runs up to 16 cycles
+in one turn (D114), and raising the batch to 64 or 256 cycles changes nothing (medians of 10 interleaved streams: 86,250,
+86,771 and 88,267 msgs/s). What did cost throughput was the zeroing of the term behind the stream: V8's `fill` of a
+`SharedArrayBuffer` is 10 to 15 times slower than a copy, 0.6 us of every 1376 B frame (D123). Interleaved (base, candidate,
+base, ...), 12 pairs, one process each, 50,000 messages after a warm-up of 5,000, 2026-10-26, same Node and host (load average 3
+to 6 on 4 cores: the spread is the host's), medians:
+
+| bytes | path                           | base (before #52, #53) msgs/s | candidate msgs/s | min..max, base   | min..max, candidate |
+| ----- | ------------------------------ | ----------------------------- | ---------------- | ---------------- | ------------------- |
+| 64    | Aeron TS                       | 227,394                       | 253,985          | 164,045..303,003 | 191,210..291,457    |
+| 1376  | Aeron TS                       | 78,382                        | 85,275           | 48,705..88,326   | 70,703..92,464      |
+| 1376  | raw dgram floor (credit of 64) | 139,658                       | 139,386          | 116,102..156,481 | 123,809..150,624    |
+
+That is 56% and 61% of the floor at 1376 B. The rest is inherent to a single node thread and node's `dgram` (D124): the CPU
+profile of the stream is 33% in the `sendmsg` call of `dgram` (on the loopback it also delivers the datagram), 25% in the
+event loop's poll (`recvmsg` and the `'message'` callback), 24% in `src/` (4.2 us a message: four copies of the frame, the
+bounds checks, the counters) and the rest in the collector, timers and the harness.
+
 Allocation per message (estimates, bytes per message):
 
 | run                                       | port   | node   | harness | other | minor GCs per 1000 msgs |
@@ -499,7 +528,12 @@ measured it at 134 to 141 B/msg in the 64 B stream; it took out the `UnsafeBuffe
 each duty cycle (D114), and the column went to 31.8 (the 64 B stream row above was measured once with `--runs 1`, the
 others are from before the change). What is left in `src/` is the heap numbers of D13: the `nowNs` that `Sender.doWork`,
 `Receiver.doWork` and `DriverConductor.doWork` pass on (7 to 8 B/msg each) and `ClientConductor.service` (4). The
-rest of a send is node's own (about 47 B per datagram, D113). The figures are per message of a run, so they grow with the
+rest of a send is node's own (about 47 B per datagram, D113). Issue #52 then found that the times and positions
+stored in the fields that were declared with no number (`PublicationImage.timeOfLastPacketNs`, `NetworkPublication.timeOfLastDataOrHeartbeatNs`,
+`ClientConductor.timeOfLastServiceNs`, ... 291 fields, D122) allocated a heap number per store, and the column of a later run
+went from 48.4 to 36.8 B/msg at 64 B and from 282.7 to 245.2 at 1376 B; what is left is the `nowNs` of each duty cycle (D112)
+and node's own work attributed to the runner's functions. `EndToEndAllocationTest` runs the whole path over a loopback fake
+of `dgram` and bounds the bytes per step. The figures are per message of a run, so they grow with the
 datagrams per message (1376 B) and with the cycles per message (the round trip spins the loop many times for each
 message). Recorded, not a gate. The minor
 collections are rare (0.02 per 1000 messages at 64 B).

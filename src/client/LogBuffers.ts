@@ -50,7 +50,7 @@ export interface LogLookup {
 export class LogBuffers implements AutoCloseable {
     private _lingerDeadlineNs: number = Long.MAX_VALUE;
     private refCount = 0;
-    private readonly _termLength: number;
+    private readonly _termLength: number = 0;
     private readonly termBuffers: UnsafeBuffer[] = [];
     private readonly logMetaDataBuffer: UnsafeBuffer;
 
