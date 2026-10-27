@@ -62,8 +62,12 @@ describe('Aeron embedded', () => {
         const rig = newRig();
         const channel = newChannel();
 
-        const publication = rig.aeron.addPublication(channel, STREAM_ID) as ConcurrentPublication;
+        // the subscription first: the first setup frame of the publication then finds the receiver ready for the stream.
+        // A setup frame sent before is lost and the next one goes PUBLICATION_SETUP_TIMEOUT_NS (100 ms) later, which on
+        // this rig's wall clock makes the test depend on how fast the cycles run (a publication added first is
+        // aPublicationAddedBeforeItsSubscriptionConnectsOnTheNextSetupFrameRegression, on the manual clock).
         const subscription = rig.aeron.addSubscription(channel, STREAM_ID);
+        const publication = rig.aeron.addPublication(channel, STREAM_ID) as ConcurrentPublication;
         expect(publication.channel()).toBe(channel);
         expect(subscription.channel()).toBe(channel);
 
@@ -123,6 +127,37 @@ describe('Aeron embedded', () => {
         publication.close();
         await rig.until(() => unavailable.mock.calls.length === 1, 'unavailable image');
         expect(subscription.hasNoImages()).toBe(true);
+    });
+
+    it('aPublicationAddedBeforeItsSubscriptionConnectsOnTheNextSetupFrameRegression', async () => {
+        // a manual clock: the first setup frame goes out before the receiver has the stream and is lost; the stream
+        // connects on the setup frame the publication sends PUBLICATION_SETUP_TIMEOUT_NS (100 cycles) later, whatever
+        // the speed of the cycles on the wall clock
+        const rig = newRig(true);
+        const channel = newChannel();
+
+        const publicationId = rig.aeron.asyncAddPublication(channel, STREAM_ID);
+        await rig.until(() => null !== rig.aeron.getPublication(publicationId), 'publication');
+        const publication = rig.aeron.getPublication(publicationId) as ConcurrentPublication;
+        // the first setup frame goes out while nothing receives the stream
+        for (let i = 0; i < 20; i++) {
+            rig.cycle();
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        expect(publication.isConnected()).toBe(false);
+
+        const subscriptionId = rig.aeron.asyncAddSubscription(channel, STREAM_ID);
+        await rig.until(() => null !== rig.aeron.getSubscription(subscriptionId), 'subscription');
+        const subscription = rig.aeron.getSubscription(subscriptionId) as Subscription;
+        await rig.until(() => publication.isConnected() && subscription.imageCount() === 1, 'connected stream');
+
+        await offerMessage(rig, publication, 'late subscriber');
+        const received: string[] = [];
+        await rig.until(() => {
+            poll(subscription, received);
+            return received.length > 0;
+        }, 'message');
+        expect(received).toEqual(['late subscriber']);
     });
 
     it('anInvalidChannelIsRefusedWithARegistrationExceptionAndTheClientGoesOn', () => {
