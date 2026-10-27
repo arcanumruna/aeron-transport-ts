@@ -472,18 +472,20 @@ export class Image {
         subscriberPosition.getHalves(halves);
         const low = halves[0]!;
         const high = halves[1]!;
-        const initialPosition = high * 4294967296 + (low >>> 0);
-        if (initialPosition >= limitPosition) {
+        const initialOffset = low & this.termLengthMask;
+        const termBuffer = this.termBuffers[Image.termIndex(low, high, this._positionBitsToShift)] as UnsafeBuffer;
+        const capacity = termBuffer.capacity();
+        // Java: if (initialPosition >= limitPosition) return 0; then
+        // (int)Math.min(termBuffer.capacity(), (limitPosition - initialPosition) + offset). The distance to the limit
+        // is formed after every call and used at once, so no position double is kept live and boxed (spec D137)
+        const available = limitPosition - (high * 4294967296 + (low >>> 0));
+        if (available <= 0) {
             return 0;
         }
+        const limitOffset = available >= capacity - initialOffset ? capacity : available + initialOffset;
 
         let fragmentsRead = 0;
-        const initialOffset = low & this.termLengthMask;
         let offset = initialOffset;
-        const termBuffer = this.termBuffers[Image.termIndex(low, high, this._positionBitsToShift)] as UnsafeBuffer;
-        // Java: (int)Math.min(termBuffer.capacity(), (limitPosition - initialPosition) + offset); the minimum is at
-        // most the capacity, an int, so the cast is exact
-        const limitOffset = Math.min(termBuffer.capacity(), limitPosition - initialPosition + offset);
         const header = this.header;
         header.buffer(termBuffer);
 
@@ -546,16 +548,18 @@ export class Image {
         subscriberPosition.getHalves(halves);
         const low = halves[0]!;
         const high = halves[1]!;
-        const initialPosition = high * 4294967296 + (low >>> 0);
-        if (initialPosition >= limitPosition) {
+        let initialOffset = low & this.termLengthMask;
+        const termBuffer = this.termBuffers[Image.termIndex(low, high, this._positionBitsToShift)] as UnsafeBuffer;
+        const capacity = termBuffer.capacity();
+        // as boundedPoll: the distance to the limit is formed after every call and used at once (spec D137)
+        const available = limitPosition - (high * 4294967296 + (low >>> 0));
+        if (available <= 0) {
             return 0;
         }
+        const limitOffset = available >= capacity - initialOffset ? capacity : available + initialOffset;
 
         let fragmentsRead = 0;
-        let initialOffset = low & this.termLengthMask;
         let offset = initialOffset;
-        const termBuffer = this.termBuffers[Image.termIndex(low, high, this._positionBitsToShift)] as UnsafeBuffer;
-        const limitOffset = Math.min(termBuffer.capacity(), limitPosition - initialPosition + offset);
         const header = this.header;
         header.buffer(termBuffer);
 

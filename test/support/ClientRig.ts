@@ -7,6 +7,8 @@
 import { vi } from 'vitest';
 import type { Mock } from 'vitest';
 import { UnsafeBuffer } from '../../src/agrona/concurrent/UnsafeBuffer.js';
+import { CountersReader } from '../../src/agrona/concurrent/status/CountersReader.js';
+import { UnsafeBufferPosition } from '../../src/agrona/concurrent/status/UnsafeBufferPosition.js';
 import type { ErrorHandler } from '../../src/agrona/ErrorHandler.js';
 import { Long } from '../../src/agrona/jdk.js';
 import { ConcurrentPublication } from '../../src/client/ConcurrentPublication.js';
@@ -20,7 +22,6 @@ import { Subscription } from '../../src/client/Subscription.js';
 import type { RawLog } from '../../src/driver/buffer/RawLog.js';
 import { ARRAY_BACKING } from './Backing.js';
 import type { Backing } from './Backing.js';
-import { AtomicLongPosition } from './AtomicLongPosition.js';
 import { asConductor, asLogBuffers, newFakePublicationConductor, newFakeSubscriptionConductor } from './ClientFakes.js';
 import type { FakePublicationConductor, FakeSubscriptionConductor } from './ClientFakes.js';
 import { MockPosition } from './MockPosition.js';
@@ -57,7 +58,7 @@ export class ClientRig {
     public readonly subscriptionConductor: FakeSubscriptionConductor;
     public readonly limit = new MockPosition();
     public readonly publication: Publication;
-    public readonly subscriberPosition: AtomicLongPosition;
+    public readonly subscriberPosition: UnsafeBufferPosition;
     public readonly errors: Error[] = [];
     public readonly errorHandler: ErrorHandler & { onError: Mock<(error: Error) => void> };
     public readonly subscription: Subscription;
@@ -132,7 +133,11 @@ export class ClientRig {
         );
 
         this.errorHandler = { onError: vi.fn((error: Error) => void this.errors.push(error)) };
-        this.subscriberPosition = new AtomicLongPosition(0, this.startPosition);
+        this.subscriberPosition = new UnsafeBufferPosition(
+            new UnsafeBuffer(backing.aligned(CountersReader.COUNTER_LENGTH, 64) as ArrayBuffer | SharedArrayBuffer),
+            0,
+        );
+        this.subscriberPosition.set(this.startPosition);
         this.subscription = new Subscription(
             asConductor(this.subscriptionConductor),
             ClientRig.CHANNEL,
