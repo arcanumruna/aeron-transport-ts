@@ -22,7 +22,7 @@ import { AeronException } from './AeronException.js';
  * Exception raised when a channel endpoint has an error: the status indicator of the endpoint says which.
  */
 export class ChannelEndpointException extends AeronException {
-    private readonly _statusIndicatorId: number;
+    private readonly _statusIndicatorId: number = 0;
 
     /**
      * Construct an exception for a channel endpoint.

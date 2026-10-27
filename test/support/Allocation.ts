@@ -16,6 +16,9 @@ vi.setConfig({ testTimeout: 180_000 });
 
 v8.setFlagsFromString('--expose-gc');
 const gc = vm.runInNewContext('gc') as () => void;
+v8.setFlagsFromString('--allow-natives-syntax');
+const prepareForOptimization = new Function('f', '%PrepareFunctionForOptimization(f);') as (f: unknown) => void;
+const optimizeOnNextCall = new Function('f', '%OptimizeFunctionOnNextCall(f);') as (f: unknown) => void;
 
 export const ITERATIONS = 2_000_000;
 const WARM_UP = 100_000;
@@ -67,13 +70,15 @@ export async function measure(
     settle = false,
 ): Promise<{ collections: number; heapGrowth: number }> {
     const warmUp = Math.min(WARM_UP, Math.max(1_000, iterations >> 3));
+    // Force a synchronous TurboFan compile of `run` before it is measured. Left to the JIT, the loop tiers up through
+    // Maglev and on-stack replacement on a background thread: on a loaded host (vitest runs the test files in parallel)
+    // the measured call could then run, wholly or partly, in a lower tier that boxes numbers above 2^31 and causes
+    // collections that are not the code's own (issues #33, #46). `%OptimizeFunctionOnNextCall` compiles on the calling
+    // thread at the next call, so the measured code does not depend on timing.
+    prepareForOptimization(run);
     run(warmUp);
     run(warmUp);
-    // On a loaded host (vitest runs the test files in parallel) the optimizing compiler runs on a background thread
-    // that may not have installed the loop's optimized code yet: the loop would then run in the interpreter or the
-    // baseline tier, which boxes numbers and causes collections that are not the code's own (issue #33). Give that
-    // thread a moment, then warm up once more so that the optimized code is the one that is measured.
-    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+    optimizeOnNextCall(run);
     run(warmUp);
     if (settle) {
         await settleUntilQuiet(run, warmUp);

@@ -29,9 +29,9 @@ const { PENDING_SETUP_FRAME } = SessionState;
  * @internal package-private in Java
  */
 export class PendingSetupMessageFromSource {
-    private readonly _sessionId: number;
-    private readonly _streamId: number;
-    private readonly _transportIndex: number;
+    private readonly _sessionId: number = 0;
+    private readonly _streamId: number = 0;
+    private readonly _transportIndex: number = 0;
     private readonly periodic: boolean;
     private readonly _channelEndpoint: ReceiveChannelEndpoint;
     private _controlAddress: InetSocketAddress | null;

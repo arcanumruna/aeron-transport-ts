@@ -36,7 +36,7 @@ import { UdpChannelTransport } from './UdpChannelTransport.js';
  * padding classes are not ported.
  */
 export class ReceiveDestinationTransport extends UdpChannelTransport {
-    private _timeOfLastActivityNs: number;
+    private _timeOfLastActivityNs: number = 0;
     private _currentControlAddress: InetSocketAddress | null;
     private readonly localSocketAddressIndicator: AtomicCounter;
     private readonly receiveChannelEndpoint: ReceiveChannelEndpoint;

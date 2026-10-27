@@ -156,7 +156,7 @@ export class LossReport {
  */
 export class ReportEntry {
     private readonly buffer: UnsafeBuffer;
-    private readonly offset: number;
+    private readonly offset: number = 0;
 
     /**
      * @internal package-private in Java

@@ -31,9 +31,9 @@ const { SIZE_OF_LONG } = BitUtil;
  * @see CountersManager
  */
 export class UnsafeBufferStatusIndicator extends StatusIndicator {
-    private readonly counterId: number;
+    private readonly counterId: number = 0;
     private readonly buffer: AtomicBuffer;
-    private readonly counterOffset: number;
+    private readonly counterOffset: number = 0;
 
     /**
      * Map a status indicator over a buffer.

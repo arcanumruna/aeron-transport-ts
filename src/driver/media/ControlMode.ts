@@ -45,7 +45,7 @@ export class ControlMode {
     public static readonly RESPONSE: ControlMode = new ControlMode('RESPONSE');
 
     private readonly _name: string;
-    private readonly _ordinal: number;
+    private readonly _ordinal: number = 0;
 
     private constructor(name: string) {
         this._name = name;

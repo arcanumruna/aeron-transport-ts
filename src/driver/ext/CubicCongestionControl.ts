@@ -51,22 +51,22 @@ export class CubicCongestionControl implements CongestionControl {
      */
     public static readonly CC_PARAM_VALUE: string = 'cubic';
 
-    private readonly mtu: number;
-    private readonly maxCwnd: number;
-    private readonly _initialWindowLength: number;
-    private readonly _maxWindowLength: number;
+    private readonly mtu: number = 0;
+    private readonly maxCwnd: number = 0;
+    private readonly _initialWindowLength: number = 0;
+    private readonly _maxWindowLength: number = 0;
 
-    private k: number;
-    private w_max: number;
-    private windowLength: number;
-    private cwnd: number;
+    private k: number = 0;
+    private w_max: number = 0;
+    private windowLength: number = 0;
+    private cwnd: number = 0;
 
-    private lastUpdateTimestampNs: number;
-    private lastLossTimestampNs: number;
+    private lastUpdateTimestampNs: number = 0;
+    private lastLossTimestampNs: number = 0;
     private lastRttTimestampNs: number = 0;
-    private rttNs: number;
-    private rttTimeoutNs: number;
-    private readonly windowUpdateTimeoutNs: number;
+    private rttNs: number = 0;
+    private rttTimeoutNs: number = 0;
+    private readonly windowUpdateTimeoutNs: number = 0;
 
     private readonly errorHandler: ErrorHandler | null = null;
     private readonly rttIndicator!: AtomicCounter;

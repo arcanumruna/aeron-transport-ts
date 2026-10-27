@@ -72,7 +72,7 @@ describe('GateEndToEnd', () => {
     });
 
     /** `bench:gate` of the copy, HEAD of the copy as the base. */
-    function gate(pairs: number, inject?: string): GateRun {
+    function gate(pairs: number, inject?: string, calibrate = false): GateRun {
         const args = [
             '--experimental-transform-types',
             '--import',
@@ -91,6 +91,8 @@ describe('GateEndToEnd', () => {
             String(SAMPLES),
             // the host of a test run is not idle (the other test files run beside this one); the pairs are interleaved
             '--ignore-load',
+            // the verdict tests below size their own noise rule; the A/A run has a test of its own
+            ...(calibrate ? [] : ['--no-calibrate']),
             ...(undefined === inject ? [] : ['--inject', inject]),
         ];
         const run = spawnSync(process.execPath, args, { cwd: copy, encoding: 'utf8', timeout: TIMEOUT_MS });
@@ -128,6 +130,26 @@ describe('GateEndToEnd', () => {
             expect(run.status, run.output).toBe(EXIT_PASS);
             expect(run.output).toContain('bench gate: PASS');
             expect(run.output).not.toContain('--inject');
+        },
+        TIMEOUT_MS,
+    );
+
+    it(
+        'theGateRunsTheBaseAgainstItselfFirstUnlessToldNotTo',
+        () => {
+            // 5 pairs: the A/A run and the A/B run. The verdict depends on the host (a noisy one is NO_VERDICT with
+            // the spread), so this asserts what the gate says it did and that the A/A figures are in the output.
+            const run = gate(5, undefined, true);
+            expect(run.status, run.output).not.toBe(2);
+            expect(run.output).toContain('A/A calibration: the base against itself, 5 pairs');
+            expect(run.output).not.toContain('--no-calibrate');
+            if (EXIT_PASS !== run.status) {
+                expect(run.output).toMatch(/A\/A median ratio \d+\.\d{3}, spread \d+\.\d{3}|median ratio \d+\.\d{3} >/);
+            }
+
+            const skipped = gate(5);
+            expect(skipped.output).toContain('--no-calibrate: no A/A run');
+            expect(skipped.output).not.toContain('A/A calibration');
         },
         TIMEOUT_MS,
     );

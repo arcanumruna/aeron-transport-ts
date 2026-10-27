@@ -43,7 +43,7 @@ export class Category {
     public static readonly WARN: Category = new Category('WARN');
 
     private readonly _name: string;
-    private readonly _ordinal: number;
+    private readonly _ordinal: number = 0;
 
     private constructor(name: string) {
         this._name = name;

@@ -28,7 +28,7 @@ import type { CommandResult } from './CommandResult.js';
 import type { DutyCycleTracker } from './DutyCycleTracker.js';
 import type { NameResolverAgent } from './NameResolverAgent.js';
 import type { SystemCounters } from './status/SystemCounters.js';
-import { hostToLookUp, lookUpHost } from './HostNameLookup.js';
+import { hostsToLookUp, hostToLookUp, lookUpHost } from './HostNameLookup.js';
 import type { InetSocketAddress } from './jdkNet.js';
 import { MediaDriver, type MediaDriverContext } from './MediaDriver.js';
 import { UdpChannel } from './media/UdpChannel.js';
@@ -36,6 +36,14 @@ import { SystemCounterDescriptor } from './status/SystemCounterDescriptor.js';
 import { TimeTrackingNameResolver } from './TimeTrackingNameResolver.js';
 
 type Task = () => void;
+
+/** A parse that waits for the `dns.lookup` of the host names of its channel. */
+interface PendingLookup {
+    pending: number;
+    started: boolean;
+    done: boolean;
+    complete: () => void;
+}
 
 /**
  * Agent that does the work of the conductor's blocking commands: parsing channels (name resolution), re-resolution,
@@ -51,9 +59,10 @@ export class NativeResourceAgent implements Agent {
     private readonly nameResolver: TimeTrackingNameResolver;
     private readonly taskQueue: OneToOneConcurrentArrayQueue<Task>;
     private readonly freeFailsCounter: AtomicCounter;
-    private readonly freeLimit: number;
+    private readonly freeLimit: number = 0;
     private readonly logFactory: LogFactory;
     private readonly countedErrorHandler: CountedErrorHandler;
+    private readonly pendingLookups = new Set<PendingLookup>();
     private wakeUp: (() => void) | null = null;
 
     public constructor(ctx: MediaDriverContext) {
@@ -103,11 +112,80 @@ export class NativeResourceAgent implements Agent {
     }
 
     public onParseChannel(result: CommandResult<UdpChannel>, channel: string, isDestination: boolean): void {
-        try {
-            result.ok(UdpChannel.parse(channel, this.nameResolver, isDestination));
-        } catch (ex) {
-            result.error(ex as Error);
+        this.lookUpHostsThen(result, channel, () => {
+            try {
+                result.ok(UdpChannel.parse(channel, this.nameResolver, isDestination));
+            } catch (ex) {
+                result.error(ex as Error);
+            }
+        });
+    }
+
+    /**
+     * Fill the name cache on the driver's side (spec D7, D126, issue #12): the DNS names of the channel are looked up
+     * with `dns.lookup` first, and `complete` runs when the last one is over (a failed look-up leaves the cache as it
+     * is, so the parse then fails with the unknown host error). A channel with no name to look up, and a name that is
+     * in the cache, complete at once. {@link failPendingLookups} completes the ones still out.
+     */
+    private lookUpHostsThen<T>(result: CommandResult<T>, channel: string, complete: () => void): void {
+        const hosts = hostsToLookUp(channel);
+        if (0 === hosts.length) {
+            complete();
+            return;
         }
+
+        const lookup: PendingLookup = { pending: hosts.length, started: false, done: false, complete };
+        const onLookedUp = (): void => {
+            if (0 === --lookup.pending && lookup.started && !lookup.done) {
+                lookup.done = true;
+                this.pendingLookups.delete(lookup);
+                complete();
+                this.wakeUp?.();
+            }
+        };
+
+        try {
+            for (const host of hosts) {
+                lookUpHost(host, onLookedUp);
+            }
+        } catch (ex) {
+            // pending never reaches zero again for a look-up that did not start: the error is the answer
+            lookup.done = true;
+            result.error(ex as Error);
+            return;
+        }
+        lookup.started = true;
+        if (0 === lookup.pending) {
+            // every name was in the cache: the callbacks ran before the loop ended
+            lookup.done = true;
+            complete();
+        } else {
+            this.pendingLookups.add(lookup);
+        }
+    }
+
+    /**
+     * Completes every parse that waits for a `dns.lookup`, with the cache as it is now: a name that is not in it is
+     * the unknown host error, as when the look-up failed. A caller that blocks the one JS thread (a synchronous client
+     * call, spec D102) calls it, since the callback of a look-up cannot run while it waits; the callback that comes
+     * later still fills the cache and completes nothing.
+     *
+     * @return the number of parses completed.
+     */
+    public failPendingLookups(): number {
+        if (0 === this.pendingLookups.size) {
+            return 0;
+        }
+        let count = 0;
+        for (const lookup of this.pendingLookups) {
+            this.pendingLookups.delete(lookup);
+            if (!lookup.done) {
+                lookup.done = true;
+                lookup.complete();
+                count++;
+            }
+        }
+        return count;
     }
 
     public onReResolveAddress(result: CommandResult<InetSocketAddress>, endpoint: string, uriParamName: string): void {
@@ -146,11 +224,13 @@ export class NativeResourceAgent implements Agent {
     }
 
     public onDestinationAddress(result: CommandResult<InetSocketAddress>, channel: ChannelUri): void {
-        try {
-            result.ok(UdpChannel.destinationAddress(channel, this.nameResolver));
-        } catch (ex) {
-            result.error(ex as Error);
-        }
+        this.lookUpHostsThen(result, channel.toString(), () => {
+            try {
+                result.ok(UdpChannel.destinationAddress(channel, this.nameResolver));
+            } catch (ex) {
+                result.error(ex as Error);
+            }
+        });
     }
 
     public onFreeLogBuffer(rawLog: RawLog): void {

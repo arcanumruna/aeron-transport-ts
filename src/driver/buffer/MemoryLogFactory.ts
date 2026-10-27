@@ -35,9 +35,9 @@ const IMAGES = 'images';
 
 /** The meta data and the terms of the log are windows on `SharedArrayBuffer`s (spec D16), so that a worker can map them. */
 class MemoryRawLog implements RawLog {
-    private readonly _termLength: number;
+    private readonly _termLength: number = 0;
     private readonly logName: string;
-    private readonly logLength: number;
+    private readonly logLength: number = 0;
     private readonly termBufferWindows: UnsafeBuffer[] = [];
     private readonly logMetaDataBuffer: UnsafeBuffer;
     private readonly factory: MemoryLogFactory;
@@ -131,10 +131,10 @@ class MemoryRawLog implements RawLog {
  * relative path of the file of `FileStoreLogFactory`.
  */
 export class MemoryLogFactory implements LogFactory {
-    private readonly filePageSize: number;
+    private readonly filePageSize: number = 0;
     private readonly errorHandler: ErrorHandler | null;
     private readonly mappedBytesCounter: AtomicCounter;
-    private readonly singleBufferLimit: number;
+    private readonly singleBufferLimit: number = 0;
     private readonly logs = new Map<string, MemoryRawLog>();
 
     /**

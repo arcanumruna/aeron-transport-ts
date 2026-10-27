@@ -33,7 +33,7 @@ export class NamedInterface implements UnresolvedInterface {
     public static readonly OPENING_CHAR = '{';
 
     public readonly name: string;
-    public readonly port: number;
+    public readonly port: number = 0;
     public constructor(name: string, port: number) {
         this.name = name;
         this.port = port;

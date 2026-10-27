@@ -1039,12 +1039,12 @@ export class DynamicSndMultiDestination extends MultiSndDestination {
  * @internal package-private in Java
  */
 export class Destination {
-    public timeOfLastActivityNs: number;
+    public timeOfLastActivityNs: number = 0;
     public receiverIdHigh = 0;
     public receiverIdLow = 0;
-    public readonly registrationId: number;
+    public readonly registrationId: number = 0;
     public isReceiverIdValid: boolean;
-    public port: number;
+    public port: number = 0;
     public address: InetSocketAddress;
     public readonly endpoint: string | null;
 

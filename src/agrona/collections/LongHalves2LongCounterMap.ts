@@ -30,7 +30,7 @@ import { LongHalves2LongHashMap } from './LongHalves2LongHashMap.js';
  */
 export class LongHalves2LongCounterMap {
     private readonly map: LongHalves2LongHashMap;
-    private readonly initial: number;
+    private readonly initial: number = 0;
 
     /**
      * Construct a map with the given initial value.

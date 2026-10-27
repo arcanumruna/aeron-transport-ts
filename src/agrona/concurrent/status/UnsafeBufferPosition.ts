@@ -31,9 +31,9 @@ const { SIZE_OF_LONG } = BitUtil;
  */
 export class UnsafeBufferPosition extends Position {
     private _isClosed = false;
-    private readonly counterId: number;
+    private readonly counterId: number = 0;
     private readonly buffer: UnsafeBuffer;
-    private readonly counterOffset: number;
+    private readonly counterOffset: number = 0;
     private readonly countersManager: CountersManager | null;
 
     /**

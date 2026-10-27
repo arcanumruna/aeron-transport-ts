@@ -25,13 +25,13 @@ const LARGE_POSITION = 2 ** 40;
 type Case = 'writeAndRead' | 'tryClaimCommitAndRead' | 'tryClaimAbortAndRead' | 'controlledRead' | 'sizeAndPositions';
 
 /**
- * Interim allowances of the `LargePosition` cases: the heap numbers per iteration (write + read, claim + commit + read
- * and so on) that a case may allocate, each the minimum bound that passes over an ArrayBuffer (many-to-one measures 4
- * or 5 depending on how V8 inlines the loop, so 5; one-to-one 4; `size`, the positions and the heartbeat: 4, as
- * many-to-one measures 3 or 4 depending on the inlining). They are caused by the `long` paths of `jdk.ts` and `UnsafeBuffer`, which box a position above 2^31 across calls that are not
- * inlined; both are owned by T2b, whose fix round drives these numbers down to 0 (issue #19, heap numbers at large
- * positions). The SharedArrayBuffer cases use the same bounds, except where `SHARED_LARGE_POSITION_HEAP_NUMBERS`
- * overrides them.
+ * Upper bounds of the `LargePosition` cases (spec D127): the heap numbers per iteration (write + read, claim + commit +
+ * read and so on) that a case may allocate, each the minimum bound that passes over an ArrayBuffer, in the order of this
+ * file (many-to-one measures 4 or 5 depending on how V8 inlines the loop, so 5; one-to-one 4; `size`, the positions
+ * and the heartbeat: 4). The ring buffers keep Java's code, which calls up to five `long` operations of `UnsafeBuffer`
+ * of 370 to 600 bytecode bytes each, and V8 inlines 920 in all: the operations that are not inlined box the position they
+ * take or return (issue #19). The SharedArrayBuffer cases use the same bounds, except where
+ * `SHARED_LARGE_POSITION_HEAP_NUMBERS` overrides them.
  */
 export const LARGE_POSITION_HEAP_NUMBERS: Readonly<Record<'many-to-one' | 'one-to-one', Record<Case, number>>> = {
     'many-to-one': {
@@ -51,9 +51,9 @@ export const LARGE_POSITION_HEAP_NUMBERS: Readonly<Record<'many-to-one' | 'one-t
 };
 
 /**
- * Overrides of `LARGE_POSITION_HEAP_NUMBERS` for a SharedArrayBuffer, each the minimum bound that passes. Measured after
- * T2b: one-to-one `size`, the positions and the heartbeat box 5 per iteration on the striped 64-bit path (D16), one
- * more than over an ArrayBuffer (issue #19).
+ * Overrides of `LARGE_POSITION_HEAP_NUMBERS` for a SharedArrayBuffer, each the minimum bound that passes: one-to-one
+ * `size`, the positions and the heartbeat box 5 per iteration on node 24 (1 on node 22), one more than over an
+ * ArrayBuffer (issue #19, spec D127).
  */
 const SHARED_LARGE_POSITION_HEAP_NUMBERS: Readonly<
     Record<'many-to-one' | 'one-to-one', Partial<Record<Case, number>>>

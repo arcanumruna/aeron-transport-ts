@@ -17,10 +17,15 @@
  */
 // Port of io/aeron/logbuffer/LogBufferUnblocker.java @ 1.53.3
 import type { UnsafeBuffer } from '../../agrona/concurrent/UnsafeBuffer.js';
+import { BitUtil } from '../../agrona/BitUtil.js';
 import { LogBufferDescriptor } from './LogBufferDescriptor.js';
 import { Status, TermUnblocker } from './TermUnblocker.js';
 
-const { indexByTermCount, rawTailVolatile, rotateLog, termOffset } = LogBufferDescriptor;
+const { indexByTermCount, rotateLog } = LogBufferDescriptor;
+const { SIZE_OF_LONG } = BitUtil;
+
+/** Scratch for the halves of a raw tail (spec D12, D16): the module is used on one thread at a time. */
+const RAW_TAIL_HALVES = new Int32Array(2);
 
 /**
  * Provides the functionality to unblock a log at a given position.
@@ -50,17 +55,22 @@ export class LogBufferUnblocker {
         const activeTermCount = LogBufferDescriptor.activeTermCount(logMetaDataBuffer);
 
         if (activeTermCount === ((blockedTermCount - 1) | 0) && blockedOffset === 0) {
-            const currentTermId = LogBufferDescriptor.termId(
-                rawTailVolatile(logMetaDataBuffer, indexByTermCount(activeTermCount)),
+            const currentTermId = LogBufferDescriptor.rawTailTermId(
+                logMetaDataBuffer,
+                indexByTermCount(activeTermCount),
             );
             rotateLog(logMetaDataBuffer, activeTermCount, currentTermId);
             return true;
         }
 
         const blockedIndex = indexByTermCount(blockedTermCount);
-        const rawTail = rawTailVolatile(logMetaDataBuffer, blockedIndex);
-        const termId = LogBufferDescriptor.termId(rawTail);
-        const tailOffset = termOffset(rawTail, termLength);
+        // Java's one `rawTailVolatile` read, as halves (spec D12): no `bigint` is allocated
+        logMetaDataBuffer.getLongVolatileHalves(
+            LogBufferDescriptor.TERM_TAIL_COUNTERS_OFFSET + SIZE_OF_LONG * blockedIndex,
+            RAW_TAIL_HALVES,
+        );
+        const termId = RAW_TAIL_HALVES[1]!;
+        const tailOffset = Math.min(RAW_TAIL_HALVES[0]! >>> 0, termLength) | 0;
         const termBuffer = termBuffers[blockedIndex] as UnsafeBuffer;
 
         switch (TermUnblocker.unblock(logMetaDataBuffer, termBuffer, blockedOffset, tailOffset, termId)) {

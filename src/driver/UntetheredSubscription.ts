@@ -31,7 +31,7 @@ export class UntetheredSubscriptionState {
     public static readonly RESTING: UntetheredSubscriptionState = new UntetheredSubscriptionState('RESTING');
 
     private readonly _name: string;
-    private readonly _ordinal: number;
+    private readonly _ordinal: number = 0;
 
     private constructor(name: string) {
         this._name = name;
@@ -70,7 +70,7 @@ export class UntetheredSubscription {
     public static readonly State = UntetheredSubscriptionState;
 
     private _state: UntetheredSubscriptionState = ACTIVE;
-    public timeOfLastUpdateNs: number;
+    public timeOfLastUpdateNs: number = 0;
     public readonly subscriptionLink: SubscriptionLink;
     public readonly position: ReadablePosition;
 

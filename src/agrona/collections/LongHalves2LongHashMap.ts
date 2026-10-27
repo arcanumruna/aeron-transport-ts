@@ -57,8 +57,8 @@ export type LongHalvesLongPredicate = (keyHigh: number, keyLow: number, value: n
 export class LongHalves2LongHashMap {
     static readonly MIN_CAPACITY = 8;
 
-    private readonly loadFactorValue: number;
-    private readonly missingValueValue: number;
+    private readonly loadFactorValue: number = 0;
+    private readonly missingValueValue: number = 0;
     private resizeThresholdValue = 0;
     /** @internal accessed by the nested classes, which are in this file */
     public _size = 0;
@@ -1196,9 +1196,9 @@ export class LongHalves2LongHashMapEntryIterator extends AbstractIterator implem
  */
 export class LongHalves2LongHashMapMapEntry implements LongHalves2LongHashMapEntry {
     private readonly map: LongHalves2LongHashMap;
-    private readonly hi: number;
-    private readonly lo: number;
-    private readonly v: number;
+    private readonly hi: number = 0;
+    private readonly lo: number = 0;
+    private readonly v: number = 0;
 
     public constructor(map: LongHalves2LongHashMap, hi: number, lo: number, v: number) {
         this.map = map;

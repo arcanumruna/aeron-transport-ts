@@ -25,8 +25,8 @@ import type { DriverManagedResource } from './DriverManagedResource.js';
  * Aeron client library tracker.
  */
 export class AeronClient implements DriverManagedResource {
-    private readonly _clientId: number;
-    private readonly clientLivenessTimeoutMs: number;
+    private readonly _clientId: number = 0;
+    private readonly clientLivenessTimeoutMs: number = 0;
     private reachedEndOfLife = false;
     private closedByCommand = false;
     private readonly clientTimeouts: AtomicCounter;

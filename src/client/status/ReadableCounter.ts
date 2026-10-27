@@ -34,8 +34,8 @@ const { SIZE_OF_LONG } = BitUtil;
 export class ReadableCounter implements AutoCloseable {
     private readonly countersReader: CountersReader;
     private readonly valueBuffer: UnsafeBuffer;
-    private readonly _registrationId: number;
-    private readonly _counterId: number;
+    private readonly _registrationId: number = 0;
+    private readonly _counterId: number = 0;
     private _isClosed = false;
 
     /**

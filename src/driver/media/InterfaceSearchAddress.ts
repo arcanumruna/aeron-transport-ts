@@ -37,7 +37,7 @@ export class InterfaceSearchAddress implements UnresolvedInterface {
     private static readonly WILDCARD = new InterfaceSearchAddress(new InetSocketAddress(0), 0);
 
     public readonly address: InetSocketAddress;
-    public readonly subnetPrefix: number;
+    public readonly subnetPrefix: number = 0;
     public constructor(address: InetSocketAddress, subnetPrefix: number) {
         this.address = address;
         this.subnetPrefix = subnetPrefix;

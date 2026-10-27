@@ -9,6 +9,8 @@ import {
     EXIT_PASS,
     EXIT_USAGE,
     type Expected,
+    RULES,
+    unsteady,
     MIN_TAIL_SAMPLES,
     type Line,
     type Pair,
@@ -303,5 +305,140 @@ describe('GateSummarize', () => {
         );
         expect(run.status).toBe(EXIT_USAGE);
         expect(run.stderr).toContain('unknown argument: --bogus');
+    });
+});
+
+describe('GateCalibration (issue #29: the A/A run of the base against itself)', () => {
+    const FILE = 'x.bench.ts';
+    const LATENCY: Expected = { name: 'lat', file: FILE };
+    const THROUGHPUT: Expected = { name: 'thr', file: FILE };
+    const line = (name: string, scale: number, samples = 2000): Line => ({
+        name,
+        nsPerOp: 100 * scale,
+        p50: 100 * scale,
+        p99: 200 * scale,
+        p999: 400 * scale,
+        samples,
+        ...('thr' === name ? { opsPerSec: 1000 * scale } : {}),
+    });
+    /** Pairs whose candidate (or second) run is the base scaled by each of the ratios, on every metric. */
+    const pairsOf = (ratio: readonly number[], samples = 2000): PairLines[] =>
+        ratio.map((r) => ({
+            base: [line('lat', 1, samples), line('thr', 1, samples)],
+            cand: [line('lat', r, samples), line('thr', r, samples)],
+        }));
+    const STEADY = [1, 1, 1, 1, 1];
+    const metricOf = (summary: ReturnType<typeof summarize>, bench: number, label: string) =>
+        summary.benches[bench]?.metrics.find((m) => label === m.label);
+
+    it('noCalibrationIsTheVerdictOfBefore', () => {
+        const summary = summarize(pairsOf(STEADY), [LATENCY, THROUGHPUT]);
+        expect(summary.status).toBe('PASS');
+    });
+
+    it('aSteadyHostGivesTheVerdictOfTheABRun', () => {
+        const pass = summarize(pairsOf(STEADY), [LATENCY, THROUGHPUT], REQUIRED_PAIRS, pairsOf(STEADY));
+        expect(pass.status).toBe('PASS');
+        expect(pass.exitCode).toBe(EXIT_PASS);
+
+        const fail = summarize(pairsOf([1.3, 1.3, 1.3, 1.3, 1.3]), [LATENCY], REQUIRED_PAIRS, pairsOf(STEADY));
+        expect(fail.status).toBe('FAIL');
+        expect(fail.exitCode).toBe(EXIT_FAIL);
+    });
+
+    // [name, A/A ratios, label, bench index, expected status of the metric, text of the reason]
+    it.each([
+        // the median of the A/A ratios beyond the limit of the metric (1.05 for ns/op and p50, 0.95 for ops/s)
+        [
+            'median over 1.05 on ns/op',
+            [1.08, 1.08, 1.08, 1.08, 1.08],
+            'ns/op',
+            0,
+            'NO_VERDICT',
+            'A/A median ratio 1.080',
+        ],
+        ['median over 1.05 on p50', [1.06, 1.06, 1.06, 1.06, 1.06], 'p50', 0, 'NO_VERDICT', 'A/A median ratio 1.060'],
+        ['median under 0.95 on ops/s', [0.9, 0.9, 0.9, 0.9, 0.9], 'ops/s', 1, 'NO_VERDICT', 'A/A median ratio 0.900'],
+        // a median inside the limit but pair ratios spread wider than the band 1 +/- 0.05, max - min over 0.10
+        ['spread 0.40 around 1.0', [0.8, 1.2, 0.8, 1.2, 1.0], 'ns/op', 0, 'NO_VERDICT', 'spread 0.400'],
+        ['spread 0.11 just over', [0.94, 1.0, 1.0, 1.0, 1.05], 'ns/op', 0, 'NO_VERDICT', 'spread 0.110'],
+        ['spread 0.08 just inside', [0.96, 1.0, 1.0, 1.0, 1.04], 'ns/op', 0, 'PASS', ''],
+        ['a median of exactly the limit is steady', [1.05, 1.05, 1.05, 1.05, 1.05], 'ns/op', 0, 'PASS', ''],
+        ['ops/s median exactly 0.95 is steady', [0.95, 0.95, 0.95, 0.95, 0.95], 'ops/s', 1, 'PASS', ''],
+        ['all ones', STEADY, 'ns/op', 0, 'PASS', ''],
+    ] as const)('%s', (_name, aa, label, bench, status, reason) => {
+        const summary = summarize(pairsOf(STEADY), [LATENCY, THROUGHPUT], REQUIRED_PAIRS, pairsOf(aa));
+        const metric = metricOf(summary, bench, label);
+        expect(metric?.status).toBe(status);
+        if ('' !== reason) {
+            expect(metric?.message).toContain(reason);
+            expect(metric?.message).toContain('the host is too noisy');
+            expect(summary.benches[bench]?.status).toBe('NO_VERDICT');
+            expect(summary.exitCode).toBe(EXIT_NO_VERDICT);
+        }
+    });
+
+    it('aNoisyMetricIsNoVerdictEvenWhenTheABRunFails', () => {
+        const summary = summarize(
+            pairsOf([1.5, 1.5, 1.5, 1.5, 1.5]),
+            [LATENCY],
+            REQUIRED_PAIRS,
+            pairsOf([0.7, 1.3, 0.7, 1.3, 1.0]),
+        );
+        expect(metricOf(summary, 0, 'ns/op')?.status).toBe('NO_VERDICT');
+        expect(metricOf(summary, 0, 'p50')?.status).toBe('NO_VERDICT');
+        expect(summary.benches[0]?.status).toBe('NO_VERDICT');
+        expect(summary.exitCode).toBe(EXIT_NO_VERDICT);
+    });
+
+    it('theLimitOfEachMetricIsItsOwn', () => {
+        // a spread of 0.15 is over the 0.10 band of ns/op (limit 1.05) but inside the 0.20 band of p99 (limit 1.10)
+        const aa = pairsOf([0.93, 1.0, 1.0, 1.0, 1.08], 20_000);
+        const summary = summarize(pairsOf(STEADY, 20_000), [LATENCY], REQUIRED_PAIRS, aa);
+        expect(metricOf(summary, 0, 'ns/op')?.status).toBe('NO_VERDICT');
+        expect(metricOf(summary, 0, 'p99')?.status).toBe('PASS');
+        expect(metricOf(summary, 0, 'p99.9')?.status).toBe('PASS');
+        // 0.30 is over both
+        const wide = summarize(
+            pairsOf(STEADY, 20_000),
+            [LATENCY],
+            REQUIRED_PAIRS,
+            pairsOf([0.85, 1.0, 1.0, 1.0, 1.15], 20_000),
+        );
+        expect(metricOf(wide, 0, 'p99')?.status).toBe('NO_VERDICT');
+        expect(metricOf(wide, 0, 'p99.9')?.status).toBe('NO_VERDICT');
+    });
+
+    it('theTailMetricsBelowTheSampleCountAreInformationAndAreNotCalibrated', () => {
+        const summary = summarize(pairsOf(STEADY), [LATENCY], REQUIRED_PAIRS, pairsOf([0.5, 1.5, 0.5, 1.5, 1.0]));
+        expect(metricOf(summary, 0, 'p99')?.status).toBe('INFO');
+        expect(metricOf(summary, 0, 'ns/op')?.status).toBe('NO_VERDICT');
+    });
+
+    it('anACalibrationWithoutAValidRatioIsNoVerdict', () => {
+        for (const aa of [[], [{ base: [line('lat', 1)], cand: [{ name: 'lat', error: 'the process failed' }] }]]) {
+            const summary = summarize(pairsOf(STEADY), [LATENCY], REQUIRED_PAIRS, aa as PairLines[]);
+            expect(metricOf(summary, 0, 'ns/op')?.status).toBe('NO_VERDICT');
+            expect(metricOf(summary, 0, 'ns/op')?.message).toContain('A/A run has no valid ratio');
+            expect(summary.exitCode).toBe(EXIT_NO_VERDICT);
+        }
+    });
+
+    it('aBenchThatIsNotApplicableInTheBaseIsNotCalibrated', () => {
+        const runsNa: PairLines[] = Array.from({ length: 5 }, () => ({
+            base: [{ name: FILE, error: 'import: no such api' }],
+            cand: [line('lat', 1), line('thr', 1)],
+        }));
+        const summary = summarize(runsNa, [LATENCY], REQUIRED_PAIRS, []);
+        expect(summary.benches[0]?.notes).toEqual(['n/a in base']);
+        expect(summary.status).toBe('PASS');
+    });
+
+    it('unsteadyNamesTheMeasuredSpreadAndEveryRatio', () => {
+        const rule = RULES.find((r) => 'ns/op' === r.label)!;
+        expect(unsteady(rule, { median: 1, spread: 0.1, ratios: [0.95, 1.05] })).toBeUndefined();
+        const reason = unsteady(rule, { median: 1, spread: 0.5, ratios: [0.75, 1.25] });
+        expect(reason).toContain('spread 0.500');
+        expect(reason).toContain('0.750, 1.250');
     });
 });

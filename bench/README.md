@@ -37,12 +37,12 @@ reports NO_VERDICT for it.
 ## The gate
 
 ```
-npm run bench:gate -- --base <ref> [--pairs n] [--filter s] [--file s] [--samples n] [--seed n] [--ignore-load] [--inject spec]
+npm run bench:gate -- --base <ref> [--pairs n] [--filter s] [--file s] [--samples n] [--seed n] [--ignore-load] [--no-calibrate] [--inject spec]
 ```
 
 It extracts `<ref>` (default `origin/main`) with `git archive` into a scratch directory under the temp directory,
 outside the repository, copies the candidate's `bench/` and worker loader into it, and runs each bench file as a
-separate process on both sides, `--pairs` times (default 5; latency benches need 5, throughput benches 3). The candidate
+separate process on both sides, `--pairs` times (default 15, the count at which a verdict is believed, see "Noise" below; latency benches need at least 5, throughput benches 3, and `--pairs 5` is the quick check). The candidate
 is the working tree. **The order within a pair is random**: a seeded PRNG (mulberry32) decides per pair and file whether
 the base or the candidate runs first, so that neither always runs first. The seed is printed (`seed ...`) and settable
 with `--seed`, which repeats the order. Bench processes start with `--expose-gc`. The scratch directory is deleted at
@@ -52,6 +52,25 @@ the end, also on a failure.
 it prints a warning and exits 3 (NO_VERDICT) without running. `--ignore-load` overrides this for local experiments and
 the gate prints that it was used.
 
+**A/A calibration.** Before the A/B pairs the gate runs the base against itself, for the same number of pairs
+(`A/A calibration: ...` on stderr). Two runs of the same code can differ by more than the limits on a shared host, and then
+a PASS or a FAIL says nothing about the candidate. For each metric that is a verdict (ns/op, p50, ops/s, and p99 / p99.9
+from 20,000 samples) the A/A pair ratios are checked, and the metric is **NO_VERDICT** instead of PASS or FAIL, with the
+measured median and spread in the message (`ns/op: A/A median ratio 1.012, spread 0.310 (pairs: ...), wider than 0.100:
+the host is too noisy for a verdict on this metric`), when
+
+- the median of its A/A ratios is beyond the metric's limit (over 1.05 for ns/op and p50, over 1.10 for p99 and p99.9,
+  under 0.95 for ops/s): the host alone would fail the gate; or
+- its A/A pair ratios spread (`max - min`) wider than the band the limit allows around 1, which is twice the distance of
+  the limit from 1 (0.10 for ns/op, p50 and ops/s, 0.20 for p99 and p99.9), so that a pair ratio of the A/B run cannot be
+  told from the host's own noise; or
+- the A/A run has no valid ratio for it.
+
+A metric that fails the A/A check is NO_VERDICT even if the A/B median is over its limit: rerun on an idle host.
+`--no-calibrate` skips the A/A run (the tests of the gate use it, they size their own noise rule); the gate says so.
+The A/A logic is `calibrate` and `unsteady` in `bench/lib/verdict.ts`, tested table-driven in
+`test/extra/bench/GateVerdict.test.ts` (`GateCalibration`).
+
 **It never passes without a verdict.** The benches expected are the ones the candidate's bench modules export, not the
 ones a run printed (`summarize` in `bench/lib/verdict.ts`):
 
@@ -59,7 +78,8 @@ ones a run printed (`summarize` in `bench/lib/verdict.ts`):
 - a bench file that fails to import in the base (`import:`) is `n/a in base` and passes; any other failure of the base
   (a bench new in the candidate whose setup fails, a base process that died, no result printed) is NO_VERDICT;
 - a metric with no valid ratio (NaN, zero or missing values) is NO_VERDICT, not a pass;
-- a bench with fewer pairs than required (5 latency, 3 throughput) is NO_VERDICT.
+- a bench with fewer pairs than required (5 latency, 3 throughput) is NO_VERDICT;
+- a metric the A/A calibration finds too noisy is NO_VERDICT (above).
 
 For each bench and metric the verdict is on the **median of the per-pair ratios candidate / base** (for an even number
 of pairs, the mean of the two middle ratios). It fails when the median is
@@ -101,7 +121,7 @@ sets `AERON_BENCH_INJECT` for the **candidate** runs only (the base never inheri
 (`bench/lib/inject.ts`, spec D110). It exists to prove that the gate fails a slow candidate: the tests of the gate use it
 (below), and nothing in `src/` has a hook.
 
-**Noise is never a verdict: rerun with `--pairs 15`, then bisect.** Run it on an idle machine; shared CI runners are
+**Noise is never a verdict: rerun with `--pairs 15` (the default), then bisect.** Run it on an idle machine; shared CI runners are
 too noisy for latency, so CI only runs the benches once per PR and reports the numbers.
 
 ## Baselines
@@ -271,6 +291,48 @@ three passed (0.982, 1.017, 0.999) and the resend bench failed (1.080). Because 
 T1, T4 and the merge do not change the resend path. A second 15-pair run of d08decb against `origin/main` gave 0.972.
 No step regresses, so the single 1.080 was noise.
 
+### UnsafeBuffer int accessors (issue #8)
+
+`npm run bench:micro -- --file unsafebuffer`, 2026-10-26, Node v22.22.0, same host (4 cores, shared with other builds, so
+indicative only). One operation of the first two benches is 16 `putInt` and 16 `getInt` at distinct indices with the
+default `byteOrder`; the other two are `TermRebuilder.insert` of a 32 byte frame (9 `getInt`, 8 `putInt`, one release
+store). Median of 6 runs each, base and candidate interleaved (ABAB), ns per operation. The base is the tree before the
+fix: `boundsCheck0` called `Objects.checkFromIndexSize` (a template string in its throw, counted against the inlining
+budget of every caller), and `byteOrder` was a default parameter compared with `ByteOrder.LITTLE_ENDIAN`. The candidate
+tests the bounds inline, throws from a cold function, and takes an omitted `byteOrder` as the native order without
+loading it (Java has the two overloads).
+
+| Bench                                                  | base ns/op | candidate ns/op | ratio |
+| ------------------------------------------------------ | ---------- | --------------- | ----- |
+| UnsafeBuffer 16 putInt + 16 getInt (ArrayBuffer)       | 137.2      | 78.6            | 0.57  |
+| UnsafeBuffer 16 putInt + 16 getInt (SharedArrayBuffer) | 180.4      | 81.5            | 0.45  |
+| TermRebuilder.insert 32 B (ArrayBuffer)                | 118.7      | 94.3            | 0.79  |
+| TermRebuilder.insert 32 B (SharedArrayBuffer)          | 133.8      | 110.0           | 0.82  |
+
+### UnsafeBuffer long operations (issue #19)
+
+`npm run bench:micro -- --file unsafebuffer`, 2026-10-26, Node v22.22.0, same host, median of 6 runs each, base and candidate
+interleaved (ABAB), ns per operation. One operation is 8 `putLongRelease` + 8 `getLongVolatile`, 8 `getAndAddLong` or 8
+`compareAndSetLong` on words of about 2^40, in a process that has run both backings. The base is the tree before the fix: each
+`long` method was a dispatcher over a striped body and a plain body, each over helpers. The candidate is one function for
+`getLongVolatile` and `putLongVolatile` (their aliases are the same function objects) and a dispatcher over two flat bodies for
+the others.
+
+| Bench                                                            | base ns/op | candidate ns/op | ratio |
+| ---------------------------------------------------------------- | ---------- | --------------- | ----- |
+| 8 putLongRelease + 8 getLongVolatile at 2^40 (ArrayBuffer)       | 104.8      | 97.9            | 0.93  |
+| 8 putLongRelease + 8 getLongVolatile at 2^40 (SharedArrayBuffer) | 639.6      | 596.9           | 0.93  |
+| 8 getAndAddLong at 2^40 (ArrayBuffer)                            | 76.9       | 74.7            | 0.97  |
+| 8 getAndAddLong at 2^40 (SharedArrayBuffer)                      | 338.7      | 304.3           | 0.90  |
+| 8 compareAndSetLong at 2^40 (ArrayBuffer)                        | 89.6       | 79.6            | 0.89  |
+| 8 compareAndSetLong at 2^40 (SharedArrayBuffer)                  | 375.9      | 322.3           | 0.86  |
+
+The hot paths that call them do not get slower (candidate / base of the median ns/op, ABAB): OneToOneRingBuffer write+read
+0.96 and tryClaim+commit+read 1.00 (10 runs); ManyToOneRingBuffer write+read 0.97 (10) and tryClaim+commit+read 1.00 (15);
+BroadcastTransmitter + receiveNext 0.99 and + CopyBroadcastReceiver 0.99 (8); ConcurrentPublication offer 0.99 and tryClaim +
+commit 0.99 (15); Image poll 1.00 and controlledPoll 0.99 (8). A first run of 5 to 8 pairs of some of these gave up to 1.08 and
+1.05, and 10 to 15 pairs gave the figures above: on this shared host fewer than 10 pairs does not settle a 5% difference.
+
 ### Receiver (T16)
 
 `bench/micro/receiver.bench.ts`: `Receiver.doWork` on a real `PublicationImage` over an in-memory log (`SharedArrayBuffer`),
@@ -288,6 +350,17 @@ harness (2,000 samples, median of the repeats).
 | Receiver doWork: one heartbeat (frame length 0)                                                        | 421.4   | 408.6   | 809.4   | 1,335.6 |
 | Receiver doWork: an idle cycle (no command, no datagram, the image has nothing to send)                | 96.8    | 94.1    | 188.6   | 231.3   |
 
+The MTU bench (issue #43) is one datagram of 1408 B (a data frame of 1376 B of payload, and the padding frame that ends each
+64 KiB term), with the conductor's `trackRebuild` and the subscriber every 4th operation. Frames of the MTU pass the 2^30 that
+a small integer holds within one run of the harness (6.2 million operations are 8.7 GB), so the bench makes 10 rigs in
+`setup` and moves to the next one after 700,000 frames (985 MB, below 2^30): a rig takes 2 to 3 ms to make, which a timed
+sample must not contain. One run of the harness, 2026-10-26, same Node and host (load average 3.4 at the start, 4 cores,
+so indicative only), 2,000 samples:
+
+| Bench                                                                                                           | ns/op   | p50     | p99     | p99.9   |
+| --------------------------------------------------------------------------------------------------------------- | ------- | ------- | ------- | ------- |
+| Receiver doWork: one data frame of 1408 B (the MTU), padding at the end of each term, positions of 1 GB per rig | 1,626.8 | 1,507.6 | 3,123.9 | 6,400.8 |
+
 ### Publications and images (T20)
 
 `bench/micro/publication.bench.ts`: `offer` and `tryClaim` + `commit` of a `ConcurrentPublication` (one atomic add of the raw
@@ -298,6 +371,13 @@ frames written by the setup and move the subscriber back to its start after the 
 (`expectNoAllocation` in `PublicationAllocationTest` and `ImageAllocationTest`, also from a position of 2^40). Measured on 4
 cores with a load average of about 5 (other tasks were running), n=1 run of the harness (2,000 samples, median of the repeats),
 so the figures are upper bounds; the baseline for the gate is to be taken on the idle machine.
+
+**Provisional (issue #45).** This baseline was recorded under load (average about 5 on 4 cores, above the 0.5 x cores that
+the gate itself refuses), so it is provisional until it is re-recorded with `npm run bench:micro -- --file publication` on
+an idle host. Do not use it as a reference for a verdict or a regression claim; `bench:gate` against a base compares two
+runs on the same host and does not depend on it. There is no tool that records baselines (the tables here are pasted by
+hand from the output of `bench:micro`), so nothing can refuse a recording; `bench:micro` prints `PROVISIONAL` after the load average when it is over 0.5 x cores
+(the gate's own limit), and such a run must not be recorded. Write the load average at the start next to the table.
 
 | Bench                                                                               | ns/op | p50   | p99   | p99.9   |
 | ----------------------------------------------------------------------------------- | ----- | ----- | ----- | ------- |
@@ -416,6 +496,24 @@ Aeron puts the small messages of one cycle in one datagram, so at 64 B it moves 
 datagrams. At 1376 B every message is a datagram and the port reaches 44% of the floor in messages per second, 21 us per
 message: the sender sends one frame per cycle and a cycle is a turn of the event loop (D11), the first place to look.
 
+Issue #53 looked at that: the sender sends one frame per publication per cycle as Java's does, a runner runs up to 16 cycles
+in one turn (D114), and raising the batch to 64 or 256 cycles changes nothing (medians of 10 interleaved streams: 86,250,
+86,771 and 88,267 msgs/s). What did cost throughput was the zeroing of the term behind the stream: V8's `fill` of a
+`SharedArrayBuffer` is 10 to 15 times slower than a copy, 0.6 us of every 1376 B frame (D123). Interleaved (base, candidate,
+base, ...), 12 pairs, one process each, 50,000 messages after a warm-up of 5,000, 2026-10-26, same Node and host (load average 3
+to 6 on 4 cores: the spread is the host's), medians:
+
+| bytes | path                           | base (before #52, #53) msgs/s | candidate msgs/s | min..max, base   | min..max, candidate |
+| ----- | ------------------------------ | ----------------------------- | ---------------- | ---------------- | ------------------- |
+| 64    | Aeron TS                       | 227,394                       | 253,985          | 164,045..303,003 | 191,210..291,457    |
+| 1376  | Aeron TS                       | 78,382                        | 85,275           | 48,705..88,326   | 70,703..92,464      |
+| 1376  | raw dgram floor (credit of 64) | 139,658                       | 139,386          | 116,102..156,481 | 123,809..150,624    |
+
+That is 56% and 61% of the floor at 1376 B. The rest is inherent to a single node thread and node's `dgram` (D124): the CPU
+profile of the stream is 33% in the `sendmsg` call of `dgram` (on the loopback it also delivers the datagram), 25% in the
+event loop's poll (`recvmsg` and the `'message'` callback), 24% in `src/` (4.2 us a message: four copies of the frame, the
+bounds checks, the counters) and the rest in the collector, timers and the harness.
+
 Allocation per message (estimates, bytes per message):
 
 | run                                       | port   | node   | harness | other | minor GCs per 1000 msgs |
@@ -430,7 +528,12 @@ measured it at 134 to 141 B/msg in the 64 B stream; it took out the `UnsafeBuffe
 each duty cycle (D114), and the column went to 31.8 (the 64 B stream row above was measured once with `--runs 1`, the
 others are from before the change). What is left in `src/` is the heap numbers of D13: the `nowNs` that `Sender.doWork`,
 `Receiver.doWork` and `DriverConductor.doWork` pass on (7 to 8 B/msg each) and `ClientConductor.service` (4). The
-rest of a send is node's own (about 47 B per datagram, D113). The figures are per message of a run, so they grow with the
+rest of a send is node's own (about 47 B per datagram, D113). Issue #52 then found that the times and positions
+stored in the fields that were declared with no number (`PublicationImage.timeOfLastPacketNs`, `NetworkPublication.timeOfLastDataOrHeartbeatNs`,
+`ClientConductor.timeOfLastServiceNs`, ... 291 fields, D122) allocated a heap number per store, and the column of a later run
+went from 48.4 to 36.8 B/msg at 64 B and from 282.7 to 245.2 at 1376 B; what is left is the `nowNs` of each duty cycle (D112)
+and node's own work attributed to the runner's functions. `EndToEndAllocationTest` runs the whole path over a loopback fake
+of `dgram` and bounds the bytes per step. The figures are per message of a run, so they grow with the
 datagrams per message (1376 B) and with the cycles per message (the round trip spins the loop many times for each
 message). Recorded, not a gate. The minor
 collections are rare (0.02 per 1000 messages at 64 B).

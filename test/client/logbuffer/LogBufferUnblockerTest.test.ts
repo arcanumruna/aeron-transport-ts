@@ -16,7 +16,7 @@
  * Modified: ported to TypeScript for aeron-transport-ts.
  */
 // Port of io/aeron/logbuffer/LogBufferUnblockerTest.java @ 1.53.3
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { UnsafeBuffer } from '../../../src/agrona/concurrent/UnsafeBuffer.js';
 import { LogBufferDescriptor } from '../../../src/client/logbuffer/LogBufferDescriptor.js';
 import { LogBufferUnblocker } from '../../../src/client/logbuffer/LogBufferUnblocker.js';
@@ -50,7 +50,7 @@ describe('LogBufferUnblocker', () => {
     let termBuffers: UnsafeBuffer[];
     let positionBitsToShift: number;
     let compareAndSetInt: ReturnType<typeof vi.spyOn>;
-    let casRawTail: ReturnType<typeof vi.spyOn>;
+    let compareAndSetLongHalves: ReturnType<typeof vi.spyOn>;
 
     beforeEach(() => {
         positionBitsToShift = LogBufferDescriptor.positionBitsToShift(TERM_LENGTH);
@@ -70,11 +70,7 @@ describe('LogBufferUnblocker', () => {
         }
 
         compareAndSetInt = vi.spyOn(logMetaDataBuffer, 'compareAndSetInt');
-        casRawTail = vi.spyOn(LogBufferDescriptor, 'casRawTail');
-    });
-
-    afterEach(() => {
-        casRawTail.mockRestore();
+        compareAndSetLongHalves = vi.spyOn(logMetaDataBuffer, 'compareAndSetLongHalves');
     });
 
     it('shouldNotUnblockWhenPositionHasCompleteMessage', () => {
@@ -137,14 +133,14 @@ describe('LogBufferUnblocker', () => {
         expect(activeTermId).toBe(TERM_ID_1 + 1);
         expect(computePosition(activeTermId, 0, positionBitsToShift, TERM_ID_1)).toBe(blockedPosition);
 
-        // compareAndSetLong(termTailCounterTwoOffset, pack(TERM_ID_1 - 2, 0), pack(TERM_ID_1 + 1, 0)): the raw tail of
-        // partition 1 is a `bigint` (spec D12), compared and stored by casRawTail
-        expect(casRawTail.mock.calls).toEqual([
-            [logMetaDataBuffer, 1, packTail(TERM_ID_1 - 2, 0), packTail(TERM_ID_1 + 1, 0)],
+        // compareAndSetLong(termTailCounterTwoOffset, pack(TERM_ID_1 - 2, 0), pack(TERM_ID_1 + 1, 0)): rotateLog compares
+        // and stores the raw tail of partition 1 as its (low, high) halves (spec D12), so no `bigint` is allocated
+        expect(compareAndSetLongHalves.mock.calls).toEqual([
+            [TERM_TAIL_COUNTER_OFFSET + 8, 0, TERM_ID_1 - 2, 0, TERM_ID_1 + 1],
         ]);
         expect(rawTailVolatile(logMetaDataBuffer, 1)).toBe(packTail(TERM_ID_1 + 1, 0));
         expect(compareAndSetInt.mock.calls).toEqual([[LOG_ACTIVE_TERM_COUNT_OFFSET, 0, 1]]);
-        expectInOrder([casRawTail, 0], [compareAndSetInt, 0]);
+        expectInOrder([compareAndSetLongHalves, 0], [compareAndSetInt, 0]);
     });
 
     it('shouldUnblockWhenPositionHasNonCommittedMessageAndTailPastEndOfTerm', () => {
