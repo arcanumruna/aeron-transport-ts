@@ -25,6 +25,8 @@ const { CONTINUE, COMMIT } = ControlledFragmentHandler.Action;
 
 /** The term count at which the `LargePosition` cases start: a position of 2^40 for the 64 KiB terms. */
 const LARGE_TERM_COUNT = 2 ** 24;
+/** The limit of the bounded polls, held in a module constant so that it is one immutable number, not a double field reloaded and boxed per call. */
+const NO_LIMIT = Long.MAX_VALUE;
 
 /** Keeps the values of the loops alive. */
 let sink = 0;
@@ -118,9 +120,9 @@ describe.each([
         loop('imagePollAllocatesNothing', 64, (r) => r.image.poll(sum, 10));
         loop('imageControlledPollAllocatesNothing', 64, (r) => r.image.controlledPoll(sum, 10));
         loop('imageControlledPollWithCommitAllocatesNothing', 64, (r) => r.image.controlledPoll(commitSum, 10));
-        loop('imageBoundedPollAllocatesNothing', 64, (r) => r.image.boundedPoll(sum, Long.MAX_VALUE, 10));
+        loop('imageBoundedPollAllocatesNothing', 64, (r) => r.image.boundedPoll(sum, NO_LIMIT, 10));
         loop('imageBoundedControlledPollAllocatesNothing', 64, (r) =>
-            r.image.boundedControlledPoll(sum, Long.MAX_VALUE, 10),
+            r.image.boundedControlledPoll(sum, NO_LIMIT, 10),
         );
         loop('imageBlockPollAllocatesNothing', 64, (r) => (r.image.blockPoll(blockHandler, 1 << 20) > 0 ? 1 : 0));
         loop('imageRawPollAllocatesNothing', 64, (r) => (r.image.rawPoll(rawHandler, 1 << 20) > 0 ? 1 : 0));
