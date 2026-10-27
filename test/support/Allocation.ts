@@ -8,6 +8,7 @@ import { PerformanceObserver, constants } from 'node:perf_hooks';
 import v8 from 'node:v8';
 import { expect, vi } from 'vitest';
 import vm from 'node:vm';
+import { Session } from 'node:inspector/promises';
 
 // A calibrated test runs the control until it has resolution and then the loop up to MAX_ATTEMPTS times; on a loaded
 // host that can pass the 10 s default, which would turn a retry that rescued the test into a timeout. Under full-suite
@@ -119,6 +120,57 @@ export function control(n: number): number {
     return boxed;
 }
 
+type ProfileNode = {
+    callFrame: { functionName: string; url: string; lineNumber: number };
+    selfSize: number;
+    children: ProfileNode[];
+};
+
+/** How many allocation sites a failure names. */
+const MAX_SITES = 8;
+
+/**
+ * The call sites that allocated most while `run(iterations)` ran, from V8's sampling heap profiler, garbage included,
+ * so that an allocation failure names where the loop allocates (a failure seen only on CI cannot be profiled locally).
+ * Each site is its innermost three frames and the sampled bytes.
+ */
+async function allocationSites(run: (iterations: number) => void, iterations: number): Promise<string> {
+    const session = new Session();
+    session.connect();
+    try {
+        await session.post('HeapProfiler.enable');
+        await session.post('HeapProfiler.startSampling', {
+            samplingInterval: 512,
+            includeObjectsCollectedByMajorGC: true,
+            includeObjectsCollectedByMinorGC: true,
+        });
+        run(iterations);
+        const { profile } = (await session.post('HeapProfiler.stopSampling')) as { profile: { head: ProfileNode } };
+        const sites = new Map<string, number>();
+        const walk = (node: ProfileNode, stack: string[]): void => {
+            const f = node.callFrame;
+            const frame = `${f.functionName || '(anonymous)'} ${f.url.split('/').pop() ?? ''}:${f.lineNumber + 1}`;
+            const frames = [...stack, frame];
+            if (node.selfSize > 0) {
+                const site = frames.slice(-3).reverse().join(' < ');
+                sites.set(site, (sites.get(site) ?? 0) + node.selfSize);
+            }
+            for (const child of node.children) {
+                walk(child, frames);
+            }
+        };
+        walk(profile.head, []);
+        return [...sites]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, MAX_SITES)
+            .map(([site, bytes]) => `${bytes} B at ${site}`)
+            .join('; ');
+    } finally {
+        await session.post('HeapProfiler.disable');
+        session.disconnect();
+    }
+}
+
 const MAX_CALIBRATED_ITERATIONS = 32_000_000;
 const MIN_CONTROL_COLLECTIONS = 16;
 const MAX_ATTEMPTS = 6;
@@ -153,9 +205,13 @@ async function minimumCollections(
         // the detail of every attempt goes into the failure message (issue #42): a flake under load names its numbers
         attempts.push(`#${attempt + 1}: ${collections} collections, heap growth ${heapGrowth} B, ${detail}`);
         if (collections > bound && heapGrowth > retainedGrowth) {
+            attempts.push(`allocation sites: ${await allocationSites(run, n)}`);
             return collections;
         }
         minimum = Math.min(minimum, collections);
+    }
+    if (minimum > bound) {
+        attempts.push(`allocation sites: ${await allocationSites(run, n)}`);
     }
     return minimum;
 }
