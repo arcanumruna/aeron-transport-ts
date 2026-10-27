@@ -343,9 +343,11 @@ export class Image {
         } catch (ex) {
             this.errorHandler.onError(ex as Error);
         } finally {
-            const newPosition = initialPosition + (offset - initialOffset);
-            if (newPosition > initialPosition && !this._isClosed) {
-                this.subscriberPosition.setRelease(newPosition);
+            // spec D137: the image is the only writer of its position, so it adds the int delta to the counter
+            const delta = offset - initialOffset;
+            if (delta > 0 && !this._isClosed) {
+                const subscriberPosition = this.subscriberPosition;
+                subscriberPosition.addRelease(delta);
             }
         }
 
@@ -372,7 +374,8 @@ export class Image {
         }
 
         let fragmentsRead = 0;
-        let initialPosition = this.subscriberPosition.get();
+        const subscriberPosition = this.subscriberPosition;
+        const initialPosition = subscriberPosition.get();
         let initialOffset = initialPosition & this.termLengthMask;
         let offset = initialOffset;
         const termBuffer = this.activeTermBuffer(initialPosition);
@@ -416,19 +419,19 @@ export class Image {
                 }
 
                 if (COMMIT === action) {
-                    initialPosition += offset - initialOffset;
+                    const delta = offset - initialOffset;
                     initialOffset = offset;
                     if (!this._isClosed) {
-                        this.subscriberPosition.setRelease(initialPosition);
+                        subscriberPosition.addRelease(delta);
                     }
                 }
             }
         } catch (ex) {
             this.errorHandler.onError(ex as Error);
         } finally {
-            const resultingPosition = initialPosition + (offset - initialOffset);
-            if (resultingPosition > initialPosition && !this._isClosed) {
-                this.subscriberPosition.setRelease(resultingPosition);
+            const delta = offset - initialOffset;
+            if (delta > 0 && !this._isClosed) {
+                subscriberPosition.addRelease(delta);
             }
         }
 
@@ -454,7 +457,8 @@ export class Image {
             return 0;
         }
 
-        const initialPosition = this.subscriberPosition.get();
+        const subscriberPosition = this.subscriberPosition;
+        const initialPosition = subscriberPosition.get();
         if (initialPosition >= limitPosition) {
             return 0;
         }
@@ -491,9 +495,9 @@ export class Image {
         } catch (ex) {
             this.errorHandler.onError(ex as Error);
         } finally {
-            const resultingPosition = initialPosition + (offset - initialOffset);
-            if (resultingPosition > initialPosition && !this._isClosed) {
-                this.subscriberPosition.setRelease(resultingPosition);
+            const delta = offset - initialOffset;
+            if (delta > 0 && !this._isClosed) {
+                subscriberPosition.addRelease(delta);
             }
         }
 
@@ -524,7 +528,7 @@ export class Image {
         }
 
         const subscriberPosition = this.subscriberPosition;
-        let initialPosition = subscriberPosition.get();
+        const initialPosition = subscriberPosition.get();
         if (initialPosition >= limitPosition) {
             return 0;
         }
@@ -573,19 +577,19 @@ export class Image {
                 }
 
                 if (COMMIT === action) {
-                    initialPosition += offset - initialOffset;
+                    const delta = offset - initialOffset;
                     initialOffset = offset;
                     if (!this._isClosed) {
-                        subscriberPosition.setRelease(initialPosition);
+                        subscriberPosition.addRelease(delta);
                     }
                 }
             }
         } catch (ex) {
             this.errorHandler.onError(ex as Error);
         } finally {
-            const resultingPosition = initialPosition + (offset - initialOffset);
-            if (resultingPosition > initialPosition && !this._isClosed) {
-                subscriberPosition.setRelease(resultingPosition);
+            const delta = offset - initialOffset;
+            if (delta > 0 && !this._isClosed) {
+                subscriberPosition.addRelease(delta);
             }
         }
 
@@ -624,7 +628,8 @@ export class Image {
                 this.errorHandler.onError(ex as Error);
             } finally {
                 if (!this._isClosed) {
-                    this.subscriberPosition.setRelease(position + length);
+                    const subscriberPosition = this.subscriberPosition;
+                    subscriberPosition.addRelease(length);
                 }
             }
         }
@@ -676,7 +681,8 @@ export class Image {
                 this.errorHandler.onError(ex as Error);
             } finally {
                 if (!this._isClosed) {
-                    this.subscriberPosition.setRelease(position + length);
+                    const subscriberPosition = this.subscriberPosition;
+                    subscriberPosition.addRelease(length);
                 }
             }
         }

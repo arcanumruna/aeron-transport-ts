@@ -96,4 +96,15 @@ export abstract class Position extends ReadablePosition {
      * @return true if a new max has been set otherwise false.
      */
     public abstract proposeMaxOpaque(proposedValue: number): boolean;
+
+    /**
+     * Port-only (spec D137): add an `int` delta to the position with release memory semantics, for its single writer.
+     * The default reads and sets the value; {@link UnsafeBufferPosition} adds to the two `int` halves of the counter,
+     * so that no position above 2^31 is formed as a double (which V8 boxes across a call).
+     *
+     * @param delta an `int` in [0, 2^31 - 1].
+     */
+    public addRelease(delta: number): void {
+        this.setRelease(this.get() + delta);
+    }
 }
