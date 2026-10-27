@@ -119,6 +119,11 @@ export class NativeResourceAgent implements Agent {
         return MediaDriver.AERON_DRIVER_NATIVE_RESOURCE_THREAD_NAME;
     }
 
+    /** What a look-up's waiter threw on the event loop (issue #84): counted, as an error of this agent's duty cycle. */
+    private readonly onLookUpError = (ex: unknown): void => {
+        this.countedErrorHandler.onError(ex instanceof Error ? ex : new Error(String(ex)));
+    };
+
     public onParseChannel(result: CommandResult<UdpChannel>, channel: string, isDestination: boolean): void {
         this.lookUpHostsThen(result, channel, () => {
             try {
@@ -143,6 +148,7 @@ export class NativeResourceAgent implements Agent {
         }
 
         const lookup: PendingLookup = { pending: hosts.length, started: false, done: false, complete };
+        const onError = this.onLookUpError;
         const onLookedUp = (): void => {
             if (0 === --lookup.pending && lookup.started && !lookup.done) {
                 lookup.done = true;
@@ -154,7 +160,7 @@ export class NativeResourceAgent implements Agent {
 
         try {
             for (const host of hosts) {
-                lookUpHost(host, onLookedUp);
+                lookUpHost(host, onLookedUp, onError);
             }
         } catch (ex) {
             // pending never reaches zero again for a look-up that did not start: the error is the answer
@@ -215,6 +221,7 @@ export class NativeResourceAgent implements Agent {
                     this.completeReResolution(result, endpoint, uriParamName);
                     this.wakeUp?.();
                 },
+                this.onLookUpError,
                 true,
             );
         } catch (ex) {

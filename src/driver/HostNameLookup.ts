@@ -26,8 +26,24 @@ import { InetAddress } from './jdkNet.js';
 const { ENDPOINT_PARAM_NAME, INTERFACE_PARAM_NAME, MDC_CONTROL_PARAM_NAME, RESPONSE_ENDPOINT_PARAM_NAME } =
     CommonContext;
 
-// The look-ups that are out, by lower-case host name (issue #78): the `done` callbacks that wait for each one.
-const inFlight = new Map<string, Array<() => void>>();
+/** A caller waiting for a look-up: `done` when it is over, `onError` with what `done` threw (issue #84). */
+type Waiter = { readonly done: () => void; readonly onError: (ex: unknown) => void };
+
+/**
+ * A `dns.lookup` that is out: its sequence number for its host, the callers waiting on it (emptied when a newer one
+ * takes them over), and whether a refresh has joined it (issue #85).
+ */
+type LookUp = { readonly seq: number; readonly waiters: Waiter[]; refreshed: boolean };
+
+/**
+ * The look-ups of one host: the one that answers the waiters (null once it has), how many are out (that one and at most
+ * one it superseded), the sequence number of the last one issued, and that of the last one whose answer was taken, so
+ * that the answer of an older look-up that arrives late never replaces a newer one (issue #85).
+ */
+type HostLookUps = { current: LookUp | null; outstanding: number; issued: number; answered: number };
+
+// The hosts with a look-up out, by lower-case host name (issue #78); a host is removed when none is out.
+const hostLookUps = new Map<string, HostLookUps>();
 
 const NO_HOSTS: readonly string[] = [];
 
@@ -65,68 +81,114 @@ export function hostToLookUp(endpoint: string): string | null {
  * <p>
  * Look-ups of the same name (case-insensitive) are coalesced (issue #78): a call while one is out joins it and starts no
  * second `dns.lookup`. A `refresh` joins too: its answer arrives after the request was made, but may come from a
- * look-up issued before it; a later refresh starts a new look-up.
+ * look-up issued before it. A second refresh while the same look-up is still out supersedes it (issue #85): it starts a
+ * new `dns.lookup` that takes over every waiter. At most one superseded look-up per name is out: while one is, every
+ * call joins the current one, so a name never has more than two `dns.lookup`s out. The answer of a look-up is taken only
+ * if no newer one has answered: a superseded look-up that answers late fills the cache only until the newer answers, and
+ * never replaces its address.
+ * <p>
+ * Liveness: a refresh waits for at most one round of a look-up that hangs. Beyond that, a waiter relies on `dns.lookup`
+ * answering at all, which the resolver of the OS bounds with its own timeouts and retries (`getaddrinfo`); a look-up that
+ * the OS never answers holds its waiters, as a `getaddrinfo` that never returns holds Java's resolving thread.
  *
- * @param host the host name, as {@link hostToLookUp} answers it.
- * @param done called when the look-up is over, whatever its result. A name that is in the cache is not looked up
- *             again (unless `refresh`): `done` is called at once. Otherwise it is called on the event loop, once per
- *             call, in the order of the calls; if one throws the rest are still called and the first error is
- *             rethrown. A `dns.lookup` that throws at once (an argument it refuses) throws from here, and leaves no
- *             look-up out.
+ * @param host    the host name, as {@link hostToLookUp} answers it.
+ * @param done    called when the look-up is over, whatever its result: once per call, in the order of the calls. A name
+ *                that is in the cache is not looked up again (unless `refresh`): `done` is called at once; otherwise it
+ *                is called on the event loop. What it throws goes to `onError` and never stops the other waiters (issue
+ *                #84). A `dns.lookup` that throws at once (an argument it refuses) throws from here, leaves no look-up
+ *                out, and `done` is not called.
+ * @param onError given what `done` threw. What `onError` itself throws is dropped: nothing up the stack of a dns callback
+ *                can handle it, and from here it would read as the refusal of the argument.
  * @param refresh true to look the name up even if it is in the cache: the re-resolution of the driver (D58) wants the
  *                current address.
  */
-export function lookUpHost(host: string, done: () => void, refresh = false): void {
-    if (!refresh && InetAddress.nameCache.has(host.toLowerCase())) {
-        done();
-        return;
-    }
-
+export function lookUpHost(host: string, done: () => void, onError: (ex: unknown) => void, refresh = false): void {
     const key = host.toLowerCase();
-    const joined = inFlight.get(key);
-    if (undefined !== joined) {
-        joined.push(done);
+    const waiter: Waiter = { done, onError };
+    if (!refresh && InetAddress.nameCache.has(key)) {
+        callWaiter(waiter);
         return;
     }
-    inFlight.set(key, [done]);
 
-    // only an error that dns.lookup itself throws is handled here: a callback that ran at once (a mock; Node never calls
-    // back synchronously) and rethrew a waiter's error has already removed the entry, and another may have replaced it
+    let lookUps = hostLookUps.get(key);
+    const joined = lookUps?.current ?? null;
+    if (undefined !== lookUps && null !== joined) {
+        // join, unless this is the second refresh of a look-up and no superseded one is still out
+        if (!(refresh && joined.refreshed && 1 === lookUps.outstanding)) {
+            joined.waiters.push(waiter);
+            joined.refreshed ||= refresh;
+            return;
+        }
+    }
+
+    if (undefined === lookUps) {
+        lookUps = { current: null, outstanding: 0, issued: 0, answered: 0 };
+        hostLookUps.set(key, lookUps);
+    }
+    const state = lookUps;
+    // a new look-up, or one that supersedes a look-up a refresh joined: it takes over the waiters. A refresh that starts
+    // one does not mark it: the next refresh joins it, since its answer was asked for after that refresh was made.
+    const lookUp: LookUp = {
+        seq: ++state.issued,
+        waiters: null === joined ? [waiter] : [...joined.waiters, waiter],
+        refreshed: false,
+    };
+    state.current = lookUp;
+    state.outstanding++;
+
+    // only an error that dns.lookup itself throws is handled here: the callback never throws, and one that ran at once
+    // (a mock; Node never calls back synchronously) has already settled this look-up
     let called = false;
     try {
         dns.lookup(host, { order: 'ipv4first' }, (err, address) => {
             called = true;
-            if (null === err) {
-                try {
-                    DefaultNameResolver.cache(host, InetAddress.getByName(address));
-                } catch (ex) {
-                    // the address is not usable: the name stays unresolved, as after a failed look-up
-                    void ex;
-                }
-            }
-            const waiters = inFlight.get(key) ?? [];
-            inFlight.delete(key); // before any waiter runs: a waiter that looks the name up again starts a new look-up
-            let failure: unknown = null;
-            let failed = false;
-            for (const waiter of waiters) {
-                try {
-                    waiter();
-                } catch (ex) {
-                    if (!failed) {
-                        failed = true;
-                        failure = ex;
+            state.outstanding--;
+            if (lookUp.seq > state.answered) {
+                state.answered = lookUp.seq;
+                if (null === err) {
+                    try {
+                        DefaultNameResolver.cache(host, InetAddress.getByName(address));
+                    } catch (ex) {
+                        // the address is not usable: the name stays unresolved, as after a failed look-up
+                        void ex;
                     }
                 }
             }
-            if (failed) {
-                throw failure;
+            if (state.current !== lookUp) {
+                return; // superseded: the look-up that replaced it answers the waiters
+            }
+            state.current = null;
+            if (0 === state.outstanding && hostLookUps.get(key) === state) {
+                hostLookUps.delete(key); // before any waiter runs: one that looks the name up again starts afresh
+            }
+            for (const w of lookUp.waiters) {
+                callWaiter(w);
             }
         });
     } catch (ex) {
         if (!called) {
-            inFlight.delete(key);
+            state.outstanding--;
+            state.current = joined; // a superseded look-up keeps its waiters, without this one
+            if (null === joined && 0 === state.outstanding) {
+                hostLookUps.delete(key);
+            }
         }
         throw ex;
+    }
+    if (null !== joined) {
+        joined.waiters.length = 0; // the new look-up answers them: the superseded one holds nothing
+    }
+}
+
+function callWaiter(waiter: Waiter): void {
+    try {
+        waiter.done();
+    } catch (ex) {
+        try {
+            waiter.onError(ex);
+        } catch (ignore) {
+            void ignore;
+        }
     }
 }
 

@@ -1578,12 +1578,19 @@ export class ClientConductor implements Agent {
                 command.remaining--;
                 this.wakeUp?.();
             };
+            const onError = (ex: unknown): void => this.handleError(ex instanceof Error ? ex : new Error(String(ex)));
             try {
-                lookUpHost(host, done);
+                lookUpHost(host, done, onError);
             } catch (ex) {
-                // an argument that dns refuses: the name stays unresolved and the driver answers the command
+                // an argument that dns refuses: the name stays unresolved and the driver answers the command. What
+                // `done` throws (the wake-up) goes to the error handler, as from the look-up, and the other hosts of
+                // the command are still looked up (issue #84).
                 void ex;
-                done();
+                try {
+                    done();
+                } catch (doneEx) {
+                    onError(doneEx);
+                }
             }
         }
 

@@ -1341,7 +1341,7 @@ export class Aeron implements AutoCloseable {
                 (host) =>
                     new Promise<void>((resolve) => {
                         try {
-                            lookUpHost(host, resolve);
+                            lookUpHost(host, resolve, () => {}); // resolve never throws
                         } catch (ex) {
                             // an argument that dns refuses: the name stays unresolved
                             void ex;
