@@ -62,12 +62,12 @@ export function hostToLookUp(endpoint: string): string | null {
  * Look up a host name with `dns.lookup(name, { order: 'ipv4first' })` (Java's order), and put the address in the cache of
  * the {@link DefaultNameResolver} so that its synchronous `resolve` finds it. A failed look-up leaves the cache as it is:
  * the name then fails to resolve as in Java, and the command that uses it is answered with the error.
+ * <p>
+ * Look-ups of the same name (case-insensitive) are coalesced (issue #78): a call while one is out joins it and starts no
+ * second `dns.lookup`. A `refresh` joins too: its answer arrives after the request was made, but may come from a
+ * look-up issued before it; a later refresh starts a new look-up.
  *
  * @param host the host name, as {@link hostToLookUp} answers it.
- * Look-ups of the same name (case-insensitive) are coalesced (issue #78): a call while one is out joins it and starts no
- * second `dns.lookup`. A `refresh` joins too: that look-up started no earlier than this request was made, so its answer
- * is as current as a new one would be.
- *
  * @param done called when the look-up is over, whatever its result. A name that is in the cache is not looked up
  *             again (unless `refresh`): `done` is called at once. Otherwise it is called on the event loop, once per
  *             call, in the order of the calls; if one throws the rest are still called and the first error is
@@ -90,8 +90,12 @@ export function lookUpHost(host: string, done: () => void, refresh = false): voi
     }
     inFlight.set(key, [done]);
 
+    // only an error that dns.lookup itself throws is handled here: a callback that ran at once (a mock; Node never calls
+    // back synchronously) and rethrew a waiter's error has already removed the entry, and another may have replaced it
+    let called = false;
     try {
         dns.lookup(host, { order: 'ipv4first' }, (err, address) => {
+            called = true;
             if (null === err) {
                 try {
                     DefaultNameResolver.cache(host, InetAddress.getByName(address));
@@ -119,7 +123,9 @@ export function lookUpHost(host: string, done: () => void, refresh = false): voi
             }
         });
     } catch (ex) {
-        inFlight.delete(key);
+        if (!called) {
+            inFlight.delete(key);
+        }
         throw ex;
     }
 }

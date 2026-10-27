@@ -324,4 +324,30 @@ describe('HostNameLookupCoalescingRegression', () => {
         lookups[1]!.callback(null, '10.2.2.8', 4);
         expect(again).toBe(1);
     });
+
+    it('aSynchronousCallbackWhoseWaiterThrowsKeepsTheWaitersNewLookUpRegression', () => {
+        // a mock that calls back at once (Node never does): the waiter starts a new look-up, then throws; the error
+        // must not be taken for a refusal by dns.lookup, which would drop the new look-up's entry
+        let first = true;
+        vi.mocked(dns.lookup).mockImplementation(((host: string, _o: unknown, callback: LookupCallback) => {
+            lookups.push({ host, callback });
+            if (first) {
+                first = false;
+                callback(null, '10.2.2.9', 4);
+            }
+        }) as never);
+        let again = 0;
+        expect(() =>
+            lookUpHost('sync.host', () => {
+                lookUpHost('sync.host', () => again++, true);
+                throw new Error('waiter');
+            }),
+        ).toThrowError('waiter');
+        expect(lookups.length).toBe(2);
+
+        lookUpHost('sync.host', () => again++, true); // joins the waiter's look-up
+        expect(lookups.length).toBe(2);
+        lookups[1]!.callback(null, '10.2.2.9', 4);
+        expect(again).toBe(2);
+    });
 });
