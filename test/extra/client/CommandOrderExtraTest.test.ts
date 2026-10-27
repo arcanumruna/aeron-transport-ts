@@ -22,6 +22,8 @@ const STREAM_ID = 1001;
 describe('Command order (D92)', () => {
     let lookups: { host: string; callback: LookupCallback }[];
     let seen: string[];
+    /** Host names that the fake `dns.lookup` refuses by throwing at once, as Node does for an argument it rejects. */
+    const refused = new Set<string>();
     const rigs: EmbeddedRig[] = [];
 
     beforeEach(() => {
@@ -29,6 +31,9 @@ describe('Command order (D92)', () => {
         seen = [];
         DefaultNameResolver.clearCache();
         vi.spyOn(dns, 'lookup').mockImplementation(((host: string, _options: unknown, callback: LookupCallback) => {
+            if (refused.has(host)) {
+                throw new TypeError('refused');
+            }
             lookups.push({ host, callback });
         }) as never);
     });
@@ -45,6 +50,7 @@ describe('Command order (D92)', () => {
                 void ex;
             }
         }
+        refused.clear();
         vi.restoreAllMocks();
         DefaultNameResolver.clearCache();
     });
@@ -186,6 +192,39 @@ describe('Command order (D92)', () => {
         expect(seen[1]).toContain('host-b.example');
     });
 
+    it('twoCommandsForDifferentHostsWhoseLookUpsCompleteInReverseOrderReachTheDriverInCommandOrderWithTheirOwnAddressesRegression', async () => {
+        const rig = newRig();
+        const publication = await manualPublication(rig);
+        record(rig);
+        const hostA = 'aeron:udp?endpoint=host-a.example:' + freeUdpPort();
+        const hostB = 'aeron:udp?endpoint=host-b.example:' + freeUdpPort();
+
+        const idA = publication.asyncAddDestination(hostA);
+        const idB = publication.asyncAddDestination(hostB);
+        expect(lookups.map((l) => l.host)).toEqual(['host-a.example', 'host-b.example']);
+
+        // B's look-up completes first: A still waits, so nothing may leave
+        (lookups[1] as { callback: LookupCallback }).callback(null, '127.0.0.3', 4);
+        cycles(rig, 20);
+        expect(seen).toEqual([]);
+        expect(rig.aeron.isCommandActive(idA)).toBe(true);
+        expect(rig.aeron.isCommandActive(idB)).toBe(true);
+
+        (lookups[0] as { callback: LookupCallback }).callback(null, '127.0.0.2', 4);
+        cycles(rig, 20);
+        expect(seen).toEqual([
+            'addDestination:' + publication.registrationId() + ':' + hostA,
+            'addDestination:' + publication.registrationId() + ':' + hostB,
+        ]);
+        // each name resolved to its own host's address
+        const resolve = (name: string) => DefaultNameResolver.INSTANCE.resolve(name, 'endpoint', false);
+        expect(resolve('host-a.example')?.getHostAddress()).toBe('127.0.0.2');
+        expect(resolve('host-b.example')?.getHostAddress()).toBe('127.0.0.3');
+        expect(rig.aeron.isCommandActive(idA)).toBe(false);
+        expect(rig.aeron.isCommandActive(idB)).toBe(false);
+        expect(rig.errors).toEqual([]);
+    });
+
     it('aSynchronousCallBehindAQueuedCommandWritesTheQueueFirstAndDoesNotWaitForTheEventLoopRegression', async () => {
         const rig = newRig(false);
         const publication = await manualPublication(rig);
@@ -253,6 +292,73 @@ describe('Command order (D92)', () => {
         expect(rig.aeron.isCommandActive(id)).toBe(false);
     });
 
+    it('aWakeUpThatThrowsGoesToTheErrorHandlerAndTheOtherCommandsOfTheHostStillReachTheDriverRegression', async () => {
+        // issue #84: a continuation that throws inside the look-up callback must neither escape the dns callback nor stop
+        // the other commands waiting for the same name
+        const rig = newRig();
+        const publication = await manualPublication(rig);
+        record(rig);
+        rig.aeron.setWakeUp(() => {
+            throw new Error('wake up');
+        });
+        const first = 'aeron:udp?endpoint=host-a.example:' + freeUdpPort();
+        const second = 'aeron:udp?endpoint=host-a.example:' + freeUdpPort();
+
+        publication.asyncAddDestination(first);
+        publication.asyncAddDestination(second);
+        expect(lookups.map((l) => l.host)).toEqual(['host-a.example']);
+
+        expect(() => complete(0)).not.toThrow();
+        cycles(rig, 20);
+
+        expect(rig.errors.map((e) => (e as Error).message)).toEqual(['wake up', 'wake up']);
+        expect(seen).toEqual([
+            'addDestination:' + publication.registrationId() + ':' + first,
+            'addDestination:' + publication.registrationId() + ':' + second,
+        ]);
+    });
+
+    it('aCachedHostWhoseWakeUpThrowsDoesNotStopTheLookUpOfTheOtherHostsOfTheCommandRegression', async () => {
+        // issue #84: a cached host answers at once, inside the call; a wake-up that throws there must go to the error
+        // handler and leave the look-up of the command's next host to go ahead
+        const rig = newRig();
+        const publication = await manualPublication(rig);
+        record(rig);
+        publication.asyncAddDestination('aeron:udp?endpoint=host-a.example:' + freeUdpPort());
+        complete(0); // host-a.example is cached from now on
+        cycles(rig, 20);
+        publication.asyncAddDestination('aeron:udp?endpoint=host-q.example:' + freeUdpPort()); // queued, waiting
+        expect(lookups.map((l) => l.host)).toEqual(['host-a.example', 'host-q.example']);
+        rig.aeron.setWakeUp(() => {
+            throw new Error('wake up');
+        });
+
+        const both = 'aeron:udp?endpoint=host-a.example:' + freeUdpPort() + '|control=host-c.example:' + freeUdpPort();
+        expect(() => publication.asyncAddDestination(both)).not.toThrow();
+
+        expect(lookups.map((l) => l.host)).toEqual(['host-a.example', 'host-q.example', 'host-c.example']);
+        expect(rig.errors.map((e) => (e as Error).message)).toEqual(['wake up']);
+    });
+
+    it('aRefusedHostWhoseWakeUpThrowsDoesNotStopTheLookUpOfTheOtherHostsOfTheCommandRegression', async () => {
+        // issue #84: a host that dns refuses is counted as done inside the call; a wake-up that throws there must go to
+        // the error handler and leave the look-up of the command's next host to go ahead
+        const rig = newRig();
+        const publication = await manualPublication(rig);
+        record(rig);
+        publication.asyncAddDestination('aeron:udp?endpoint=host-q.example:' + freeUdpPort()); // queued, waiting
+        refused.add('host-r.example');
+        rig.aeron.setWakeUp(() => {
+            throw new Error('wake up');
+        });
+
+        const both = 'aeron:udp?endpoint=host-r.example:' + freeUdpPort() + '|control=host-c.example:' + freeUdpPort();
+        expect(() => publication.asyncAddDestination(both)).not.toThrow();
+
+        expect(lookups.map((l) => l.host)).toEqual(['host-q.example', 'host-c.example']);
+        expect(rig.errors.map((e) => (e as Error).message)).toEqual(['wake up']);
+    });
+
     it('aLookUpThatCompletesAfterCloseSendsNothingAndDoesNotWakeTheRunnerRegression', () => {
         const rig = newRig();
         const addPublication = vi.spyOn(proxyOf(rig), 'addPublication');
@@ -281,7 +387,7 @@ describe('lookUpHost cache (D92)', () => {
         const lookup = vi.spyOn(dns, 'lookup');
         const done = vi.fn();
 
-        lookUpHost('cached.example', done);
+        lookUpHost('cached.example', done, () => {});
 
         expect(lookup).not.toHaveBeenCalled();
         expect(done).toHaveBeenCalledTimes(1);
@@ -292,7 +398,12 @@ describe('lookUpHost cache (D92)', () => {
         DefaultNameResolver.cache('cached.example', InetAddress.getByName('127.0.0.1'));
         const lookup = vi.spyOn(dns, 'lookup').mockImplementation((() => {}) as never);
 
-        lookUpHost('cached.example', () => {}, true);
+        lookUpHost(
+            'cached.example',
+            () => {},
+            () => {},
+            true,
+        );
 
         expect(lookup).toHaveBeenCalledTimes(1);
     });
@@ -301,7 +412,11 @@ describe('lookUpHost cache (D92)', () => {
         DefaultNameResolver.clearCache();
         const lookup = vi.spyOn(dns, 'lookup').mockImplementation((() => {}) as never);
 
-        lookUpHost('other.example', () => {});
+        lookUpHost(
+            'other.example',
+            () => {},
+            () => {},
+        );
 
         expect(lookup).toHaveBeenCalledTimes(1);
     });

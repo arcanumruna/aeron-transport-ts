@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DriverProxy } from '../../../src/client/DriverProxy.js';
 import { DefaultNameResolver } from '../../../src/driver/DefaultNameResolver.js';
 import { lookUpHost } from '../../../src/driver/HostNameLookup.js';
+import { InetAddress } from '../../../src/driver/jdkNet.js';
 import { MediaDriver } from '../../../src/driver/MediaDriver.js';
 import type { UdpChannel } from '../../../src/driver/media/UdpChannel.js';
 import { NativeResourceAgent } from '../../../src/driver/NativeResourceAgent.js';
@@ -222,8 +223,10 @@ describe('NativeResourceAgentLookupLifecycleRegression', () => {
 });
 
 describe('HostNameLookupCoalescingRegression', () => {
+    const cachedAddress = (host: string): string | undefined => InetAddress.nameCache.get(host)?.getHostAddress();
     let lookups: { host: string; callback: LookupCallback }[];
     let throwOnNext: boolean;
+    const ignore = (): void => {};
 
     beforeEach(() => {
         lookups = [];
@@ -254,8 +257,8 @@ describe('HostNameLookupCoalescingRegression', () => {
     it('twoCallsForOneHostStartOneLookUpAndBothAreCalledOnceRegression', () => {
         let a = 0;
         let b = 0;
-        lookUpHost('coalesce.host', () => a++);
-        lookUpHost('coalesce.host', () => b++);
+        lookUpHost('coalesce.host', () => a++, ignore);
+        lookUpHost('coalesce.host', () => b++, ignore);
         expect(lookups.length).toBe(1);
         expect(a + b).toBe(0);
 
@@ -265,8 +268,8 @@ describe('HostNameLookupCoalescingRegression', () => {
 
     it('theHostKeyIsCaseInsensitiveRegression', () => {
         let n = 0;
-        lookUpHost('some.host', () => n++);
-        lookUpHost('Some.Host', () => n++);
+        lookUpHost('some.host', () => n++, ignore);
+        lookUpHost('Some.Host', () => n++, ignore);
         expect(lookups.length).toBe(1);
         lookups[0]!.callback(null, '10.2.2.3', 4);
         expect(n).toBe(2);
@@ -274,13 +277,13 @@ describe('HostNameLookupCoalescingRegression', () => {
 
     it('aRefreshJoinsAnInFlightLookUpAndALaterOneStartsANewOneRegression', () => {
         let n = 0;
-        lookUpHost('refresh.host', () => n++);
-        lookUpHost('refresh.host', () => n++, true);
+        lookUpHost('refresh.host', () => n++, ignore);
+        lookUpHost('refresh.host', () => n++, ignore, true);
         expect(lookups.length).toBe(1);
         lookups[0]!.callback(null, '10.2.2.4', 4);
         expect(n).toBe(2);
 
-        lookUpHost('refresh.host', () => n++, true); // cached, but refresh: a new look-up
+        lookUpHost('refresh.host', () => n++, ignore, true); // cached, but refresh: a new look-up
         expect(lookups.length).toBe(2);
         expect(n).toBe(2);
         lookups[1]!.callback(null, '10.2.2.5', 4);
@@ -289,36 +292,67 @@ describe('HostNameLookupCoalescingRegression', () => {
 
     it('aSynchronousThrowLeavesNoInFlightEntryRegression', () => {
         throwOnNext = true;
-        expect(() => lookUpHost('throws.host', () => {})).toThrowError('refused throws.host');
+        expect(() => lookUpHost('throws.host', () => {}, ignore)).toThrowError('refused throws.host');
         let n = 0;
-        lookUpHost('throws.host', () => n++);
+        lookUpHost('throws.host', () => n++, ignore);
         expect(lookups.length).toBe(1);
         lookups[0]!.callback(null, '10.2.2.6', 4);
         expect(n).toBe(1);
     });
 
-    it('aWaiterThatThrowsDoesNotStopTheOthersAndTheFirstErrorIsRethrownRegression', () => {
+    it('aWaiterThatThrowsDoesNotStopTheOthersAndEachErrorGoesToItsOwnHandlerRegression', () => {
+        // issue #84: the dns callback never throws; each waiter's error goes to that waiter's handler
         let c = 0;
-        lookUpHost('waiters.host', () => {
-            throw new Error('first');
-        });
-        lookUpHost('waiters.host', () => {
-            throw new Error('second');
-        });
-        lookUpHost('waiters.host', () => c++);
-        expect(() => lookups[0]!.callback(null, '10.2.2.7', 4)).toThrowError('first');
+        const errors: string[] = [];
+        lookUpHost(
+            'waiters.host',
+            () => {
+                throw new Error('first');
+            },
+            (ex) => errors.push('a:' + (ex as Error).message),
+        );
+        lookUpHost(
+            'waiters.host',
+            () => {
+                throw new Error('second');
+            },
+            (ex) => errors.push('b:' + (ex as Error).message),
+        );
+        lookUpHost('waiters.host', () => c++, ignore);
+        expect(() => lookups[0]!.callback(null, '10.2.2.7', 4)).not.toThrow();
         expect(c).toBe(1);
+        expect(errors).toEqual(['a:first', 'b:second']);
 
         // the entry is gone: the next call looks up again
-        lookUpHost('waiters.host', () => {}, true);
+        lookUpHost('waiters.host', () => {}, ignore, true);
         expect(lookups.length).toBe(2);
+    });
+
+    it('anErrorHandlerThatThrowsDoesNotStopTheOtherWaitersRegression', () => {
+        let c = 0;
+        lookUpHost(
+            'handler.host',
+            () => {
+                throw new Error('waiter');
+            },
+            () => {
+                throw new Error('handler');
+            },
+        );
+        lookUpHost('handler.host', () => c++, ignore);
+        expect(() => lookups[0]!.callback(null, '10.2.2.10', 4)).not.toThrow();
+        expect(c).toBe(1);
     });
 
     it('aWaiterThatLooksTheHostUpAgainStartsANewLookUpRegression', () => {
         let again = 0;
-        lookUpHost('again.host', () => {
-            lookUpHost('again.host', () => again++, true);
-        });
+        lookUpHost(
+            'again.host',
+            () => {
+                lookUpHost('again.host', () => again++, ignore, true);
+            },
+            ignore,
+        );
         lookups[0]!.callback(null, '10.2.2.8', 4);
         expect(lookups.length).toBe(2);
         lookups[1]!.callback(null, '10.2.2.8', 4);
@@ -327,7 +361,7 @@ describe('HostNameLookupCoalescingRegression', () => {
 
     it('aSynchronousCallbackWhoseWaiterThrowsKeepsTheWaitersNewLookUpRegression', () => {
         // a mock that calls back at once (Node never does): the waiter starts a new look-up, then throws; the error
-        // must not be taken for a refusal by dns.lookup, which would drop the new look-up's entry
+        // goes to its handler and must not be taken for a refusal by dns.lookup, which would drop the new entry
         let first = true;
         vi.mocked(dns.lookup).mockImplementation(((host: string, _o: unknown, callback: LookupCallback) => {
             lookups.push({ host, callback });
@@ -337,17 +371,147 @@ describe('HostNameLookupCoalescingRegression', () => {
             }
         }) as never);
         let again = 0;
+        const errors: unknown[] = [];
         expect(() =>
-            lookUpHost('sync.host', () => {
-                lookUpHost('sync.host', () => again++, true);
-                throw new Error('waiter');
-            }),
-        ).toThrowError('waiter');
+            lookUpHost(
+                'sync.host',
+                () => {
+                    lookUpHost('sync.host', () => again++, ignore, true);
+                    throw new Error('waiter');
+                },
+                (ex) => errors.push(ex),
+            ),
+        ).not.toThrow();
+        expect(errors.map((e) => (e as Error).message)).toEqual(['waiter']);
         expect(lookups.length).toBe(2);
 
-        lookUpHost('sync.host', () => again++, true); // joins the waiter's look-up
+        // the next refresh joins the waiter's look-up: had the entry been dropped, it would start a third one
+        lookUpHost('sync.host', () => again++, ignore, true);
         expect(lookups.length).toBe(2);
         lookups[1]!.callback(null, '10.2.2.9', 4);
         expect(again).toBe(2);
+    });
+
+    it('aHungLookUpDelaysARefreshByAtMostOneRoundRegression', () => {
+        // issue #85: a dns.lookup that never calls back must not hold every later refresh forever
+        let n = 0;
+        let m = 0;
+        let r = 0;
+        lookUpHost('hung.host', () => n++, ignore); // its dns.lookup never answers
+        lookUpHost('hung.host', () => r++, ignore, true); // the first refresh joins it
+        expect(lookups.length).toBe(1);
+        lookUpHost('hung.host', () => m++, ignore, true); // the next round supersedes it
+        expect(lookups.length).toBe(2);
+        lookups[1]!.callback(null, '10.2.2.11', 4);
+        expect([n, r, m]).toEqual([1, 1, 1]);
+        expect(InetAddress.nameCache.has('hung.host')).toBe(true);
+
+        // the hung look-up answers late: older than the answer taken, it neither replaces the cached address nor calls
+        // anyone again; a new look-up is not disturbed
+        lookUpHost('hung.host', () => m++, ignore, true);
+        expect(lookups.length).toBe(3);
+        lookups[0]!.callback(null, '10.2.2.12', 4);
+        expect([n, r, m]).toEqual([1, 1, 1]);
+        expect(cachedAddress('hung.host')).toBe('10.2.2.11');
+        lookups[2]!.callback(null, '10.2.2.13', 4);
+        expect([n, r, m]).toEqual([1, 1, 2]);
+        expect(cachedAddress('hung.host')).toBe('10.2.2.13');
+    });
+
+    it('manyRefreshesOfAHungLookUpStartAtMostOneMoreDnsLookUpRegression', () => {
+        // issue #85: at most one superseded look-up per name is out, so a name never has more than two dns.lookups
+        let n = 0;
+        lookUpHost('many.host', () => n++, ignore); // never answers
+        for (let i = 0; i < 50; i++) {
+            lookUpHost('many.host', () => n++, ignore, true);
+        }
+        expect(lookups.length).toBe(2);
+        lookups[1]!.callback(null, '10.2.2.20', 4);
+        expect(n).toBe(51);
+        lookups[0]!.callback(null, '10.2.2.21', 4); // late and older: answers no one, keeps the newer address
+        expect(n).toBe(51);
+        expect(cachedAddress('many.host')).toBe('10.2.2.20');
+    });
+
+    it('aLookUpStartedByARefreshIsJoinedByTheNextRefreshRegression', () => {
+        // a refresh that starts a look-up does not mark it: the next refresh joins it, the one after supersedes it
+        let n = 0;
+        lookUpHost('started.host', () => n++, ignore, true);
+        lookUpHost('started.host', () => n++, ignore, true);
+        expect(lookups.length).toBe(1);
+        lookUpHost('started.host', () => n++, ignore, true);
+        expect(lookups.length).toBe(2);
+        lookups[1]!.callback(null, '10.2.2.22', 4);
+        expect(n).toBe(3);
+    });
+
+    it('aSupersedingLookUpThatHangsTooHoldsTheWaitersUntilItAnswersAndStartsNoThirdRegression', () => {
+        let n = 0;
+        lookUpHost('both.host', () => n++, ignore);
+        lookUpHost('both.host', () => n++, ignore, true);
+        lookUpHost('both.host', () => n++, ignore, true); // supersedes: lookups[1], which hangs too
+        lookUpHost('both.host', () => n++, ignore, true); // joins lookups[1]
+        lookUpHost('both.host', () => n++, ignore, true); // a superseded one is out: joins, starts no third
+        expect(lookups.length).toBe(2);
+
+        lookups[0]!.callback(null, '10.2.2.23', 4); // the superseded one answers first: fills the cache, calls no one
+        expect(n).toBe(0);
+        expect(cachedAddress('both.host')).toBe('10.2.2.23');
+
+        lookups[1]!.callback(null, '10.2.2.24', 4); // newer: replaces the address and answers every waiter
+        expect(n).toBe(5);
+        expect(cachedAddress('both.host')).toBe('10.2.2.24');
+    });
+
+    it('aNewerFailedAnswerKeepsAnOlderLateAnswerOutOfTheCacheRegression', () => {
+        // the newest answer wins even when it is a failure: an older late address is not taken after it
+        lookUpHost('fail.host', ignore, ignore);
+        lookUpHost('fail.host', ignore, ignore, true);
+        lookUpHost('fail.host', ignore, ignore, true);
+        expect(lookups.length).toBe(2);
+        lookups[1]!.callback(new Error('ENOTFOUND'));
+        lookups[0]!.callback(null, '10.2.2.25', 4);
+        expect(InetAddress.nameCache.has('fail.host')).toBe(false);
+    });
+
+    it('aCachedHostWhoseWaiterThrowsGivesTheErrorToItsHandlerAndDoesNotThrowRegression', () => {
+        // a throw from here reads as dns refusing the argument: the error of `done` goes to `onError` instead
+        lookUpHost('cached.host', ignore, ignore);
+        lookups[0]!.callback(null, '10.2.2.26', 4);
+        const errors: string[] = [];
+        expect(() =>
+            lookUpHost(
+                'cached.host',
+                () => {
+                    throw new Error('done');
+                },
+                (ex) => errors.push((ex as Error).message),
+            ),
+        ).not.toThrow();
+        expect(errors).toEqual(['done']);
+        expect(lookups.length).toBe(1);
+    });
+
+    it('aRefreshWhileOnlyPlainLookUpsAreOutJoinsWithoutSupersedingRegression', () => {
+        let n = 0;
+        lookUpHost('plain.host', () => n++, ignore);
+        lookUpHost('plain.host', () => n++, ignore);
+        lookUpHost('plain.host', () => n++, ignore, true);
+        expect(lookups.length).toBe(1);
+        lookUpHost('plain.host', () => n++, ignore); // a plain call never supersedes
+        expect(lookups.length).toBe(1);
+        lookups[0]!.callback(null, '10.2.2.14', 4);
+        expect(n).toBe(4);
+    });
+
+    it('aSupersedingRefreshThatDnsRefusesLeavesTheOldLookUpWithItsWaitersRegression', () => {
+        let n = 0;
+        lookUpHost('refused.host', () => n++, ignore);
+        lookUpHost('refused.host', () => n++, ignore, true);
+        throwOnNext = true;
+        expect(() => lookUpHost('refused.host', () => n++, ignore, true)).toThrowError('refused refused.host');
+        expect(lookups.length).toBe(1);
+        lookups[0]!.callback(null, '10.2.2.15', 4);
+        expect(n).toBe(2);
     });
 });
