@@ -356,7 +356,7 @@ control); the publisher is one more. The scenarios: a unicast reference; **multi
 destinations (one `control-mode=manual` subscription, two publications on one driver, one for each destination, the offers
 alternating between them) and **MDS merge** (the same subscription with 2 destinations, but ONE `control-mode=manual`
 publication with both destinations added, so every message arrives over both transports and the image drops the
-duplicates: the merge path of D133). The multicast and MDC publications have `fc=min,g:/N` (as the interop rows of D116), so the
+duplicates: the merge path of D135). The multicast and MDC publications have `fc=min,g:/N` (as the interop rows of D116), so the
 stream starts when all N receivers are counted and the slowest paces it.
 
 - **Latency**: one 32 B message at a time, the ns from `offer` until the LAST subscriber has read it.

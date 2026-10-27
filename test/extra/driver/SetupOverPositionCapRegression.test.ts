@@ -1,4 +1,4 @@
-// Regression test of issue #58 (port-only, spec D126): a SETUP whose position is over the position cap is rejected
+// Regression test of issue #58 (port-only, spec D128): a SETUP whose position is over the position cap is rejected
 // before any image log is allocated, and at most one error is recorded for it.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OneToOneConcurrentArrayQueue } from '../../../src/agrona/concurrent/OneToOneConcurrentArrayQueue.js';

@@ -1384,7 +1384,7 @@ export class ClientConductor implements Agent {
             if (nowMs > lastKeepAliveMs + this.driverTimeoutMs) {
                 this.terminateConductor();
 
-                // Java puts the Aeron directory name in the messages; the port has none (spec D129)
+                // Java puts the Aeron directory name in the messages; the port has none (spec D131)
                 if (NULL_VALUE === lastKeepAliveMs) {
                     throw new DriverTimeoutException('MediaDriver has been shutdown');
                 }
@@ -1421,7 +1421,7 @@ export class ClientConductor implements Agent {
                     } catch (ex) {
                         // Java: catch (final RuntimeException ex). TypeError and RangeError stand in for Java's
                         // NullPointerException, ClassCastException, ArrayIndexOutOfBoundsException and ArithmeticException,
-                        // which are RuntimeExceptions; only what Java does not catch (a JavaError) is rethrown (spec D128).
+                        // which are RuntimeExceptions; only what Java does not catch (a JavaError) is rethrown (spec D130).
                         if (!(ex instanceof RuntimeException || ex instanceof TypeError || ex instanceof RangeError)) {
                             throw ex;
                         }

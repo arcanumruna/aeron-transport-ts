@@ -838,7 +838,7 @@ const IFF_MULTICAST = 0x1000;
  * `isUp` is `IFF_UP` and running. The sysfs flags never include `IFF_RUNNING`, so it is emulated from
  * `/sys/class/net/<name>/carrier` (`1` is running) and, when the carrier cannot be read (it is not readable for an
  * interface without a link, and `lo` has none), from `operstate` (`up` and `unknown` are running); when neither can be
- * read the interface counts as running (spec D131). Only interfaces that have at least one address are listed, as the
+ * read the interface counts as running (spec D133). Only interfaces that have at least one address are listed, as the
  * JDK lists them. Elsewhere, or when the flags file cannot be read, `supportsMulticast` is true for every interface
  * that is not internal; on macOS also for the loopback interface, as Java reports for `lo0`. {@link flagsDirectory} is
  * the override: another directory of `<name>/flags` files, or null for the approximation only.

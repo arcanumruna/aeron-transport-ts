@@ -237,7 +237,7 @@ describe.skipIf(!IS_LINUX)('multicast transports on one port', () => {
             expect(bindHostOf('[ff02::11:87]', undefined)).toBeNull();
         });
     });
-    // Issue #61: a multicast channel always has an interface (`UdpChannel.parse` resolves one, D132 withdrawn), and the
+    // Issue #61: a multicast channel always has an interface (`UdpChannel.parse` resolves one, D134 withdrawn), and the
     // transport resolves it once, so that the receive bind, the join and the send use the same one.
     describe('a link-local group of a channel without an interface', () => {
         afterEach(() => {

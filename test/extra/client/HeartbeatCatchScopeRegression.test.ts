@@ -1,4 +1,4 @@
-// Regression test of issue #59 (item 3, port-only, spec D128): the heartbeat counter lookup of `ClientConductor`
+// Regression test of issue #59 (item 3, port-only, spec D130): the heartbeat counter lookup of `ClientConductor`
 // catches what Java's `catch (final RuntimeException ex)` catches: a `RuntimeException`, and the `TypeError` and
 // `RangeError` that stand in for Java's NullPointerException and the like, are turned into "unexpected close of heartbeat
 // timestamp counter"; a `JavaError` is not.

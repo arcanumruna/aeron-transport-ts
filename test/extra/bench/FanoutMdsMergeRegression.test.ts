@@ -1,4 +1,4 @@
-// Regression test of issue #63 (port-only, spec D133): the `mds-merge` fan-out scenario sends one session over both
+// Regression test of issue #63 (port-only, spec D135): the `mds-merge` fan-out scenario sends one session over both
 // transports of one multi-destination subscription, so that the bench measures the merge of two paths in the image.
 import { describe, expect, it } from 'vitest';
 import { Fanout, FANOUT_SCENARIOS, fanoutLatency, fanoutStream } from '../../../bench/lib/fanout.js';

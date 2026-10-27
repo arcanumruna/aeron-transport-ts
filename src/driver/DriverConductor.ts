@@ -3090,7 +3090,7 @@ class CreatePublicationImageCommand extends Command {
     }
 
     /**
-     * Rejects a SETUP whose position is over the position cap before any log is allocated (spec D126): the position
+     * Rejects a SETUP whose position is over the position cap before any log is allocated (spec D128): the position
      * `computePosition` would throw for (D5) in `newPublicationImage` and in the `PublicationImage` constructor, after
      * the log was allocated, so every periodic SETUP would allocate and free a log and record an error.
      */

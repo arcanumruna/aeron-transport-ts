@@ -1,4 +1,4 @@
-// Regression test of issue #14 (port-only, spec D131): the flags of the `NetworkInterface` stand-in are those of
+// Regression test of issue #14 (port-only, spec D133): the flags of the `NetworkInterface` stand-in are those of
 // `/sys/class/net/<name>/flags` on Linux, `isUp` also needs the carrier (IFF_RUNNING emulated), and an interface without
 // an address is not listed. `os.networkInterfaces()` is mocked to
 // list `lo` and `eth9`; a temporary directory plays `/sys/class/net`.

@@ -216,7 +216,7 @@ describe('NetworkUtilExtraTest', () => {
     describe('the default shim', () => {
         it('listsTheInterfacesOfTheHost', () => {
             const interfaces = Shim.DEFAULT.getNetworkInterfaces();
-            // Node lists the interfaces that are up with an address, which is what the JDK stand-in lists (spec D131)
+            // Node lists the interfaces that are up with an address, which is what the JDK stand-in lists (spec D133)
             const listedByNode = new Set(Object.keys(networkInterfaces()));
 
             for (const ifc of interfaces) {
