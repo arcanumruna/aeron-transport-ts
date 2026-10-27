@@ -19,6 +19,7 @@ const gc = vm.runInNewContext('gc') as () => void;
 v8.setFlagsFromString('--allow-natives-syntax');
 const prepareForOptimization = new Function('f', '%PrepareFunctionForOptimization(f);') as (f: unknown) => void;
 const optimizeOnNextCall = new Function('f', '%OptimizeFunctionOnNextCall(f);') as (f: unknown) => void;
+const optimizationStatus = new Function('f', 'return %GetOptimizationStatus(f);') as (f: unknown) => number;
 
 export const ITERATIONS = 2_000_000;
 const WARM_UP = 100_000;
@@ -38,7 +39,7 @@ const MAX_SETTLE_ROUNDS = 40;
  * iterations that causes no minor collection means the optimized code is the code that runs. The wait is bounded by
  * rounds, not by time, and a loop that really allocates is never quiet: it goes on to the measurement, which fails it.
  */
-async function settleUntilQuiet(run: (iterations: number) => void, warmUp: number): Promise<void> {
+async function settleUntilQuiet(run: (iterations: number) => void, warmUp: number): Promise<number> {
     for (let round = 0; round < MAX_SETTLE_ROUNDS; round++) {
         await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
         const observer = new PerformanceObserver(() => {});
@@ -52,9 +53,10 @@ async function settleUntilQuiet(run: (iterations: number) => void, warmUp: numbe
             .filter((e) => (e as unknown as Collection).detail?.kind === constants.NODE_PERFORMANCE_GC_MINOR).length;
         observer.disconnect();
         if (0 === collections) {
-            return;
+            return round;
         }
     }
+    return MAX_SETTLE_ROUNDS;
 }
 
 /**
@@ -68,7 +70,7 @@ export async function measure(
     run: (iterations: number) => void,
     iterations: number,
     settle = false,
-): Promise<{ collections: number; heapGrowth: number }> {
+): Promise<{ collections: number; heapGrowth: number; detail: string }> {
     const warmUp = Math.min(WARM_UP, Math.max(1_000, iterations >> 3));
     // Force a synchronous TurboFan compile of `run` before it is measured. Left to the JIT, the loop tiers up through
     // Maglev and on-stack replacement on a background thread: on a loaded host (vitest runs the test files in parallel)
@@ -80,9 +82,8 @@ export async function measure(
     run(warmUp);
     optimizeOnNextCall(run);
     run(warmUp);
-    if (settle) {
-        await settleUntilQuiet(run, warmUp);
-    }
+    const statusAfterCompile = optimizationStatus(run);
+    const settleRounds = settle ? await settleUntilQuiet(run, warmUp) : 0;
 
     const observer = new PerformanceObserver(() => {});
     observer.observe({ entryTypes: ['gc'] });
@@ -102,7 +103,10 @@ export async function measure(
         .takeRecords()
         .filter((e) => (e as unknown as Collection).detail?.kind === constants.NODE_PERFORMANCE_GC_MINOR).length;
     observer.disconnect();
-    return { collections, heapGrowth };
+    // the optimization status (a %GetOptimizationStatus bit field) after the forced compile and after the measured run,
+    // so that a failure under load says which tier the loop ran in (issue #46)
+    const detail = `status 0x${statusAfterCompile.toString(16)}/0x${optimizationStatus(run).toString(16)}, settle ${settleRounds}`;
+    return { collections, heapGrowth, detail };
 }
 
 let boxed = 0;
@@ -145,9 +149,9 @@ async function minimumCollections(
 ): Promise<number> {
     let minimum = Infinity;
     for (let attempt = 0; attempt < MAX_ATTEMPTS && minimum > bound; attempt++) {
-        const { collections, heapGrowth } = await measure(run, n, bound <= 1);
+        const { collections, heapGrowth, detail } = await measure(run, n, bound <= 1);
         // the detail of every attempt goes into the failure message (issue #42): a flake under load names its numbers
-        attempts.push(`#${attempt + 1}: ${collections} collections, heap growth ${heapGrowth} B`);
+        attempts.push(`#${attempt + 1}: ${collections} collections, heap growth ${heapGrowth} B, ${detail}`);
         if (collections > bound && heapGrowth > retainedGrowth) {
             return collections;
         }
