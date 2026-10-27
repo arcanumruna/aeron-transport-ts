@@ -206,6 +206,31 @@ describe.each([
             expect(sum[0]).not.toBeNaN();
         });
 
+        // `rotateLog` read and swapped the raw tail as `bigint` temporaries, which allocated on each rotation whenever V8
+        // did not inline them; it now works on the halves of the slot (spec D12)
+        it(title('rotateLogRegression'), async () => {
+            exerciseEverything();
+            const meta = new UnsafeBuffer(backing.arrayBuffer(LogBufferDescriptor.LOG_META_DATA_LENGTH));
+            let termCount = 0;
+            LogBufferDescriptor.activeTermCountOrdered(meta, termCount);
+            await expectNoAllocation((n) => {
+                let acc = 0;
+                for (let i = 0; i < n; i++) {
+                    const currentTermId = (termId + termCount) | 0;
+                    const nextIndex = LogBufferDescriptor.indexByTermCount((termCount + 1) | 0);
+                    LogBufferDescriptor.initialiseTailWithTermId(meta, nextIndex, (currentTermId - 2) | 0);
+                    acc += LogBufferDescriptor.rotateLog(meta, termCount, currentTermId) ? 1 : 0;
+                    acc += LogBufferDescriptor.rawTailTermId(meta, nextIndex);
+                    termCount = (termCount + 1) | 0;
+                }
+                sum[0] = acc;
+            }, ITERATIONS);
+            expect(LogBufferDescriptor.activeTermCount(meta)).toBe(termCount);
+            const lastIndex = LogBufferDescriptor.indexByTermCount(termCount);
+            expect(LogBufferDescriptor.rawTailTermId(meta, lastIndex)).toBe((termId + termCount) | 0);
+            expect(LogBufferDescriptor.rawTailTermOffset(meta, lastIndex, TERM_LENGTH)).toBe(0);
+        });
+
         it(title('headerPosition'), async () => {
             exerciseEverything();
             const term = filledTerm(backing, termId);
